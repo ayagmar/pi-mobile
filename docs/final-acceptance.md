@@ -117,11 +117,12 @@ core-sessions/    - Session repository, caching
 bridge/           - Node.js bridge service
 benchmark/        - Performance measurement (macrobenchmark module)
 docs/             - Documentation
-  ├── pi-android-rpc-client-plan.md
-  ├── pi-android-rpc-client-tasks.md
-  ├── pi-android-rpc-progress.md
-  ├── perf-baseline.md
-  └── final-acceptance.md
+  ├── perf-baseline.md       - Performance targets and measurement
+  ├── final-acceptance.md    - This acceptance report
+  └── ai/                    - Development planning documents
+       ├── pi-android-rpc-client-plan.md
+       ├── pi-android-rpc-client-tasks.md
+       └── pi-android-rpc-progress.md
 README.md         - Setup and usage guide
 ```
 
