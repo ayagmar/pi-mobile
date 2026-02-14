@@ -23,6 +23,8 @@ class RpcMessageParser(
             "tool_execution_update" -> json.decodeFromJsonElement<ToolExecutionUpdateEvent>(jsonObject)
             "tool_execution_end" -> json.decodeFromJsonElement<ToolExecutionEndEvent>(jsonObject)
             "extension_ui_request" -> json.decodeFromJsonElement<ExtensionUiRequestEvent>(jsonObject)
+            "agent_start" -> json.decodeFromJsonElement<AgentStartEvent>(jsonObject)
+            "agent_end" -> json.decodeFromJsonElement<AgentEndEvent>(jsonObject)
             else -> GenericRpcEvent(type = type, payload = jsonObject)
         }
     }

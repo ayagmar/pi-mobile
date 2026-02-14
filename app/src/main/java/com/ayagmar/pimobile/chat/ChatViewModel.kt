@@ -26,6 +26,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+@Suppress("TooManyFunctions")
 class ChatViewModel(
     private val sessionController: SessionController,
 ) : ViewModel() {
@@ -35,8 +36,56 @@ class ChatViewModel(
 
     init {
         observeConnection()
+        observeStreamingState()
         observeEvents()
         loadInitialMessages()
+    }
+
+    fun onInputTextChanged(text: String) {
+        _uiState.update { it.copy(inputText = text) }
+    }
+
+    fun sendPrompt() {
+        val message = _uiState.value.inputText.trim()
+        if (message.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(inputText = "", errorMessage = null) }
+            val result = sessionController.sendPrompt(message)
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    fun abort() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.abort()
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    fun steer(message: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.steer(message)
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    fun followUp(message: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.followUp(message)
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
     }
 
     fun toggleToolExpansion(itemId: String) {
@@ -59,6 +108,16 @@ class ChatViewModel(
             sessionController.connectionState.collect { state ->
                 _uiState.update { current ->
                     current.copy(connectionState = state)
+                }
+            }
+        }
+    }
+
+    private fun observeStreamingState() {
+        viewModelScope.launch {
+            sessionController.isStreaming.collect { isStreaming ->
+                _uiState.update { current ->
+                    current.copy(isStreaming = isStreaming)
                 }
             }
         }
@@ -187,7 +246,9 @@ class ChatViewModel(
 data class ChatUiState(
     val isLoading: Boolean = false,
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
+    val isStreaming: Boolean = false,
     val timeline: List<ChatTimelineItem> = emptyList(),
+    val inputText: String = "",
     val errorMessage: String? = null,
 )
 

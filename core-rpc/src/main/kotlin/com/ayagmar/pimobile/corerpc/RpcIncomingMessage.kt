@@ -86,3 +86,14 @@ data class GenericRpcEvent(
     override val type: String,
     val payload: JsonObject,
 ) : RpcEvent
+
+@Serializable
+data class AgentStartEvent(
+    override val type: String,
+) : RpcEvent
+
+@Serializable
+data class AgentEndEvent(
+    override val type: String,
+    val messages: List<JsonObject>? = null,
+) : RpcEvent

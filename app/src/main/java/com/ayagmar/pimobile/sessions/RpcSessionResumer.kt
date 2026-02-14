@@ -4,14 +4,20 @@ import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.corenet.PiRpcConnection
 import com.ayagmar.pimobile.corenet.PiRpcConnectionConfig
 import com.ayagmar.pimobile.corenet.WebSocketTarget
+import com.ayagmar.pimobile.corerpc.AbortCommand
+import com.ayagmar.pimobile.corerpc.AgentEndEvent
+import com.ayagmar.pimobile.corerpc.AgentStartEvent
 import com.ayagmar.pimobile.corerpc.CompactCommand
 import com.ayagmar.pimobile.corerpc.ExportHtmlCommand
+import com.ayagmar.pimobile.corerpc.FollowUpCommand
 import com.ayagmar.pimobile.corerpc.ForkCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
+import com.ayagmar.pimobile.corerpc.PromptCommand
 import com.ayagmar.pimobile.corerpc.RpcCommand
 import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
 import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.corerpc.SetSessionNameCommand
+import com.ayagmar.pimobile.corerpc.SteerCommand
 import com.ayagmar.pimobile.corerpc.SwitchSessionCommand
 import com.ayagmar.pimobile.coresessions.SessionRecord
 import com.ayagmar.pimobile.hosts.HostProfile
@@ -44,6 +50,7 @@ import java.util.UUID
 interface SessionController {
     val rpcEvents: SharedFlow<RpcIncomingMessage>
     val connectionState: StateFlow<ConnectionState>
+    val isStreaming: StateFlow<Boolean>
 
     suspend fun resume(
         hostProfile: HostProfile,
@@ -52,6 +59,14 @@ interface SessionController {
     ): Result<String?>
 
     suspend fun getMessages(): Result<RpcResponse>
+
+    suspend fun sendPrompt(message: String): Result<Unit>
+
+    suspend fun abort(): Result<Unit>
+
+    suspend fun steer(message: String): Result<Unit>
+
+    suspend fun followUp(message: String): Result<Unit>
 
     suspend fun renameSession(name: String): Result<String?>
 
@@ -62,6 +77,7 @@ interface SessionController {
     suspend fun forkSessionFromLatestMessage(): Result<String?>
 }
 
+@Suppress("TooManyFunctions")
 class RpcSessionController(
     private val connectionFactory: () -> PiRpcConnection = { PiRpcConnection() },
     private val connectTimeoutMs: Long = DEFAULT_TIMEOUT_MS,
@@ -71,14 +87,17 @@ class RpcSessionController(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _rpcEvents = MutableSharedFlow<RpcIncomingMessage>(extraBufferCapacity = EVENT_BUFFER_CAPACITY)
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
+    private val _isStreaming = MutableStateFlow(false)
 
     private var activeConnection: PiRpcConnection? = null
     private var clientId: String = UUID.randomUUID().toString()
     private var rpcEventsJob: Job? = null
     private var connectionStateJob: Job? = null
+    private var streamingMonitorJob: Job? = null
 
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = _rpcEvents
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    override val isStreaming: StateFlow<Boolean> = _isStreaming.asStateFlow()
 
     override suspend fun resume(
         hostProfile: HostProfile,
@@ -225,20 +244,78 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun sendPrompt(message: String): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val isCurrentlyStreaming = _isStreaming.value
+                val command =
+                    PromptCommand(
+                        id = UUID.randomUUID().toString(),
+                        message = message,
+                        streamingBehavior = if (isCurrentlyStreaming) "steer" else null,
+                    )
+                connection.sendCommand(command)
+            }
+        }
+    }
+
+    override suspend fun abort(): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val command = AbortCommand(id = UUID.randomUUID().toString())
+                connection.sendCommand(command)
+            }
+        }
+    }
+
+    override suspend fun steer(message: String): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val command =
+                    SteerCommand(
+                        id = UUID.randomUUID().toString(),
+                        message = message,
+                    )
+                connection.sendCommand(command)
+            }
+        }
+    }
+
+    override suspend fun followUp(message: String): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val command =
+                    FollowUpCommand(
+                        id = UUID.randomUUID().toString(),
+                        message = message,
+                    )
+                connection.sendCommand(command)
+            }
+        }
+    }
+
     private suspend fun clearActiveConnection() {
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
+        streamingMonitorJob?.cancel()
         rpcEventsJob = null
         connectionStateJob = null
+        streamingMonitorJob = null
 
         activeConnection?.disconnect()
         activeConnection = null
         _connectionState.value = ConnectionState.DISCONNECTED
+        _isStreaming.value = false
     }
 
     private fun observeConnection(connection: PiRpcConnection) {
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
+        streamingMonitorJob?.cancel()
 
         rpcEventsJob =
             scope.launch {
@@ -251,6 +328,17 @@ class RpcSessionController(
             scope.launch {
                 connection.connectionState.collect { state ->
                     _connectionState.value = state
+                }
+            }
+
+        streamingMonitorJob =
+            scope.launch {
+                connection.rpcEvents.collect { event ->
+                    when (event) {
+                        is AgentStartEvent -> _isStreaming.value = true
+                        is AgentEndEvent -> _isStreaming.value = false
+                        else -> Unit
+                    }
                 }
             }
     }
