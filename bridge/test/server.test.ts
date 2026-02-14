@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, type ClientOptions, type RawData } from "ws";
 
 import { createLogger } from "../src/logger.js";
-import type { PiRpcForwarder, PiRpcForwarderMessage } from "../src/rpc-forwarder.js";
+import type {
+    AcquireControlRequest,
+    AcquireControlResult,
+    PiProcessManager,
+    ProcessManagerEvent,
+} from "../src/process-manager.js";
+import type { PiRpcForwarder } from "../src/rpc-forwarder.js";
 import type { BridgeServer } from "../src/server.js";
 import { createBridgeServer } from "../src/server.js";
 
@@ -57,11 +63,12 @@ describe("bridge websocket server", () => {
             },
         });
 
-        ws.send("{ malformed-json");
-
-        const errorEnvelope = await waitForEnvelope(ws, (envelope) => {
+        const waitForMalformedError = waitForEnvelope(ws, (envelope) => {
             return envelope.payload?.type === "bridge_error" && envelope.payload.code === "malformed_envelope";
         });
+        ws.send("{ malformed-json");
+
+        const errorEnvelope = await waitForMalformedError;
 
         expect(errorEnvelope.channel).toBe("bridge");
         expect(errorEnvelope.payload?.type).toBe("bridge_error");
@@ -70,9 +77,9 @@ describe("bridge websocket server", () => {
         ws.close();
     });
 
-    it("forwards rpc payloads to the rpc subprocess channel", async () => {
-        const fakeRpcForwarder = new FakeRpcForwarder();
-        const { baseUrl, server } = await startBridgeServer({ rpcForwarder: fakeRpcForwarder });
+    it("forwards rpc payload using cwd-specific process manager context", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        const { baseUrl, server } = await startBridgeServer({ processManager: fakeProcessManager });
         bridgeServer = server;
 
         const ws = await connectWebSocket(baseUrl, {
@@ -81,6 +88,33 @@ describe("bridge websocket server", () => {
             },
         });
 
+        const waitForCwdSet = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_set_cwd",
+                    cwd: "/tmp/project-a",
+                },
+            }),
+        );
+        await waitForCwdSet;
+
+        const waitForControlAcquired = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_control_acquired");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                    cwd: "/tmp/project-a",
+                },
+            }),
+        );
+        await waitForControlAcquired;
+
+        const waitForRpcEnvelope = waitForEnvelope(ws, (envelope) => {
+            return envelope.channel === "rpc" && envelope.payload?.id === "req-1";
+        });
         ws.send(
             JSON.stringify({
                 channel: "rpc",
@@ -91,25 +125,88 @@ describe("bridge websocket server", () => {
             }),
         );
 
-        const rpcEnvelope = await waitForEnvelope(ws, (envelope) => {
-            return envelope.channel === "rpc" && envelope.payload?.id === "req-1";
-        });
+        const rpcEnvelope = await waitForRpcEnvelope;
 
-        expect(fakeRpcForwarder.sentPayloads).toEqual([
+        expect(fakeProcessManager.sentPayloads).toEqual([
             {
-                id: "req-1",
-                type: "get_state",
+                cwd: "/tmp/project-a",
+                payload: {
+                    id: "req-1",
+                    type: "get_state",
+                },
             },
         ]);
-        expect(rpcEnvelope.channel).toBe("rpc");
         expect(rpcEnvelope.payload?.type).toBe("response");
         expect(rpcEnvelope.payload?.command).toBe("get_state");
 
         ws.close();
     });
+
+    it("rejects concurrent control lock attempts for the same cwd", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        const { baseUrl, server } = await startBridgeServer({ processManager: fakeProcessManager });
+        bridgeServer = server;
+
+        const wsA = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+        const wsB = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        for (const ws of [wsA, wsB]) {
+            const waitForCwdSet = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+            ws.send(
+                JSON.stringify({
+                    channel: "bridge",
+                    payload: {
+                        type: "bridge_set_cwd",
+                        cwd: "/tmp/shared-project",
+                    },
+                }),
+            );
+            await waitForCwdSet;
+        }
+
+        const waitForControlAcquired = waitForEnvelope(wsA, (envelope) => envelope.payload?.type === "bridge_control_acquired");
+        wsA.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                },
+            }),
+        );
+        await waitForControlAcquired;
+
+        const waitForLockRejection = waitForEnvelope(wsB, (envelope) => {
+            return envelope.payload?.type === "bridge_error" && envelope.payload?.code === "control_lock_denied";
+        });
+        wsB.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                },
+            }),
+        );
+
+        const rejection = await waitForLockRejection;
+
+        expect(rejection.payload?.message).toContain("cwd is controlled by another client");
+
+        wsA.close();
+        wsB.close();
+    });
 });
 
-async function startBridgeServer(deps?: { rpcForwarder?: PiRpcForwarder }): Promise<{ baseUrl: string; server: BridgeServer }> {
+async function startBridgeServer(
+    deps?: { processManager?: PiProcessManager },
+): Promise<{ baseUrl: string; server: BridgeServer }> {
     const logger = createLogger("silent");
     const server = createBridgeServer(
         {
@@ -117,6 +214,7 @@ async function startBridgeServer(deps?: { rpcForwarder?: PiRpcForwarder }): Prom
             port: 0,
             logLevel: "silent",
             authToken: "bridge-token",
+            processIdleTtlMs: 300_000,
         },
         logger,
         deps,
@@ -159,6 +257,7 @@ interface EnvelopeLike {
         code?: string;
         id?: string;
         command?: string;
+        message?: string;
     };
 }
 
@@ -234,29 +333,74 @@ function isEnvelopeLike(value: unknown): value is EnvelopeLike {
     return true;
 }
 
-class FakeRpcForwarder implements PiRpcForwarder {
-    sentPayloads: Record<string, unknown>[] = [];
-    private messageHandler: (payload: PiRpcForwarderMessage) => void = () => {};
+class FakeProcessManager implements PiProcessManager {
+    sentPayloads: Array<{ cwd: string; payload: Record<string, unknown> }> = [];
 
-    setMessageHandler(handler: (payload: PiRpcForwarderMessage) => void): void {
+    private messageHandler: (event: ProcessManagerEvent) => void = () => {};
+    private lockByCwd = new Map<string, string>();
+
+    setMessageHandler(handler: (event: ProcessManagerEvent) => void): void {
         this.messageHandler = handler;
     }
 
-    send(payload: Record<string, unknown>): void {
-        this.sentPayloads.push(payload);
+    getOrStart(cwd: string): PiRpcForwarder {
+        void cwd;
+        throw new Error("Not used in FakeProcessManager");
+    }
+
+    sendRpc(cwd: string, payload: Record<string, unknown>): void {
+        this.sentPayloads.push({ cwd, payload });
 
         this.messageHandler({
-            id: payload.id,
-            type: "response",
-            command: payload.type,
-            success: true,
-            data: {
-                forwarded: true,
+            cwd,
+            payload: {
+                id: payload.id,
+                type: "response",
+                command: payload.type,
+                success: true,
+                data: {
+                    forwarded: true,
+                },
             },
         });
     }
 
-    async stop(): Promise<void> {
+    acquireControl(request: AcquireControlRequest): AcquireControlResult {
+        const owner = this.lockByCwd.get(request.cwd);
+        if (owner && owner !== request.clientId) {
+            return {
+                success: false,
+                reason: `cwd is controlled by another client: ${request.cwd}`,
+            };
+        }
+
+        this.lockByCwd.set(request.cwd, request.clientId);
+        return { success: true };
+    }
+
+    hasControl(clientId: string, cwd: string): boolean {
+        return this.lockByCwd.get(cwd) === clientId;
+    }
+
+    releaseControl(clientId: string, cwd: string): void {
+        if (this.lockByCwd.get(cwd) === clientId) {
+            this.lockByCwd.delete(cwd);
+        }
+    }
+
+    releaseClient(clientId: string): void {
+        for (const [cwd, owner] of this.lockByCwd.entries()) {
+            if (owner === clientId) {
+                this.lockByCwd.delete(cwd);
+            }
+        }
+    }
+
+    async evictIdleProcesses(): Promise<void> {
         return;
+    }
+
+    async stop(): Promise<void> {
+        this.lockByCwd.clear();
     }
 }

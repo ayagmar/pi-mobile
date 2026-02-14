@@ -11,6 +11,7 @@ describe("parseBridgeConfig", () => {
             port: 8787,
             logLevel: "info",
             authToken: "test-token",
+            processIdleTtlMs: 300_000,
         });
     });
 
@@ -20,12 +21,14 @@ describe("parseBridgeConfig", () => {
             BRIDGE_PORT: "7777",
             BRIDGE_LOG_LEVEL: "debug",
             BRIDGE_AUTH_TOKEN: "my-token",
+            BRIDGE_PROCESS_IDLE_TTL_MS: "90000",
         });
 
         expect(config.host).toBe("100.64.0.10");
         expect(config.port).toBe(7777);
         expect(config.logLevel).toBe("debug");
         expect(config.authToken).toBe("my-token");
+        expect(config.processIdleTtlMs).toBe(90_000);
     });
 
     it("fails on invalid port", () => {
@@ -36,5 +39,11 @@ describe("parseBridgeConfig", () => {
 
     it("fails when auth token is missing", () => {
         expect(() => parseBridgeConfig({})).toThrow("BRIDGE_AUTH_TOKEN is required");
+    });
+
+    it("fails when process idle ttl is invalid", () => {
+        expect(() =>
+            parseBridgeConfig({ BRIDGE_AUTH_TOKEN: "test-token", BRIDGE_PROCESS_IDLE_TTL_MS: "900" }),
+        ).toThrow("Invalid BRIDGE_PROCESS_IDLE_TTL_MS: 900");
     });
 });

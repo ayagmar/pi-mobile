@@ -3,12 +3,14 @@ import type { LevelWithSilent } from "pino";
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
 const DEFAULT_LOG_LEVEL: LevelWithSilent = "info";
+const DEFAULT_PROCESS_IDLE_TTL_MS = 5 * 60 * 1000;
 
 export interface BridgeConfig {
     host: string;
     port: number;
     logLevel: LevelWithSilent;
     authToken: string;
+    processIdleTtlMs: number;
 }
 
 export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
@@ -16,12 +18,14 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
     const port = parsePort(env.BRIDGE_PORT);
     const logLevel = parseLogLevel(env.BRIDGE_LOG_LEVEL);
     const authToken = parseAuthToken(env.BRIDGE_AUTH_TOKEN);
+    const processIdleTtlMs = parseProcessIdleTtlMs(env.BRIDGE_PROCESS_IDLE_TTL_MS);
 
     return {
         host,
         port,
         logLevel,
         authToken,
+        processIdleTtlMs,
     };
 }
 
@@ -65,4 +69,15 @@ function parseAuthToken(tokenRaw: string | undefined): string {
     }
 
     return token;
+}
+
+function parseProcessIdleTtlMs(ttlRaw: string | undefined): number {
+    if (!ttlRaw) return DEFAULT_PROCESS_IDLE_TTL_MS;
+
+    const ttlMs = Number.parseInt(ttlRaw, 10);
+    if (Number.isNaN(ttlMs) || ttlMs < 1_000) {
+        throw new Error(`Invalid BRIDGE_PROCESS_IDLE_TTL_MS: ${ttlRaw}`);
+    }
+
+    return ttlMs;
 }

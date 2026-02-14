@@ -1,20 +1,19 @@
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 
 import type { Logger } from "pino";
 import { WebSocket as WsWebSocket, WebSocketServer, type RawData, type WebSocket } from "ws";
 
 import type { BridgeConfig } from "./config.js";
+import type { PiProcessManager } from "./process-manager.js";
+import { createPiProcessManager } from "./process-manager.js";
 import {
     createBridgeEnvelope,
     createBridgeErrorEnvelope,
     createRpcEnvelope,
     parseBridgeEnvelope,
 } from "./protocol.js";
-import {
-    createPiRpcForwarder,
-    type PiRpcForwarder,
-    type PiRpcForwarderMessage,
-} from "./rpc-forwarder.js";
+import { createPiRpcForwarder } from "./rpc-forwarder.js";
 
 export interface BridgeServerStartInfo {
     host: string;
@@ -27,7 +26,12 @@ export interface BridgeServer {
 }
 
 interface BridgeServerDependencies {
-    rpcForwarder?: PiRpcForwarder;
+    processManager?: PiProcessManager;
+}
+
+interface ClientConnectionContext {
+    clientId: string;
+    cwd?: string;
 }
 
 export function createBridgeServer(
@@ -47,24 +51,33 @@ export function createBridgeServer(
     });
 
     const wsServer = new WebSocketServer({ noServer: true });
-    const rpcForwarder = dependencies.rpcForwarder ??
-        createPiRpcForwarder(
-            {
-                command: "pi",
-                args: ["--mode", "rpc"],
-                cwd: process.cwd(),
+    const processManager = dependencies.processManager ??
+        createPiProcessManager({
+            idleTtlMs: config.processIdleTtlMs,
+            logger: logger.child({ component: "process-manager" }),
+            forwarderFactory: (cwd: string) => {
+                return createPiRpcForwarder(
+                    {
+                        command: "pi",
+                        args: ["--mode", "rpc"],
+                        cwd,
+                    },
+                    logger.child({ component: "rpc-forwarder", cwd }),
+                );
             },
-            logger.child({ component: "rpc-forwarder" }),
-        );
-
-    rpcForwarder.setMessageHandler((payload: PiRpcForwarderMessage) => {
-        const rpcEnvelope = JSON.stringify(createRpcEnvelope(payload));
-
-        wsServer.clients.forEach((client) => {
-            if (client.readyState === WsWebSocket.OPEN) {
-                client.send(rpcEnvelope);
-            }
         });
+
+    const clientContexts = new Map<WebSocket, ClientConnectionContext>();
+
+    processManager.setMessageHandler((event) => {
+        const rpcEnvelope = JSON.stringify(createRpcEnvelope(event.payload));
+
+        for (const [client, context] of clientContexts.entries()) {
+            if (context.cwd !== event.cwd) continue;
+            if (client.readyState !== WsWebSocket.OPEN) continue;
+
+            client.send(rpcEnvelope);
+        }
     });
 
     server.on("upgrade", (request, socket, head) => {
@@ -94,8 +107,14 @@ export function createBridgeServer(
     });
 
     wsServer.on("connection", (client: WebSocket, request: http.IncomingMessage) => {
+        const context: ClientConnectionContext = {
+            clientId: randomUUID(),
+        };
+        clientContexts.set(client, context);
+
         logger.info(
             {
+                clientId: context.clientId,
                 remoteAddress: request.socket.remoteAddress,
             },
             "WebSocket client connected",
@@ -111,11 +130,14 @@ export function createBridgeServer(
         );
 
         client.on("message", (data: RawData) => {
-            handleClientMessage(client, data, logger, rpcForwarder);
+            handleClientMessage(client, data, logger, processManager, context);
         });
 
         client.on("close", () => {
-            logger.info("WebSocket client disconnected");
+            processManager.releaseClient(context.clientId);
+            clientContexts.delete(client);
+
+            logger.info({ clientId: context.clientId }, "WebSocket client disconnected");
         });
     });
 
@@ -150,7 +172,7 @@ export function createBridgeServer(
                 client.close(1001, "Server shutting down");
             });
 
-            await rpcForwarder.stop();
+            await processManager.stop();
 
             await new Promise<void>((resolve, reject) => {
                 wsServer.close((error?: Error) => {
@@ -179,7 +201,8 @@ function handleClientMessage(
     client: WebSocket,
     data: RawData,
     logger: Logger,
-    rpcForwarder: PiRpcForwarder,
+    processManager: PiProcessManager,
+    context: ClientConnectionContext,
 ): void {
     const dataAsString = asUtf8String(data);
     const parsedEnvelope = parseBridgeEnvelope(dataAsString);
@@ -196,6 +219,7 @@ function handleClientMessage(
 
         logger.warn(
             {
+                clientId: context.clientId,
                 error: parsedEnvelope.error,
             },
             "Received malformed envelope",
@@ -206,31 +230,170 @@ function handleClientMessage(
     const envelope = parsedEnvelope.envelope;
 
     if (envelope.channel === "bridge") {
-        const messageType = envelope.payload.type;
+        handleBridgeControlMessage(client, context, envelope.payload, processManager);
+        return;
+    }
 
-        if (messageType === "bridge_ping") {
+    handleRpcEnvelope(client, context, envelope.payload, processManager, logger);
+}
+
+function handleBridgeControlMessage(
+    client: WebSocket,
+    context: ClientConnectionContext,
+    payload: Record<string, unknown>,
+    processManager: PiProcessManager,
+): void {
+    const messageType = payload.type;
+
+    if (messageType === "bridge_ping") {
+        client.send(
+            JSON.stringify(
+                createBridgeEnvelope({
+                    type: "bridge_pong",
+                }),
+            ),
+        );
+        return;
+    }
+
+    if (messageType === "bridge_set_cwd") {
+        const cwd = payload.cwd;
+        if (typeof cwd !== "string" || cwd.trim().length === 0) {
+            client.send(JSON.stringify(createBridgeErrorEnvelope("invalid_cwd", "cwd must be a non-empty string")));
+            return;
+        }
+
+        context.cwd = cwd;
+
+        client.send(
+            JSON.stringify(
+                createBridgeEnvelope({
+                    type: "bridge_cwd_set",
+                    cwd,
+                }),
+            ),
+        );
+        return;
+    }
+
+    if (messageType === "bridge_acquire_control") {
+        const cwd = getRequestedCwd(payload, context);
+        if (!cwd) {
             client.send(
                 JSON.stringify(
-                    createBridgeEnvelope({
-                        type: "bridge_pong",
-                    }),
+                    createBridgeErrorEnvelope(
+                        "missing_cwd_context",
+                        "Set cwd first via bridge_set_cwd or include cwd in bridge_acquire_control",
+                    ),
                 ),
             );
             return;
         }
 
+        const sessionPath = typeof payload.sessionPath === "string" ? payload.sessionPath : undefined;
+        const lockResult = processManager.acquireControl({
+            clientId: context.clientId,
+            cwd,
+            sessionPath,
+        });
+
+        if (!lockResult.success) {
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "control_lock_denied",
+                        lockResult.reason ?? "Control lock denied",
+                    ),
+                ),
+            );
+            return;
+        }
+
+        context.cwd = cwd;
+
+        client.send(
+            JSON.stringify(
+                createBridgeEnvelope({
+                    type: "bridge_control_acquired",
+                    cwd,
+                    sessionPath: sessionPath ?? null,
+                }),
+            ),
+        );
+        return;
+    }
+
+    if (messageType === "bridge_release_control") {
+        const cwd = getRequestedCwd(payload, context);
+        if (!cwd) {
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "missing_cwd_context",
+                        "Set cwd first via bridge_set_cwd or include cwd in bridge_release_control",
+                    ),
+                ),
+            );
+            return;
+        }
+
+        const sessionPath = typeof payload.sessionPath === "string" ? payload.sessionPath : undefined;
+        processManager.releaseControl(context.clientId, cwd, sessionPath);
+
+        client.send(
+            JSON.stringify(
+                createBridgeEnvelope({
+                    type: "bridge_control_released",
+                    cwd,
+                    sessionPath: sessionPath ?? null,
+                }),
+            ),
+        );
+        return;
+    }
+
+    client.send(
+        JSON.stringify(
+            createBridgeErrorEnvelope(
+                "unsupported_bridge_message",
+                "Unsupported bridge payload type",
+            ),
+        ),
+    );
+}
+
+function handleRpcEnvelope(
+    client: WebSocket,
+    context: ClientConnectionContext,
+    payload: Record<string, unknown>,
+    processManager: PiProcessManager,
+    logger: Logger,
+): void {
+    if (!context.cwd) {
         client.send(
             JSON.stringify(
                 createBridgeErrorEnvelope(
-                    "unsupported_bridge_message",
-                    "Unsupported bridge payload type",
+                    "missing_cwd_context",
+                    "Set cwd first via bridge_set_cwd",
                 ),
             ),
         );
         return;
     }
 
-    if (typeof envelope.payload.type !== "string") {
+    if (!processManager.hasControl(context.clientId, context.cwd)) {
+        client.send(
+            JSON.stringify(
+                createBridgeErrorEnvelope(
+                    "control_lock_required",
+                    "Acquire control first via bridge_acquire_control",
+                ),
+            ),
+        );
+        return;
+    }
+
+    if (typeof payload.type !== "string") {
         client.send(
             JSON.stringify(
                 createBridgeErrorEnvelope(
@@ -243,9 +406,10 @@ function handleClientMessage(
     }
 
     try {
-        rpcForwarder.send(envelope.payload);
+        processManager.sendRpc(context.cwd, payload);
     } catch (error: unknown) {
-        logger.error({ error }, "Failed to forward RPC payload");
+        logger.error({ error, clientId: context.clientId, cwd: context.cwd }, "Failed to forward RPC payload");
+
         client.send(
             JSON.stringify(
                 createBridgeErrorEnvelope(
@@ -255,6 +419,14 @@ function handleClientMessage(
             ),
         );
     }
+}
+
+function getRequestedCwd(payload: Record<string, unknown>, context: ClientConnectionContext): string | undefined {
+    if (typeof payload.cwd === "string" && payload.cwd.trim().length > 0) {
+        return payload.cwd;
+    }
+
+    return context.cwd;
 }
 
 function asUtf8String(data: RawData): string {
