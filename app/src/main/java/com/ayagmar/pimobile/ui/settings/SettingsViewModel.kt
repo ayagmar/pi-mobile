@@ -1,13 +1,16 @@
 package com.ayagmar.pimobile.ui.settings
 
 import android.content.Context
+import android.content.pm.PackageManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.sessions.SessionController
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
@@ -22,20 +25,23 @@ class SettingsViewModel(
         val appVersion =
             try {
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
-            } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+            } catch (_: PackageManager.NameNotFoundException) {
                 "unknown"
             }
 
         uiState = uiState.copy(appVersion = appVersion)
 
-        // Observe connection state
         viewModelScope.launch {
             sessionController.connectionState.collect { state ->
+                if (uiState.isChecking) return@collect
+
                 val status =
                     when (state) {
                         ConnectionState.CONNECTED -> ConnectionStatus.CONNECTED
-                        ConnectionState.DISCONNECTED -> ConnectionStatus.DISCONNECTED
-                        else -> ConnectionStatus.DISCONNECTED
+                        ConnectionState.CONNECTING,
+                        ConnectionState.RECONNECTING,
+                        ConnectionState.DISCONNECTED,
+                        -> ConnectionStatus.DISCONNECTED
                     }
                 uiState = uiState.copy(connectionStatus = status)
             }
@@ -49,6 +55,7 @@ class SettingsViewModel(
                 uiState.copy(
                     isChecking = true,
                     errorMessage = null,
+                    statusMessage = null,
                     piVersion = null,
                     connectionStatus = ConnectionStatus.CHECKING,
                 )
@@ -63,22 +70,26 @@ class SettingsViewModel(
                             isChecking = false,
                             connectionStatus = ConnectionStatus.CONNECTED,
                             piVersion = model?.let { "Model: $it" } ?: "Connected",
+                            statusMessage = "Bridge reachable",
+                            errorMessage = null,
                         )
                 } else {
                     uiState =
                         uiState.copy(
                             isChecking = false,
                             connectionStatus = ConnectionStatus.DISCONNECTED,
+                            statusMessage = null,
                             errorMessage = result.exceptionOrNull()?.message ?: "Connection failed",
                         )
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
+            } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 uiState =
                     uiState.copy(
                         isChecking = false,
                         connectionStatus = ConnectionStatus.DISCONNECTED,
+                        statusMessage = null,
                         errorMessage = "${e.javaClass.simpleName}: ${e.message}",
                     )
             }
@@ -87,16 +98,42 @@ class SettingsViewModel(
 
     fun createNewSession() {
         viewModelScope.launch {
-            uiState = uiState.copy(isLoading = true, errorMessage = null)
+            uiState = uiState.copy(isLoading = true, errorMessage = null, statusMessage = null)
 
             val result = sessionController.newSession()
 
             uiState =
-                uiState.copy(
-                    isLoading = false,
-                    errorMessage = if (result.isSuccess) "New session created" else result.exceptionOrNull()?.message,
-                )
+                if (result.isSuccess) {
+                    uiState.copy(
+                        isLoading = false,
+                        statusMessage = "New session created",
+                        errorMessage = null,
+                    )
+                } else {
+                    uiState.copy(
+                        isLoading = false,
+                        statusMessage = null,
+                        errorMessage = result.exceptionOrNull()?.message ?: "Failed to create new session",
+                    )
+                }
         }
+    }
+}
+
+class SettingsViewModelFactory(
+    private val context: Context,
+    private val sessionController: SessionController,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        check(modelClass == SettingsViewModel::class.java) {
+            "Unsupported ViewModel class: ${modelClass.name}"
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        return SettingsViewModel(
+            sessionController = sessionController,
+            context = context.applicationContext,
+        ) as T
     }
 }
 
@@ -106,6 +143,7 @@ data class SettingsUiState(
     val isLoading: Boolean = false,
     val piVersion: String? = null,
     val appVersion: String = "unknown",
+    val statusMessage: String? = null,
     val errorMessage: String? = null,
 )
 

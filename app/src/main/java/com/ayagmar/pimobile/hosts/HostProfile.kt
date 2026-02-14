@@ -55,7 +55,7 @@ data class HostDraft(
     }
 
     companion object {
-        const val DEFAULT_PORT = "8765"
+        const val DEFAULT_PORT = "8787"
         const val MIN_PORT = 1
         const val MAX_PORT = 65535
     }

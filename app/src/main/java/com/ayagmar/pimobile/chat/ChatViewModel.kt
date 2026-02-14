@@ -54,6 +54,7 @@ class ChatViewModel(
 
         // Record prompt send for TTFT tracking
         PerformanceMetrics.recordPromptSend()
+        hasRecordedFirstToken = false
 
         viewModelScope.launch {
             _uiState.update { it.copy(inputText = "", errorMessage = null) }
@@ -305,12 +306,16 @@ class ChatViewModel(
     ) {
         viewModelScope.launch {
             _uiState.update { it.copy(activeExtensionRequest = null) }
-            sessionController.sendExtensionUiResponse(
-                requestId = requestId,
-                value = value,
-                confirmed = confirmed,
-                cancelled = cancelled,
-            )
+            val result =
+                sessionController.sendExtensionUiResponse(
+                    requestId = requestId,
+                    value = value,
+                    confirmed = confirmed,
+                    cancelled = cancelled,
+                )
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
         }
     }
 
@@ -445,7 +450,15 @@ class ChatViewModel(
             val updatedTimeline =
                 if (existingIndex >= 0) {
                     state.timeline.toMutableList().also { timeline ->
-                        timeline[existingIndex] = item
+                        val existing = timeline[existingIndex]
+                        timeline[existingIndex] =
+                            when {
+                                existing is ChatTimelineItem.Tool && item is ChatTimelineItem.Tool -> {
+                                    // Preserve user toggled expansion state across streaming updates.
+                                    item.copy(isCollapsed = existing.isCollapsed)
+                                }
+                                else -> item
+                            }
                     }
                 } else {
                     state.timeline + item

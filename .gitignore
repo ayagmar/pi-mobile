@@ -29,6 +29,7 @@ replay_pid*
 # Gradle
 .gradle/
 **/build/
+**/bin/
 
 # Android
 local.properties

@@ -38,7 +38,7 @@ pnpm install
 pnpm start
 ```
 
-The bridge binds to `127.0.0.1:8787` by default. Change to your Tailscale IP in the config. It spawns pi processes on demand per working directory.
+The bridge binds to `127.0.0.1:8787` by default. Set `BRIDGE_HOST` to your laptop Tailscale IP (or `0.0.0.0`) to allow phone access. It spawns pi processes on demand per working directory.
 
 ### 2. Phone Setup
 
@@ -179,7 +179,7 @@ Debug builds include logging and assertions. Release builds (if you make them) s
 ## Security Notes
 
 - Token auth is required - don't expose the bridge without it
-- The bridge binds to all interfaces by default (change to Tailscale IP only if desired)
+- The bridge binds to localhost by default; explicitly set `BRIDGE_HOST` to your Tailscale IP for remote access
 - All traffic goes over Tailscale's encrypted mesh
 - Session data stays on the laptop; the app only displays it
 

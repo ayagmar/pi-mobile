@@ -2,6 +2,8 @@ package com.ayagmar.pimobile.corenet
 
 import com.ayagmar.pimobile.corerpc.AbortCommand
 import com.ayagmar.pimobile.corerpc.CompactCommand
+import com.ayagmar.pimobile.corerpc.CycleModelCommand
+import com.ayagmar.pimobile.corerpc.CycleThinkingLevelCommand
 import com.ayagmar.pimobile.corerpc.ExportHtmlCommand
 import com.ayagmar.pimobile.corerpc.ExtensionUiResponseCommand
 import com.ayagmar.pimobile.corerpc.FollowUpCommand
@@ -9,6 +11,7 @@ import com.ayagmar.pimobile.corerpc.ForkCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
 import com.ayagmar.pimobile.corerpc.GetMessagesCommand
 import com.ayagmar.pimobile.corerpc.GetStateCommand
+import com.ayagmar.pimobile.corerpc.NewSessionCommand
 import com.ayagmar.pimobile.corerpc.PromptCommand
 import com.ayagmar.pimobile.corerpc.RpcCommand
 import com.ayagmar.pimobile.corerpc.SetSessionNameCommand
@@ -37,6 +40,9 @@ private val rpcCommandEncoders: Map<Class<out RpcCommand>, RpcCommandEncoder> =
         ForkCommand::class.java to typedEncoder(ForkCommand.serializer()),
         ExportHtmlCommand::class.java to typedEncoder(ExportHtmlCommand.serializer()),
         CompactCommand::class.java to typedEncoder(CompactCommand.serializer()),
+        CycleModelCommand::class.java to typedEncoder(CycleModelCommand.serializer()),
+        CycleThinkingLevelCommand::class.java to typedEncoder(CycleThinkingLevelCommand.serializer()),
+        NewSessionCommand::class.java to typedEncoder(NewSessionCommand.serializer()),
         ExtensionUiResponseCommand::class.java to typedEncoder(ExtensionUiResponseCommand.serializer()),
     )
 
