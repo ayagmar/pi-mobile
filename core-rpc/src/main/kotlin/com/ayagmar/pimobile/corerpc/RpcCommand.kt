@@ -95,6 +95,18 @@ data class CompactCommand(
 ) : RpcCommand
 
 @Serializable
+data class CycleModelCommand(
+    override val id: String? = null,
+    override val type: String = "cycle_model",
+) : RpcCommand
+
+@Serializable
+data class CycleThinkingLevelCommand(
+    override val id: String? = null,
+    override val type: String = "cycle_thinking_level",
+) : RpcCommand
+
+@Serializable
 data class ExtensionUiResponseCommand(
     override val id: String? = null,
     override val type: String = "extension_ui_response",

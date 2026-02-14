@@ -10,6 +10,7 @@ import com.ayagmar.pimobile.corerpc.ToolExecutionEndEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionStartEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionUpdateEvent
 import com.ayagmar.pimobile.di.AppServices
+import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,6 +89,34 @@ class ChatViewModel(
         }
     }
 
+    fun cycleModel() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.cycleModel()
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            } else {
+                result.getOrNull()?.let { modelInfo ->
+                    _uiState.update { it.copy(currentModel = modelInfo) }
+                }
+            }
+        }
+    }
+
+    fun cycleThinkingLevel() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.cycleThinkingLevel()
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            } else {
+                result.getOrNull()?.let { level ->
+                    _uiState.update { it.copy(thinkingLevel = level) }
+                }
+            }
+        }
+    }
+
     fun toggleToolExpansion(itemId: String) {
         _uiState.update { state ->
             state.copy(
@@ -139,19 +168,30 @@ class ChatViewModel(
 
     private fun loadInitialMessages() {
         viewModelScope.launch(Dispatchers.IO) {
-            val responseResult = sessionController.getMessages()
+            val messagesResult = sessionController.getMessages()
+            val stateResult = sessionController.getState()
+
+            val modelInfo = stateResult.getOrNull()?.data?.let { parseModelInfo(it) }
+            val thinkingLevel = stateResult.getOrNull()?.data?.stringField("thinkingLevel")
+            val isStreaming = stateResult.getOrNull()?.data?.booleanField("isStreaming") ?: false
 
             _uiState.update { state ->
-                if (responseResult.isFailure) {
+                if (messagesResult.isFailure) {
                     state.copy(
                         isLoading = false,
-                        errorMessage = responseResult.exceptionOrNull()?.message,
+                        errorMessage = messagesResult.exceptionOrNull()?.message,
+                        currentModel = modelInfo,
+                        thinkingLevel = thinkingLevel,
+                        isStreaming = isStreaming,
                     )
                 } else {
                     state.copy(
                         isLoading = false,
                         errorMessage = null,
-                        timeline = parseHistoryItems(responseResult.getOrNull()?.data),
+                        timeline = parseHistoryItems(messagesResult.getOrNull()?.data),
+                        currentModel = modelInfo,
+                        thinkingLevel = thinkingLevel,
+                        isStreaming = isStreaming,
                     )
                 }
             }
@@ -250,6 +290,8 @@ data class ChatUiState(
     val timeline: List<ChatTimelineItem> = emptyList(),
     val inputText: String = "",
     val errorMessage: String? = null,
+    val currentModel: ModelInfo? = null,
+    val thinkingLevel: String? = null,
 )
 
 sealed interface ChatTimelineItem {
@@ -382,4 +424,14 @@ private fun JsonObject.stringField(fieldName: String): String? {
 
 private fun JsonObject.booleanField(fieldName: String): Boolean? {
     return this[fieldName]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
+}
+
+private fun parseModelInfo(data: JsonObject?): ModelInfo? {
+    val model = data?.get("model")?.jsonObject ?: return null
+    return ModelInfo(
+        id = model.stringField("id") ?: "unknown",
+        name = model.stringField("name") ?: "Unknown Model",
+        provider = model.stringField("provider") ?: "unknown",
+        thinkingLevel = data.stringField("thinkingLevel") ?: "off",
+    )
 }

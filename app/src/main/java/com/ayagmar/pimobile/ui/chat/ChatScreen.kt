@@ -11,8 +11,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,6 +38,7 @@ import com.ayagmar.pimobile.chat.ChatTimelineItem
 import com.ayagmar.pimobile.chat.ChatUiState
 import com.ayagmar.pimobile.chat.ChatViewModel
 import com.ayagmar.pimobile.chat.ChatViewModelFactory
+import com.ayagmar.pimobile.sessions.ModelInfo
 
 private data class ChatCallbacks(
     val onToggleToolExpansion: (String) -> Unit,
@@ -46,6 +47,8 @@ private data class ChatCallbacks(
     val onAbort: () -> Unit,
     val onSteer: (String) -> Unit,
     val onFollowUp: (String) -> Unit,
+    val onCycleModel: () -> Unit,
+    val onCycleThinking: () -> Unit,
 )
 
 @Composable
@@ -63,6 +66,8 @@ fun ChatRoute() {
                 onAbort = chatViewModel::abort,
                 onSteer = chatViewModel::steer,
                 onFollowUp = chatViewModel::followUp,
+                onCycleModel = chatViewModel::cycleModel,
+                onCycleThinking = chatViewModel::cycleThinkingLevel,
             )
         }
 
@@ -88,6 +93,13 @@ private fun ChatScreen(
         Text(
             text = "Connection: ${state.connectionState.name.lowercase()}",
             style = MaterialTheme.typography.bodyMedium,
+        )
+
+        ModelThinkingControls(
+            currentModel = state.currentModel,
+            thinkingLevel = state.thinkingLevel,
+            onCycleModel = callbacks.onCycleModel,
+            onCycleThinking = callbacks.onCycleThinking,
         )
 
         state.errorMessage?.let { errorMessage ->
@@ -383,6 +395,45 @@ private fun SteerFollowUpDialog(
             }
         },
     )
+}
+
+@Composable
+private fun ModelThinkingControls(
+    currentModel: ModelInfo?,
+    thinkingLevel: String?,
+    onCycleModel: () -> Unit,
+    onCycleThinking: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val modelText = currentModel?.let { "${it.name} (${it.provider})" } ?: "No model"
+        val thinkingText = thinkingLevel?.let { "Thinking: $it" } ?: "Thinking: off"
+
+        TextButton(
+            onClick = onCycleModel,
+            modifier = Modifier.weight(1f),
+        ) {
+            Text(
+                text = modelText,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+            )
+        }
+
+        TextButton(
+            onClick = onCycleThinking,
+            modifier = Modifier.weight(1f),
+        ) {
+            Text(
+                text = thinkingText,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+            )
+        }
+    }
 }
 
 private const val COLLAPSED_OUTPUT_LENGTH = 280

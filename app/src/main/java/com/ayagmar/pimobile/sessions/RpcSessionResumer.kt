@@ -8,6 +8,8 @@ import com.ayagmar.pimobile.corerpc.AbortCommand
 import com.ayagmar.pimobile.corerpc.AgentEndEvent
 import com.ayagmar.pimobile.corerpc.AgentStartEvent
 import com.ayagmar.pimobile.corerpc.CompactCommand
+import com.ayagmar.pimobile.corerpc.CycleModelCommand
+import com.ayagmar.pimobile.corerpc.CycleThinkingLevelCommand
 import com.ayagmar.pimobile.corerpc.ExportHtmlCommand
 import com.ayagmar.pimobile.corerpc.FollowUpCommand
 import com.ayagmar.pimobile.corerpc.ForkCommand
@@ -47,6 +49,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
 
+@Suppress("TooManyFunctions")
 interface SessionController {
     val rpcEvents: SharedFlow<RpcIncomingMessage>
     val connectionState: StateFlow<ConnectionState>
@@ -59,6 +62,8 @@ interface SessionController {
     ): Result<String?>
 
     suspend fun getMessages(): Result<RpcResponse>
+
+    suspend fun getState(): Result<RpcResponse>
 
     suspend fun sendPrompt(message: String): Result<Unit>
 
@@ -75,7 +80,18 @@ interface SessionController {
     suspend fun exportSession(): Result<String>
 
     suspend fun forkSessionFromLatestMessage(): Result<String?>
+
+    suspend fun cycleModel(): Result<ModelInfo?>
+
+    suspend fun cycleThinkingLevel(): Result<String?>
 }
+
+data class ModelInfo(
+    val id: String,
+    val name: String,
+    val provider: String,
+    val thinkingLevel: String,
+)
 
 @Suppress("TooManyFunctions")
 class RpcSessionController(
@@ -153,6 +169,15 @@ class RpcSessionController(
             runCatching {
                 val connection = ensureActiveConnection()
                 connection.requestMessages().requireSuccess("Failed to load messages")
+            }
+        }
+    }
+
+    override suspend fun getState(): Result<RpcResponse> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                connection.requestState().requireSuccess("Failed to load state")
             }
         }
     }
@@ -298,6 +323,40 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun cycleModel(): Result<ModelInfo?> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val response =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = CycleModelCommand(id = UUID.randomUUID().toString()),
+                        expectedCommand = CYCLE_MODEL_COMMAND,
+                    ).requireSuccess("Failed to cycle model")
+
+                parseModelInfo(response.data)
+            }
+        }
+    }
+
+    override suspend fun cycleThinkingLevel(): Result<String?> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val response =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = CycleThinkingLevelCommand(id = UUID.randomUUID().toString()),
+                        expectedCommand = CYCLE_THINKING_COMMAND,
+                    ).requireSuccess("Failed to cycle thinking level")
+
+                response.data?.stringField("level")
+            }
+        }
+    }
+
     private suspend fun clearActiveConnection() {
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
@@ -362,6 +421,8 @@ class RpcSessionController(
         private const val EXPORT_HTML_COMMAND = "export_html"
         private const val GET_FORK_MESSAGES_COMMAND = "get_fork_messages"
         private const val FORK_COMMAND = "fork"
+        private const val CYCLE_MODEL_COMMAND = "cycle_model"
+        private const val CYCLE_THINKING_COMMAND = "cycle_thinking_level"
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
     }
@@ -418,4 +479,17 @@ private fun JsonObject?.stringField(fieldName: String): String? {
 private fun JsonObject?.booleanField(fieldName: String): Boolean? {
     val value = this?.get(fieldName)?.jsonPrimitive?.contentOrNull ?: return null
     return value.toBooleanStrictOrNull()
+}
+
+private fun parseModelInfo(data: JsonObject?): ModelInfo? {
+    return data?.let {
+        it["model"]?.jsonObject?.let { model ->
+            ModelInfo(
+                id = model.stringField("id") ?: "unknown",
+                name = model.stringField("name") ?: "Unknown Model",
+                provider = model.stringField("provider") ?: "unknown",
+                thinkingLevel = data.stringField("thinkingLevel") ?: "off",
+            )
+        }
+    }
 }
