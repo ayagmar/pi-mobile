@@ -1,0 +1,29 @@
+{
+  "name": "pi-mobile-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm run lint && pnpm run typecheck && pnpm run test"
+  },
+  "dependencies": {
+    "pino": "^9.9.5",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "@types/node": "^24.6.0",
+    "@types/ws": "^8.18.1",
+    "eslint": "^9.36.0",
+    "globals": "^16.4.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.45.0",
+    "vitest": "^3.2.4"
+  }
+}
