@@ -13,8 +13,8 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 2.4 Multi-cwd process manager | DONE | eff1bdf | ✅ ktlintCheck, detekt, test, bridge check | Added per-cwd process manager with control locks, server control APIs (set cwd/acquire/release), and idle TTL eviction with tests for lock rejection and cwd routing. |
 | 2.5 Session indexing API | DONE | 6538df2 | ✅ ktlintCheck, detekt, test, bridge check | Added bridge_list_sessions API backed by JSONL session indexer (header/session_info/preview/messageCount/lastModel), fixture tests, and local ~/.pi session smoke run. |
 | 2.6 Bridge resilience | DONE | b39cec9 | ✅ ktlintCheck, detekt, test, bridge check | Added enriched /health status, RPC forwarder crash auto-restart/backoff, reconnect grace model with resumable clientId, and forced reconnect smoke verification. |
-| 3.1 RPC models/parser | DONE | 8f638e0 | ✅ ktlintCheck, detekt, test | Added serializable RPC command + inbound response/event models and Json parser (ignoreUnknownKeys) with tests for response states, message_update, tool events, and extension_ui_request. |
-| 3.2 Streaming assembler/throttle | TODO |  |  |  |
+| 3.1 RPC models/parser | DONE | 95b0489 | ✅ ktlintCheck, detekt, test | Added serializable RPC command + inbound response/event models and Json parser (ignoreUnknownKeys) with tests for response states, message_update, tool events, and extension_ui_request. |
+| 3.2 Streaming assembler/throttle | DONE | PENDING | ✅ ktlintCheck, detekt, test; smoke: :core-rpc:test --tests "*AssistantTextAssemblerTest" --tests "*UiUpdateThrottlerTest" | Added assistant text stream assembler keyed by message/content index, capped message-buffer tracking, and a coalescing UI update throttler with deterministic unit coverage. |
 | 3.3 WebSocket transport | TODO |  |  |  |
 | 3.4 RPC orchestrator/resync | TODO |  |  |  |
 | 4.1 Host profiles + secure token | TODO |  |  |  |

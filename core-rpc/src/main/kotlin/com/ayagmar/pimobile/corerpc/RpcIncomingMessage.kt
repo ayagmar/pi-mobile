@@ -31,6 +31,7 @@ data class AssistantMessageEvent(
     val type: String,
     val contentIndex: Int? = null,
     val delta: String? = null,
+    val content: String? = null,
     val partial: JsonObject? = null,
 )
 
