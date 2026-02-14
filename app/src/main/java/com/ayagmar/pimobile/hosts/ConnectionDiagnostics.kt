@@ -4,8 +4,12 @@ import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.corenet.PiRpcConnection
 import com.ayagmar.pimobile.corenet.PiRpcConnectionConfig
 import com.ayagmar.pimobile.corenet.WebSocketTarget
+import com.ayagmar.pimobile.corerpc.RpcResponse
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Result of connection diagnostics check.
@@ -40,80 +44,84 @@ sealed interface DiagnosticsResult {
  * Performs connection diagnostics to verify bridge connectivity and auth.
  */
 class ConnectionDiagnostics {
-    /**
-     * Tests connection to a host by attempting:
-     * 1. WebSocket connection (bridge reachable)
-     * 2. Request state via RPC (auth valid)
-     * 3. Receive response (RPC working)
-     */
-    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    @Suppress("TooGenericExceptionCaught")
     suspend fun testHost(
         hostProfile: HostProfile,
         token: String,
-        timeoutMs: Long = 10000,
+        timeoutMs: Long = 10_000,
     ): DiagnosticsResult {
         val connection = PiRpcConnection()
 
         return try {
-            val config = createConnectionConfig(hostProfile, token)
-
-            // Step 1 & 2: Connect (includes auth handshake)
-            withTimeout(timeoutMs) {
-                connection.connect(config)
-                connection.connectionState.first { it == ConnectionState.CONNECTED }
-            }
-
-            // Step 3: Request state via RPC
-            val response =
-                withTimeout(timeoutMs) {
-                    connection.requestState()
-                }
-
-            connection.disconnect()
-
-            if (response.success) {
-                val data = response.data
-                DiagnosticsResult.Success(
-                    hostProfile = hostProfile,
-                    bridgeVersion = data?.get("version")?.toString(),
-                    model = data?.get("model")?.toString(),
-                    cwd = data?.get("cwd")?.toString(),
-                )
-            } else {
-                DiagnosticsResult.RpcError(
-                    hostProfile = hostProfile,
-                    message = response.error ?: "Unknown RPC error",
-                )
-            }
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            connection.disconnect()
+            val response = connectAndRequestState(connection, hostProfile, token, timeoutMs)
+            response.toDiagnosticsResult(hostProfile)
+        } catch (error: TimeoutCancellationException) {
             DiagnosticsResult.NetworkError(
                 hostProfile = hostProfile,
-                message = "Connection timed out after ${timeoutMs}ms",
+                message = "Connection timed out after ${timeoutMs}ms (${error::class.simpleName})",
             )
-        } catch (e: Exception) {
+        } catch (error: Exception) {
+            mapError(hostProfile, error)
+        } finally {
             connection.disconnect()
-            when {
-                e.message?.contains("401", ignoreCase = true) == true ||
-                    e.message?.contains("Unauthorized", ignoreCase = true) == true -> {
-                    DiagnosticsResult.AuthError(
-                        hostProfile = hostProfile,
-                        message = "Authentication failed: invalid token",
-                    )
-                }
-                e.message?.contains("refused", ignoreCase = true) == true ||
-                    e.message?.contains("unreachable", ignoreCase = true) == true -> {
-                    DiagnosticsResult.NetworkError(
-                        hostProfile = hostProfile,
-                        message = "Bridge unreachable: ${e.message}",
-                    )
-                }
-                else -> {
-                    DiagnosticsResult.NetworkError(
-                        hostProfile = hostProfile,
-                        message = e.message ?: "Unknown error",
-                    )
-                }
+        }
+    }
+
+    private suspend fun connectAndRequestState(
+        connection: PiRpcConnection,
+        hostProfile: HostProfile,
+        token: String,
+        timeoutMs: Long,
+    ) = withTimeout(timeoutMs) {
+        connection.connect(createConnectionConfig(hostProfile, token))
+        connection.connectionState.first { state -> state == ConnectionState.CONNECTED }
+        connection.requestState()
+    }
+
+    private fun RpcResponse.toDiagnosticsResult(hostProfile: HostProfile): DiagnosticsResult {
+        if (!success) {
+            return DiagnosticsResult.RpcError(
+                hostProfile = hostProfile,
+                message = error ?: "Unknown RPC error",
+            )
+        }
+
+        return DiagnosticsResult.Success(
+            hostProfile = hostProfile,
+            bridgeVersion = null,
+            model = data?.extractModelName(),
+            cwd = data?.stringField("cwd"),
+        )
+    }
+
+    private fun mapError(
+        hostProfile: HostProfile,
+        error: Exception,
+    ): DiagnosticsResult {
+        val message = error.message.orEmpty()
+
+        return when {
+            message.contains("401", ignoreCase = true) ||
+                message.contains("unauthorized", ignoreCase = true) -> {
+                DiagnosticsResult.AuthError(
+                    hostProfile = hostProfile,
+                    message = "Authentication failed: invalid token",
+                )
+            }
+
+            message.contains("refused", ignoreCase = true) ||
+                message.contains("unreachable", ignoreCase = true) -> {
+                DiagnosticsResult.NetworkError(
+                    hostProfile = hostProfile,
+                    message = "Bridge unreachable: $message",
+                )
+            }
+
+            else -> {
+                DiagnosticsResult.NetworkError(
+                    hostProfile = hostProfile,
+                    message = if (message.isBlank()) "Unknown error" else message,
+                )
             }
         }
     }
@@ -122,17 +130,32 @@ class ConnectionDiagnostics {
         hostProfile: HostProfile,
         token: String,
     ): PiRpcConnectionConfig {
-        // The bridge uses the Authorization header for auth
         val target =
             WebSocketTarget(
                 url = hostProfile.endpoint,
                 headers = mapOf("Authorization" to "Bearer $token"),
             )
-        // Dummy cwd for diagnostics
+
         return PiRpcConnectionConfig(
             target = target,
             cwd = "/tmp",
             sessionPath = null,
         )
+    }
+}
+
+private fun JsonObject.stringField(fieldName: String): String? {
+    return this[fieldName]?.toString()?.trim('"')
+}
+
+private fun JsonObject.extractModelName(): String? {
+    val modelElement = this["model"] ?: return null
+    return modelElement.extractModelName()
+}
+
+private fun JsonElement.extractModelName(): String? {
+    return when (this) {
+        is JsonObject -> stringField("name") ?: stringField("id")
+        else -> toString().trim('"')
     }
 }

@@ -27,8 +27,8 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 5.4 Extension UI protocol support | DONE | 3d6b9ce | ✅ ktlintCheck, detekt, test, bridge check | Implemented dialog methods (select, confirm, input, editor) with proper response handling. Added fire-and-forget support (notify, setStatus, setWidget, setTitle, set_editor_text). Notifications display as snackbars. |
 | 6.1 Backpressure + bounded buffers | DONE | 328b950 | ✅ ktlintCheck, detekt, test | Added BoundedEventBuffer for RPC event backpressure, StreamingBufferManager for memory-efficient text streaming (50KB limit, tail truncation), BackpressureEventProcessor for event coalescing. |
 | 6.2 Instrumentation + perf baseline | DONE | 9232795 | ✅ ktlintCheck, detekt, test | Added PerformanceMetrics for startup/resume/TTFT timing, FrameMetrics for jank detection, macrobenchmark module with StartupBenchmark and BaselineProfileGenerator, docs/perf-baseline.md with metrics and targets. |
-| 6.3 Baseline profile + release tuning | SKIPPED | N/A | N/A | Not needed - baseline profiles only benefit Play Store distributed apps. Local builds don't use them. |
-| 7.1 Optional extension scaffold | SKIPPED | N/A | N/A | Not needed - all functionality implemented in app/bridge. No custom pi extensions required. |
+| 6.3 Baseline profile + release tuning | DE_SCOPED | N/A | N/A | Explicitly de-scoped for this repo because it targets developer-side local/debug usage; benchmark module remains for future release tuning if distribution model changes. |
+| 7.1 Optional extension scaffold | DE_SCOPED | N/A | N/A | Explicitly de-scoped from MVP scope; extension UI protocol is fully supported in app/bridge, and repo-local extension scaffold can be added later from pi-extension-template when concrete extension requirements exist. |
 | 8.1 Setup + troubleshooting docs | DONE | 50c7268 | ✅ README.md created | Human-readable setup guide with architecture, troubleshooting, and development info. |
 | 8.2 Final acceptance report | DONE | 50c7268 | ✅ docs/final-acceptance.md | Comprehensive acceptance checklist with all criteria met. |
 

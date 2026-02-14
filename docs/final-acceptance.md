@@ -66,9 +66,9 @@ All core functionality implemented and verified. The app connects to pi running 
 
 | Item | Status | Target | Measured |
 |------|--------|--------|----------|
-| Cold start to sessions | PASS | < 2.5s | TBD (see perf-baseline.md) |
-| Resume to messages | PASS | < 1.0s | TBD |
-| Prompt to first token | PASS | < 1.2s | TBD |
+| Cold start to sessions | PARTIAL | < 2.5s | TBD (device measurement pending; see perf-baseline.md) |
+| Resume to messages | PARTIAL | < 1.0s | TBD |
+| Prompt to first token | PARTIAL | < 1.2s | TBD |
 | No memory leaks | PASS | - | Bounded buffers verified |
 | Streaming stability | PASS | 10+ min | Backpressure handling in place |
 
@@ -102,10 +102,10 @@ Measured values require device testing and are tracked via `adb logcat | grep Pe
 - Large tool outputs truncated (configurable threshold)
 - Session history loads completely on resume (not paginated)
 
-## Skipped Items
+## De-scoped Items
 
-- **Task 6.3**: Baseline profiles - only benefit Play Store apps, not local builds
-- **Task 7.1**: Custom extensions - all functionality in app/bridge, no pi extensions needed
+- **Task 6.3**: Baseline profiles are de-scoped for current local/developer deployment target; benchmark module remains for future release tuning.
+- **Task 7.1**: Repo-local extension scaffold is de-scoped from MVP; extension UI protocol support is implemented and scaffold can be generated later from `pi-extension-template` when needed.
 
 ## Files Delivered
 
@@ -144,7 +144,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ## Sign-off
 
-All acceptance criteria met. Ready for use.
+Core functionality criteria are met. Performance budget verification remains pending until device benchmark values replace TBD entries.
 
 ---
 

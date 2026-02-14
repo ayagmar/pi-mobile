@@ -14,6 +14,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class WebSocketTransportIntegrationTest {
     @Test
@@ -68,6 +69,22 @@ class WebSocketTransportIntegrationTest {
                 transport.disconnect()
                 server.shutdown()
             }
+        }
+
+    @Test
+    fun `send fails when outbound queue is full`() =
+        runBlocking {
+            val transport = WebSocketTransport(client = OkHttpClient())
+
+            repeat(256) { index ->
+                transport.send("queued-$index")
+            }
+
+            assertFailsWith<IllegalStateException> {
+                transport.send("overflow")
+            }
+
+            transport.disconnect()
         }
 
     @Test

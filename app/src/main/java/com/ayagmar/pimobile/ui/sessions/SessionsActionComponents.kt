@@ -1,15 +1,20 @@
 package com.ayagmar.pimobile.ui.sessions
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.ayagmar.pimobile.coresessions.SessionRecord
+import com.ayagmar.pimobile.sessions.ForkableMessage
 
 @Composable
 fun SessionActionsRow(
@@ -55,6 +60,41 @@ fun RenameSessionDialog(
                 Text("Rename")
             }
         },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+fun ForkPickerDialog(
+    isLoading: Boolean,
+    candidates: List<ForkableMessage>,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Fork from message") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (isLoading) {
+                    CircularProgressIndicator()
+                } else {
+                    candidates.forEach { candidate ->
+                        TextButton(
+                            onClick = { onSelect(candidate.entryId) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(candidate.preview)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("Cancel")

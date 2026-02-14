@@ -55,6 +55,9 @@ class SessionsViewModel(
                 isLoading = true,
                 groups = emptyList(),
                 activeSessionPath = null,
+                isForkPickerVisible = false,
+                forkCandidates = emptyList(),
+                isLoadingForkMessages = false,
                 statusMessage = null,
                 errorMessage = null,
             )
@@ -121,6 +124,9 @@ class SessionsViewModel(
                 current.copy(
                     isResuming = true,
                     isPerformingAction = false,
+                    isForkPickerVisible = false,
+                    forkCandidates = emptyList(),
+                    isLoadingForkMessages = false,
                     errorMessage = null,
                     statusMessage = null,
                 )
@@ -162,24 +168,72 @@ class SessionsViewModel(
         }
     }
 
-    fun loadForkMessages(onLoaded: (List<ForkableMessage>) -> Unit) {
+    fun requestForkMessages() {
+        val activeSessionPath = _uiState.value.activeSessionPath
+        if (activeSessionPath == null) {
+            _uiState.update { current ->
+                current.copy(
+                    errorMessage = "Resume a session before forking",
+                    statusMessage = null,
+                )
+            }
+            return
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
-            _uiState.update { it.copy(isLoadingForkMessages = true) }
+            _uiState.update {
+                it.copy(
+                    isLoadingForkMessages = true,
+                    errorMessage = null,
+                    statusMessage = null,
+                )
+            }
 
             val result = sessionController.getForkMessages()
 
-            _uiState.update { it.copy(isLoadingForkMessages = false) }
-
-            if (result.isSuccess) {
-                onLoaded(result.getOrNull() ?: emptyList())
-            } else {
-                _uiState.update { current ->
+            _uiState.update { current ->
+                if (result.isSuccess) {
+                    val candidates = result.getOrNull().orEmpty()
+                    if (candidates.isEmpty()) {
+                        current.copy(
+                            isLoadingForkMessages = false,
+                            isForkPickerVisible = false,
+                            forkCandidates = emptyList(),
+                            errorMessage = "No forkable user messages found",
+                        )
+                    } else {
+                        current.copy(
+                            isLoadingForkMessages = false,
+                            isForkPickerVisible = true,
+                            forkCandidates = candidates,
+                            errorMessage = null,
+                        )
+                    }
+                } else {
                     current.copy(
+                        isLoadingForkMessages = false,
+                        isForkPickerVisible = false,
+                        forkCandidates = emptyList(),
                         errorMessage = result.exceptionOrNull()?.message ?: "Failed to load fork messages",
                     )
                 }
             }
         }
+    }
+
+    fun dismissForkPicker() {
+        _uiState.update { current ->
+            current.copy(
+                isForkPickerVisible = false,
+                forkCandidates = emptyList(),
+                isLoadingForkMessages = false,
+            )
+        }
+    }
+
+    fun forkFromSelectedMessage(entryId: String) {
+        dismissForkPicker()
+        runSessionAction(SessionAction.ForkFromEntry(entryId))
     }
 
     private fun runForkFromEntryAction(action: SessionAction.ForkFromEntry) {
@@ -201,6 +255,8 @@ class SessionsViewModel(
                 current.copy(
                     isPerformingAction = true,
                     isResuming = false,
+                    isForkPickerVisible = false,
+                    forkCandidates = emptyList(),
                     errorMessage = null,
                     statusMessage = null,
                 )
@@ -251,6 +307,9 @@ class SessionsViewModel(
                 current.copy(
                     isPerformingAction = true,
                     isResuming = false,
+                    isForkPickerVisible = false,
+                    forkCandidates = emptyList(),
+                    isLoadingForkMessages = false,
                     errorMessage = null,
                     statusMessage = null,
                 )
@@ -299,6 +358,9 @@ class SessionsViewModel(
                 current.copy(
                     isPerformingAction = true,
                     isResuming = false,
+                    isForkPickerVisible = false,
+                    forkCandidates = emptyList(),
+                    isLoadingForkMessages = false,
                     errorMessage = null,
                     statusMessage = null,
                 )
@@ -406,14 +468,6 @@ sealed interface SessionAction {
         }
     }
 
-    data object Fork : SessionAction {
-        override val successMessage: String = "Forked active session"
-
-        override suspend fun execute(controller: SessionController): Result<String?> {
-            return controller.forkSessionFromLatestMessage()
-        }
-    }
-
     data class ForkFromEntry(
         val entryId: String,
     ) : SessionAction {
@@ -469,6 +523,8 @@ data class SessionsUiState(
     val isResuming: Boolean = false,
     val isPerformingAction: Boolean = false,
     val isLoadingForkMessages: Boolean = false,
+    val isForkPickerVisible: Boolean = false,
+    val forkCandidates: List<ForkableMessage> = emptyList(),
     val activeSessionPath: String? = null,
     val statusMessage: String? = null,
     val errorMessage: String? = null,

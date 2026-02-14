@@ -40,8 +40,8 @@ class SettingsViewModel(
                         ConnectionState.CONNECTED -> ConnectionStatus.CONNECTED
                         ConnectionState.CONNECTING,
                         ConnectionState.RECONNECTING,
-                        ConnectionState.DISCONNECTED,
-                        -> ConnectionStatus.DISCONNECTED
+                        -> ConnectionStatus.CHECKING
+                        ConnectionState.DISCONNECTED -> ConnectionStatus.DISCONNECTED
                     }
                 uiState = uiState.copy(connectionStatus = status)
             }
@@ -64,12 +64,22 @@ class SettingsViewModel(
                 val result = sessionController.getState()
                 if (result.isSuccess) {
                     val data = result.getOrNull()?.data
-                    val model = data?.get("model")?.toString()
+                    val modelDescription =
+                        data?.get("model")?.let { modelElement ->
+                            if (modelElement is kotlinx.serialization.json.JsonObject) {
+                                val name = modelElement["name"]?.toString()?.trim('"')
+                                val provider = modelElement["provider"]?.toString()?.trim('"')
+                                if (name != null && provider != null) "$name ($provider)" else name ?: provider
+                            } else {
+                                modelElement.toString().trim('"')
+                            }
+                        }
+
                     uiState =
                         uiState.copy(
                             isChecking = false,
                             connectionStatus = ConnectionStatus.CONNECTED,
-                            piVersion = model?.let { "Model: $it" } ?: "Connected",
+                            piVersion = modelDescription,
                             statusMessage = "Bridge reachable",
                             errorMessage = null,
                         )

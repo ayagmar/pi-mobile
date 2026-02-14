@@ -41,8 +41,6 @@ interface SessionController {
 
     suspend fun exportSession(): Result<String>
 
-    suspend fun forkSessionFromLatestMessage(): Result<String?>
-
     suspend fun forkSessionFromEntryId(entryId: String): Result<String?>
 
     suspend fun getForkMessages(): Result<List<ForkableMessage>>

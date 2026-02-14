@@ -54,6 +54,37 @@ describe("bridge websocket server", () => {
         expect(statusCode).toBe(401);
     });
 
+    it("rejects websocket token passed via query parameter", async () => {
+        const { baseUrl, server } = await startBridgeServer();
+        bridgeServer = server;
+
+        const statusCode = await new Promise<number>((resolve, reject) => {
+            const ws = new WebSocket(`${baseUrl}?token=bridge-token`);
+
+            const timeoutHandle = setTimeout(() => {
+                reject(new Error("Timed out waiting for unexpected-response"));
+            }, 1_000);
+
+            ws.on("unexpected-response", (_request, response) => {
+                clearTimeout(timeoutHandle);
+                response.resume();
+                resolve(response.statusCode ?? 0);
+            });
+
+            ws.on("open", () => {
+                clearTimeout(timeoutHandle);
+                ws.close();
+                reject(new Error("Connection should have been rejected"));
+            });
+
+            ws.on("error", () => {
+                // no-op: ws emits an error on unauthorized responses
+            });
+        });
+
+        expect(statusCode).toBe(401);
+    });
+
     it("returns bridge_error for malformed envelope", async () => {
         const { baseUrl, server } = await startBridgeServer();
         bridgeServer = server;

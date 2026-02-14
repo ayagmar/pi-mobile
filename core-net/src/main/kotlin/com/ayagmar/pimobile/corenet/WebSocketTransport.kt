@@ -32,7 +32,7 @@ class WebSocketTransport(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : SocketTransport {
     private val lifecycleMutex = Mutex()
-    private val outboundQueue = Channel<String>(Channel.UNLIMITED)
+    private val outboundQueue = Channel<String>(DEFAULT_OUTBOUND_BUFFER_CAPACITY)
     private val inbound =
         MutableSharedFlow<String>(
             extraBufferCapacity = DEFAULT_INBOUND_BUFFER_CAPACITY,
@@ -101,7 +101,9 @@ class WebSocketTransport(
     }
 
     override suspend fun send(message: String) {
-        outboundQueue.send(message)
+        check(outboundQueue.trySend(message).isSuccess) {
+            "Outbound queue is full"
+        }
     }
 
     private suspend fun runConnectionLoop() {
@@ -288,6 +290,7 @@ class WebSocketTransport(
         private const val CLIENT_DISCONNECT_REASON = "client disconnect"
         private const val NORMAL_CLOSE_CODE = 1000
         private const val DEFAULT_INBOUND_BUFFER_CAPACITY = 256
+        private const val DEFAULT_OUTBOUND_BUFFER_CAPACITY = 256
     }
 }
 

@@ -189,27 +189,6 @@ class RpcSessionController(
         }
     }
 
-    override suspend fun forkSessionFromLatestMessage(): Result<String?> {
-        return mutex.withLock {
-            runCatching {
-                val connection = ensureActiveConnection()
-                val forkMessagesResponse =
-                    sendAndAwaitResponse(
-                        connection = connection,
-                        requestTimeoutMs = requestTimeoutMs,
-                        command = GetForkMessagesCommand(id = UUID.randomUUID().toString()),
-                        expectedCommand = GET_FORK_MESSAGES_COMMAND,
-                    ).requireSuccess("Failed to load fork messages")
-
-                val latestEntryId =
-                    parseForkEntryIds(forkMessagesResponse.data).lastOrNull()
-                        ?: error("No user messages available for fork")
-
-                forkWithEntryId(connection, latestEntryId)
-            }
-        }
-    }
-
     override suspend fun forkSessionFromEntryId(entryId: String): Result<String?> {
         return mutex.withLock {
             runCatching {
@@ -488,15 +467,6 @@ private fun RpcResponse.requireSuccess(defaultError: String): RpcResponse {
     }
 
     return this
-}
-
-private fun parseForkEntryIds(data: JsonObject?): List<String> {
-    val messages = runCatching { data?.get("messages")?.jsonArray }.getOrNull() ?: JsonArray(emptyList())
-
-    return messages.mapNotNull { messageElement ->
-        val messageObject = messageElement.jsonObject
-        messageObject.stringField("entryId")
-    }
 }
 
 private fun parseForkableMessages(data: JsonObject?): List<ForkableMessage> {

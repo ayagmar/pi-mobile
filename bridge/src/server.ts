@@ -115,7 +115,7 @@ export function createBridgeServer(
             return;
         }
 
-        const providedToken = extractToken(request, requestUrl);
+        const providedToken = extractToken(request);
         if (providedToken !== config.authToken) {
             socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
             socket.destroy();
@@ -587,11 +587,8 @@ function parseRequestUrl(request: http.IncomingMessage): URL | undefined {
     return new URL(request.url, base);
 }
 
-function extractToken(request: http.IncomingMessage, requestUrl: URL): string | undefined {
-    const fromHeader = getBearerToken(request.headers.authorization) || getHeaderToken(request);
-    if (fromHeader) return fromHeader;
-
-    return requestUrl.searchParams.get("token") || undefined;
+function extractToken(request: http.IncomingMessage): string | undefined {
+    return getBearerToken(request.headers.authorization) || getHeaderToken(request);
 }
 
 function getBearerToken(authorizationHeader: string | undefined): string | undefined {

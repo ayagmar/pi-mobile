@@ -53,7 +53,9 @@ fun SessionsRoute() {
                 onRefreshClick = sessionsViewModel::refreshSessions,
                 onResumeClick = sessionsViewModel::resumeSession,
                 onRename = { name -> sessionsViewModel.runSessionAction(SessionAction.Rename(name)) },
-                onFork = { sessionsViewModel.runSessionAction(SessionAction.Fork) },
+                onFork = sessionsViewModel::requestForkMessages,
+                onForkMessageSelected = sessionsViewModel::forkFromSelectedMessage,
+                onDismissForkDialog = sessionsViewModel::dismissForkPicker,
                 onExport = { sessionsViewModel.runSessionAction(SessionAction.Export) },
                 onCompact = { sessionsViewModel.runSessionAction(SessionAction.Compact) },
             ),
@@ -68,6 +70,8 @@ private data class SessionsScreenCallbacks(
     val onResumeClick: (SessionRecord) -> Unit,
     val onRename: (String) -> Unit,
     val onFork: () -> Unit,
+    val onForkMessageSelected: (String) -> Unit,
+    val onDismissForkDialog: () -> Unit,
     val onExport: () -> Unit,
     val onCompact: () -> Unit,
 )
@@ -83,6 +87,13 @@ private data class SessionsListCallbacks(
     val onCwdToggle: (String) -> Unit,
     val onResumeClick: (SessionRecord) -> Unit,
     val actions: ActiveSessionActionCallbacks,
+)
+
+private data class RenameDialogUiState(
+    val isVisible: Boolean,
+    val draft: String,
+    val onDraftChange: (String) -> Unit,
+    val onDismiss: () -> Unit,
 )
 
 @Composable
@@ -136,16 +147,44 @@ private fun SessionsScreen(
         )
     }
 
-    if (showRenameDialog) {
+    SessionsDialogs(
+        state = state,
+        callbacks = callbacks,
+        renameDialog =
+            RenameDialogUiState(
+                isVisible = showRenameDialog,
+                draft = renameDraft,
+                onDraftChange = { renameDraft = it },
+                onDismiss = { showRenameDialog = false },
+            ),
+    )
+}
+
+@Composable
+private fun SessionsDialogs(
+    state: SessionsUiState,
+    callbacks: SessionsScreenCallbacks,
+    renameDialog: RenameDialogUiState,
+) {
+    if (renameDialog.isVisible) {
         RenameSessionDialog(
-            name = renameDraft,
+            name = renameDialog.draft,
             isBusy = state.isPerformingAction,
-            onNameChange = { renameDraft = it },
-            onDismiss = { showRenameDialog = false },
+            onNameChange = renameDialog.onDraftChange,
+            onDismiss = renameDialog.onDismiss,
             onConfirm = {
-                callbacks.onRename(renameDraft)
-                showRenameDialog = false
+                callbacks.onRename(renameDialog.draft)
+                renameDialog.onDismiss()
             },
+        )
+    }
+
+    if (state.isForkPickerVisible) {
+        ForkPickerDialog(
+            isLoading = state.isLoadingForkMessages,
+            candidates = state.forkCandidates,
+            onDismiss = callbacks.onDismissForkDialog,
+            onSelect = callbacks.onForkMessageSelected,
         )
     }
 }

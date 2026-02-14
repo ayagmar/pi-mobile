@@ -83,8 +83,8 @@ The bridge will print your Tailscale IP and port.
 In the emulator app:
 1. Tap "Add Host"
 2. Enter your laptop's Tailscale IP (e.g., `100.x.x.x`)
-3. Port: `8080` (or whatever the bridge uses)
-4. Token: whatever you set in `bridge/.env` (default: none, or set `AUTH_TOKEN`)
+3. Port: `8787` (or whatever the bridge uses)
+4. Token: whatever you set in `bridge/.env` as `BRIDGE_AUTH_TOKEN`
 
 ### 3. Test the Connection
 
@@ -93,7 +93,7 @@ If the app shows "Connected" and lists your sessions, it's working.
 If not, check:
 - Is Tailscale running on both laptop and emulator host?
 - Can the emulator reach your laptop? Test with: `adb shell ping 100.x.x.x`
-- Is the bridge actually running? Check with: `curl http://100.x.x.x:8080/health`
+- Is the bridge actually running? Check with: `curl http://100.x.x.x:8787/health`
 
 ## Common Issues
 
@@ -105,8 +105,8 @@ Normal on first launch. Tap the hosts icon (top bar) to add one.
 
 - Check Tailscale is running on both ends
 - Verify the IP address is correct
-- Make sure the bridge is listening on 0.0.0.0 (not just localhost)
-- Check `bridge/.env` has correct `PORT` and `AUTH_TOKEN`
+- Make sure the bridge is listening on a reachable host (`BRIDGE_HOST`, e.g. Tailscale IP or 0.0.0.0)
+- Check `bridge/.env` has correct `BRIDGE_PORT` and `BRIDGE_AUTH_TOKEN`
 
 ### Sessions don't appear
 
