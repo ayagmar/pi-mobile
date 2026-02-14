@@ -16,6 +16,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.ayagmar.pimobile.ui.hosts.HostsRoute
+import com.ayagmar.pimobile.ui.sessions.SessionsRoute
 
 private data class AppDestination(
     val route: String,
@@ -75,7 +76,7 @@ fun piMobileApp() {
                 HostsRoute()
             }
             composable(route = "sessions") {
-                placeholderScreen(title = "Sessions")
+                SessionsRoute()
             }
             composable(route = "chat") {
                 placeholderScreen(title = "Chat")
