@@ -8,6 +8,7 @@ import com.ayagmar.pimobile.coresessions.FileSessionIndexCache
 import com.ayagmar.pimobile.coresessions.SessionGroup
 import com.ayagmar.pimobile.coresessions.SessionIndexRepository
 import com.ayagmar.pimobile.coresessions.SessionRecord
+import com.ayagmar.pimobile.di.AppServices
 import com.ayagmar.pimobile.hosts.HostProfile
 import com.ayagmar.pimobile.hosts.HostProfileStore
 import com.ayagmar.pimobile.hosts.HostTokenStore
@@ -410,7 +411,7 @@ class SessionsViewModelFactory(
             profileStore = profileStore,
             tokenStore = tokenStore,
             repository = repository,
-            sessionController = RpcSessionController(),
+            sessionController = AppServices.sessionController(),
         ) as T
     }
 }

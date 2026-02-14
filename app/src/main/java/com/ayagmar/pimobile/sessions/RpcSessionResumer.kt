@@ -1,5 +1,6 @@
 package com.ayagmar.pimobile.sessions
 
+import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.corenet.PiRpcConnection
 import com.ayagmar.pimobile.corenet.PiRpcConnectionConfig
 import com.ayagmar.pimobile.corenet.WebSocketTarget
@@ -8,15 +9,27 @@ import com.ayagmar.pimobile.corerpc.ExportHtmlCommand
 import com.ayagmar.pimobile.corerpc.ForkCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
 import com.ayagmar.pimobile.corerpc.RpcCommand
+import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
 import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.corerpc.SetSessionNameCommand
 import com.ayagmar.pimobile.corerpc.SwitchSessionCommand
 import com.ayagmar.pimobile.coresessions.SessionRecord
 import com.ayagmar.pimobile.hosts.HostProfile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
@@ -29,11 +42,16 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
 
 interface SessionController {
+    val rpcEvents: SharedFlow<RpcIncomingMessage>
+    val connectionState: StateFlow<ConnectionState>
+
     suspend fun resume(
         hostProfile: HostProfile,
         token: String,
         session: SessionRecord,
     ): Result<String?>
+
+    suspend fun getMessages(): Result<RpcResponse>
 
     suspend fun renameSession(name: String): Result<String?>
 
@@ -50,8 +68,17 @@ class RpcSessionController(
     private val requestTimeoutMs: Long = DEFAULT_TIMEOUT_MS,
 ) : SessionController {
     private val mutex = Mutex()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val _rpcEvents = MutableSharedFlow<RpcIncomingMessage>(extraBufferCapacity = EVENT_BUFFER_CAPACITY)
+    private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
+
     private var activeConnection: PiRpcConnection? = null
     private var clientId: String = UUID.randomUUID().toString()
+    private var rpcEventsJob: Job? = null
+    private var connectionStateJob: Job? = null
+
+    override val rpcEvents: SharedFlow<RpcIncomingMessage> = _rpcEvents
+    override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     override suspend fun resume(
         hostProfile: HostProfile,
@@ -60,7 +87,7 @@ class RpcSessionController(
     ): Result<String?> {
         return mutex.withLock {
             runCatching {
-                activeConnection?.disconnect()
+                clearActiveConnection()
 
                 val nextConnection = connectionFactory()
 
@@ -96,7 +123,17 @@ class RpcSessionController(
                 }.getOrThrow()
 
                 activeConnection = nextConnection
+                observeConnection(nextConnection)
                 refreshCurrentSessionPath(nextConnection)
+            }
+        }
+    }
+
+    override suspend fun getMessages(): Result<RpcResponse> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                connection.requestMessages().requireSuccess("Failed to load messages")
             }
         }
     }
@@ -188,6 +225,36 @@ class RpcSessionController(
         }
     }
 
+    private suspend fun clearActiveConnection() {
+        rpcEventsJob?.cancel()
+        connectionStateJob?.cancel()
+        rpcEventsJob = null
+        connectionStateJob = null
+
+        activeConnection?.disconnect()
+        activeConnection = null
+        _connectionState.value = ConnectionState.DISCONNECTED
+    }
+
+    private fun observeConnection(connection: PiRpcConnection) {
+        rpcEventsJob?.cancel()
+        connectionStateJob?.cancel()
+
+        rpcEventsJob =
+            scope.launch {
+                connection.rpcEvents.collect { event ->
+                    _rpcEvents.emit(event)
+                }
+            }
+
+        connectionStateJob =
+            scope.launch {
+                connection.connectionState.collect { state ->
+                    _connectionState.value = state
+                }
+            }
+    }
+
     private fun ensureActiveConnection(): PiRpcConnection {
         return requireNotNull(activeConnection) {
             "No active session. Resume a session first."
@@ -207,6 +274,7 @@ class RpcSessionController(
         private const val EXPORT_HTML_COMMAND = "export_html"
         private const val GET_FORK_MESSAGES_COMMAND = "get_fork_messages"
         private const val FORK_COMMAND = "fork"
+        private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
     }
 }
@@ -246,7 +314,7 @@ private fun RpcResponse.requireSuccess(defaultError: String): RpcResponse {
 }
 
 private fun parseForkEntryIds(data: JsonObject?): List<String> {
-    val messages = data?.get("messages") as? JsonArray ?: data?.get("messages")?.jsonArray ?: return emptyList()
+    val messages = runCatching { data?.get("messages")?.jsonArray }.getOrNull() ?: JsonArray(emptyList())
 
     return messages.mapNotNull { messageElement ->
         val messageObject = messageElement.jsonObject
