@@ -15,6 +15,7 @@ import androidx.navigation.compose.rememberNavController
 import com.ayagmar.pimobile.ui.chat.ChatRoute
 import com.ayagmar.pimobile.ui.hosts.HostsRoute
 import com.ayagmar.pimobile.ui.sessions.SessionsRoute
+import com.ayagmar.pimobile.ui.settings.SettingsRoute
 
 private data class AppDestination(
     val route: String,
@@ -34,6 +35,10 @@ private val destinations =
         AppDestination(
             route = "chat",
             label = "Chat",
+        ),
+        AppDestination(
+            route = "settings",
+            label = "Settings",
         ),
     )
 
@@ -78,6 +83,9 @@ fun piMobileApp() {
             }
             composable(route = "chat") {
                 ChatRoute()
+            }
+            composable(route = "settings") {
+                SettingsRoute()
             }
         }
     }

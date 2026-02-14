@@ -15,6 +15,7 @@ import com.ayagmar.pimobile.corerpc.ExtensionUiResponseCommand
 import com.ayagmar.pimobile.corerpc.FollowUpCommand
 import com.ayagmar.pimobile.corerpc.ForkCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
+import com.ayagmar.pimobile.corerpc.NewSessionCommand
 import com.ayagmar.pimobile.corerpc.PromptCommand
 import com.ayagmar.pimobile.corerpc.RpcCommand
 import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
@@ -92,6 +93,8 @@ interface SessionController {
         confirmed: Boolean? = null,
         cancelled: Boolean? = null,
     ): Result<Unit>
+
+    suspend fun newSession(): Result<Unit>
 }
 
 data class ModelInfo(
@@ -386,6 +389,21 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun newSession(): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                sendAndAwaitResponse(
+                    connection = connection,
+                    requestTimeoutMs = requestTimeoutMs,
+                    command = NewSessionCommand(id = UUID.randomUUID().toString()),
+                    expectedCommand = NEW_SESSION_COMMAND,
+                ).requireSuccess("Failed to create new session")
+                Unit
+            }
+        }
+    }
+
     private suspend fun clearActiveConnection() {
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
@@ -452,6 +470,7 @@ class RpcSessionController(
         private const val FORK_COMMAND = "fork"
         private const val CYCLE_MODEL_COMMAND = "cycle_model"
         private const val CYCLE_THINKING_COMMAND = "cycle_thinking_level"
+        private const val NEW_SESSION_COMMAND = "new_session"
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
     }

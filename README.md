@@ -38,7 +38,7 @@ pnpm install
 pnpm start
 ```
 
-The bridge binds to your Tailscale IP on port 8080 by default. It spawns pi processes on demand per working directory.
+The bridge binds to `127.0.0.1:8787` by default. Change to your Tailscale IP in the config. It spawns pi processes on demand per working directory.
 
 ### 2. Phone Setup
 
@@ -52,8 +52,8 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 1. Add a host in the app:
    - Host: your laptop's Tailscale IP (100.x.x.x)
-   - Port: 8080 (or whatever the bridge uses)
-   - Token: set this in bridge/.env as AUTH_TOKEN
+   - Port: 8787 (or whatever the bridge uses)
+   - Token: set this in bridge/.env as `BRIDGE_AUTH_TOKEN`
 
 2. The app will fetch your sessions from `~/.pi/agent/sessions/`
 
@@ -94,8 +94,8 @@ App renders streaming text/tools
 ### Can't connect
 
 1. Check Tailscale is running on both devices
-2. Verify the bridge is running: `curl http://100.x.x.x:8080/health`
-3. Check the token matches exactly
+2. Verify the bridge is running: `curl http://100.x.x.x:8787/health`
+3. Check the token matches exactly (BRIDGE_AUTH_TOKEN)
 4. Try the laptop's Tailscale IP, not hostname
 
 ### Sessions don't appear
@@ -165,9 +165,11 @@ pnpm start 2>&1 | tee bridge.log
 Create `bridge/.env`:
 
 ```env
-PORT=8080
-AUTH_TOKEN=your-secret-token
-IDLE_TIMEOUT_MS=300000
+BRIDGE_HOST=0.0.0.0              # Use 0.0.0.0 to accept Tailscale connections
+BRIDGE_PORT=8787                 # Port to listen on
+BRIDGE_AUTH_TOKEN=your-secret    # Required authentication token
+BRIDGE_PROCESS_IDLE_TTL_MS=300000  # 5 minutes idle timeout
+BRIDGE_LOG_LEVEL=info            # debug, info, warn, error, silent
 ```
 
 ### App Build Variants

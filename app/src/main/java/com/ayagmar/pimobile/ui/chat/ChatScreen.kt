@@ -45,6 +45,7 @@ import com.ayagmar.pimobile.chat.ChatViewModel
 import com.ayagmar.pimobile.chat.ChatViewModelFactory
 import com.ayagmar.pimobile.chat.ExtensionNotification
 import com.ayagmar.pimobile.chat.ExtensionUiRequest
+import com.ayagmar.pimobile.chat.ExtensionWidget
 import com.ayagmar.pimobile.sessions.ModelInfo
 
 private data class ChatCallbacks(
@@ -126,12 +127,27 @@ private fun ChatScreenContent(
             callbacks = callbacks,
         )
 
+        // Extension widgets (above editor)
+        ExtensionWidgets(
+            widgets = state.extensionWidgets,
+            placement = "aboveEditor",
+        )
+
         Box(modifier = Modifier.weight(1f)) {
             ChatBody(
                 state = state,
                 callbacks = callbacks,
             )
         }
+
+        // Extension widgets (below editor)
+        ExtensionWidgets(
+            widgets = state.extensionWidgets,
+            placement = "belowEditor",
+        )
+
+        // Extension statuses
+        ExtensionStatuses(statuses = state.extensionStatuses)
 
         PromptControls(
             state = state,
@@ -145,14 +161,20 @@ private fun ChatHeader(
     state: ChatUiState,
     callbacks: ChatCallbacks,
 ) {
+    // Show extension title if set, otherwise "Chat"
+    val title = state.extensionTitle ?: "Chat"
     Text(
-        text = "Chat",
+        text = title,
         style = MaterialTheme.typography.headlineSmall,
     )
-    Text(
-        text = "Connection: ${state.connectionState.name.lowercase()}",
-        style = MaterialTheme.typography.bodyMedium,
-    )
+
+    // Only show connection status if no custom title
+    if (state.extensionTitle == null) {
+        Text(
+            text = "Connection: ${state.connectionState.name.lowercase()}",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
 
     ModelThinkingControls(
         currentModel = state.currentModel,
@@ -688,6 +710,56 @@ private fun ModelThinkingControls(
                 text = thinkingText,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExtensionWidgets(
+    widgets: Map<String, ExtensionWidget>,
+    placement: String,
+) {
+    val matchingWidgets = widgets.values.filter { it.placement == placement }
+
+    matchingWidgets.forEach { widget ->
+        Card(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(8.dp),
+            ) {
+                widget.lines.forEach { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExtensionStatuses(statuses: Map<String, String>) {
+    if (statuses.isEmpty()) return
+
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        statuses.values.forEach { status ->
+            Text(
+                text = status,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

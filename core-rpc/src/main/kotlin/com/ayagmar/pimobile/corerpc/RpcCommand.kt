@@ -116,6 +116,13 @@ data class ExtensionUiResponseCommand(
 ) : RpcCommand
 
 @Serializable
+data class NewSessionCommand(
+    override val id: String? = null,
+    override val type: String = "new_session",
+    val parentSession: String? = null,
+) : RpcCommand
+
+@Serializable
 data class ImagePayload(
     val type: String = "image",
     val data: String,
