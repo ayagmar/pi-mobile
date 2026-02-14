@@ -25,7 +25,8 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 5.2 Abort/steer/follow_up controls | DONE | d0545cf | ✅ ktlintCheck, detekt, test, bridge check | Added prompt controls (sendPrompt, abort, steer, followUp), streaming state tracking via AgentStart/End events, and UI with input field, abort button (red), steer/follow-up dialogs. |
 | 5.3 Model/thinking controls | DONE | cf3cfbb | ✅ ktlintCheck, detekt, test, bridge check | Added cycle_model and cycle_thinking_level commands with ModelInfo data class. UI shows current model/thinking level with cycle buttons. State survives reconnect via getState on load. |
 | 5.4 Extension UI protocol support | DONE | 3d6b9ce | ✅ ktlintCheck, detekt, test, bridge check | Implemented dialog methods (select, confirm, input, editor) with proper response handling. Added fire-and-forget support (notify, setStatus, setWidget, setTitle, set_editor_text). Notifications display as snackbars. |
-| 6.1 Backpressure + bounded buffers | TODO |  |  |  |
+| 6.1 Backpressure + bounded buffers | DONE | TBD | ✅ ktlintCheck, detekt, test | Added BoundedEventBuffer for RPC event backpressure, StreamingBufferManager for memory-efficient text streaming (50KB limit, tail truncation), BackpressureEventProcessor for event coalescing. |
+| 6.2 Instrumentation + perf baseline | TODO |  |  |  |
 | 6.2 Instrumentation + perf baseline | TODO |  |  |  |
 | 6.3 Baseline profile + release tuning | TODO |  |  |  |
 | 7.1 Optional extension scaffold | TODO |  |  |  |

@@ -97,3 +97,15 @@ data class AgentEndEvent(
     override val type: String,
     val messages: List<JsonObject>? = null,
 ) : RpcEvent
+
+@Serializable
+data class TurnStartEvent(
+    override val type: String,
+) : RpcEvent
+
+@Serializable
+data class TurnEndEvent(
+    override val type: String,
+    val message: JsonObject? = null,
+    val toolResults: List<JsonObject>? = null,
+) : RpcEvent
