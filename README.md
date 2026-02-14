@@ -188,6 +188,19 @@ Debug builds include logging and assertions. Release builds (if you make them) s
 - Session history loads once on resume, not incrementally
 - Image attachments not supported (text only)
 
+## Testing
+
+See [docs/testing.md](docs/testing.md) for emulator setup and testing procedures.
+
+Quick start:
+```bash
+# Start emulator, build, install
+./gradlew :app:installDebug
+
+# Watch logs
+adb logcat | grep -E "PiMobile|PerfMetrics"
+```
+
 ## License
 
 MIT
