@@ -29,8 +29,8 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 6.2 Instrumentation + perf baseline | DONE | 9232795 | ✅ ktlintCheck, detekt, test | Added PerformanceMetrics for startup/resume/TTFT timing, FrameMetrics for jank detection, macrobenchmark module with StartupBenchmark and BaselineProfileGenerator, docs/perf-baseline.md with metrics and targets. |
 | 6.3 Baseline profile + release tuning | SKIPPED | N/A | N/A | Not needed - baseline profiles only benefit Play Store distributed apps. Local builds don't use them. |
 | 7.1 Optional extension scaffold | SKIPPED | N/A | N/A | Not needed - all functionality implemented in app/bridge. No custom pi extensions required. |
-| 8.1 Setup + troubleshooting docs | DONE | TBD | ✅ README.md created | Human-readable setup guide with architecture, troubleshooting, and development info. |
-| 8.2 Final acceptance report | DONE | TBD | ✅ docs/final-acceptance.md | Comprehensive acceptance checklist with all criteria met. |
+| 8.1 Setup + troubleshooting docs | DONE | 50c7268 | ✅ README.md created | Human-readable setup guide with architecture, troubleshooting, and development info. |
+| 8.2 Final acceptance report | DONE | 50c7268 | ✅ docs/final-acceptance.md | Comprehensive acceptance checklist with all criteria met. |
 
 ## Per-task verification command set
 
