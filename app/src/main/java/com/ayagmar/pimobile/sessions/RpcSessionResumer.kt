@@ -11,6 +11,7 @@ import com.ayagmar.pimobile.corerpc.CompactCommand
 import com.ayagmar.pimobile.corerpc.CycleModelCommand
 import com.ayagmar.pimobile.corerpc.CycleThinkingLevelCommand
 import com.ayagmar.pimobile.corerpc.ExportHtmlCommand
+import com.ayagmar.pimobile.corerpc.ExtensionUiResponseCommand
 import com.ayagmar.pimobile.corerpc.FollowUpCommand
 import com.ayagmar.pimobile.corerpc.ForkCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
@@ -84,6 +85,13 @@ interface SessionController {
     suspend fun cycleModel(): Result<ModelInfo?>
 
     suspend fun cycleThinkingLevel(): Result<String?>
+
+    suspend fun sendExtensionUiResponse(
+        requestId: String,
+        value: String? = null,
+        confirmed: Boolean? = null,
+        cancelled: Boolean? = null,
+    ): Result<Unit>
 }
 
 data class ModelInfo(
@@ -353,6 +361,27 @@ class RpcSessionController(
                     ).requireSuccess("Failed to cycle thinking level")
 
                 response.data?.stringField("level")
+            }
+        }
+    }
+
+    override suspend fun sendExtensionUiResponse(
+        requestId: String,
+        value: String?,
+        confirmed: Boolean?,
+        cancelled: Boolean?,
+    ): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val command =
+                    ExtensionUiResponseCommand(
+                        id = requestId,
+                        value = value,
+                        confirmed = confirmed,
+                        cancelled = cancelled,
+                    )
+                connection.sendCommand(command)
             }
         }
     }

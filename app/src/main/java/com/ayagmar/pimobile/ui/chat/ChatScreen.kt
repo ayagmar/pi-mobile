@@ -1,10 +1,14 @@
+@file:Suppress("TooManyFunctions")
+
 package com.ayagmar.pimobile.ui.chat
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,6 +43,8 @@ import com.ayagmar.pimobile.chat.ChatTimelineItem
 import com.ayagmar.pimobile.chat.ChatUiState
 import com.ayagmar.pimobile.chat.ChatViewModel
 import com.ayagmar.pimobile.chat.ChatViewModelFactory
+import com.ayagmar.pimobile.chat.ExtensionNotification
+import com.ayagmar.pimobile.chat.ExtensionUiRequest
 import com.ayagmar.pimobile.sessions.ModelInfo
 
 private data class ChatCallbacks(
@@ -49,6 +56,9 @@ private data class ChatCallbacks(
     val onFollowUp: (String) -> Unit,
     val onCycleModel: () -> Unit,
     val onCycleThinking: () -> Unit,
+    val onSendExtensionUiResponse: (String, String?, Boolean?, Boolean) -> Unit,
+    val onDismissExtensionRequest: () -> Unit,
+    val onClearNotification: (Int) -> Unit,
 )
 
 @Composable
@@ -68,6 +78,9 @@ fun ChatRoute() {
                 onFollowUp = chatViewModel::followUp,
                 onCycleModel = chatViewModel::cycleModel,
                 onCycleThinking = chatViewModel::cycleThinkingLevel,
+                onSendExtensionUiResponse = chatViewModel::sendExtensionUiResponse,
+                onDismissExtensionRequest = chatViewModel::dismissExtensionRequest,
+                onClearNotification = chatViewModel::clearNotification,
             )
         }
 
@@ -82,51 +95,41 @@ private fun ChatScreen(
     state: ChatUiState,
     callbacks: ChatCallbacks,
 ) {
+    ChatScreenContent(
+        state = state,
+        callbacks = callbacks,
+    )
+
+    ExtensionUiDialogs(
+        request = state.activeExtensionRequest,
+        onSendResponse = callbacks.onSendExtensionUiResponse,
+        onDismiss = callbacks.onDismissExtensionRequest,
+    )
+
+    NotificationsDisplay(
+        notifications = state.notifications,
+        onClear = callbacks.onClearNotification,
+    )
+}
+
+@Composable
+private fun ChatScreenContent(
+    state: ChatUiState,
+    callbacks: ChatCallbacks,
+) {
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = "Chat",
-            style = MaterialTheme.typography.headlineSmall,
-        )
-        Text(
-            text = "Connection: ${state.connectionState.name.lowercase()}",
-            style = MaterialTheme.typography.bodyMedium,
+        ChatHeader(
+            state = state,
+            callbacks = callbacks,
         )
 
-        ModelThinkingControls(
-            currentModel = state.currentModel,
-            thinkingLevel = state.thinkingLevel,
-            onCycleModel = callbacks.onCycleModel,
-            onCycleThinking = callbacks.onCycleThinking,
-        )
-
-        state.errorMessage?.let { errorMessage ->
-            Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-
-        if (state.isLoading) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                CircularProgressIndicator()
-            }
-        } else if (state.timeline.isEmpty()) {
-            Text(
-                text = "No chat messages yet. Resume a session and send a prompt.",
-                style = MaterialTheme.typography.bodyLarge,
-            )
-        } else {
-            ChatTimeline(
-                timeline = state.timeline,
-                onToggleToolExpansion = callbacks.onToggleToolExpansion,
-                modifier = Modifier.weight(1f),
+        Box(modifier = Modifier.weight(1f)) {
+            ChatBody(
+                state = state,
+                callbacks = callbacks,
             )
         }
 
@@ -134,6 +137,260 @@ private fun ChatScreen(
             state = state,
             callbacks = callbacks,
         )
+    }
+}
+
+@Composable
+private fun ChatHeader(
+    state: ChatUiState,
+    callbacks: ChatCallbacks,
+) {
+    Text(
+        text = "Chat",
+        style = MaterialTheme.typography.headlineSmall,
+    )
+    Text(
+        text = "Connection: ${state.connectionState.name.lowercase()}",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+
+    ModelThinkingControls(
+        currentModel = state.currentModel,
+        thinkingLevel = state.thinkingLevel,
+        onCycleModel = callbacks.onCycleModel,
+        onCycleThinking = callbacks.onCycleThinking,
+    )
+
+    state.errorMessage?.let { errorMessage ->
+        Text(
+            text = errorMessage,
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
+private fun ChatBody(
+    state: ChatUiState,
+    callbacks: ChatCallbacks,
+) {
+    if (state.isLoading) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            CircularProgressIndicator()
+        }
+    } else if (state.timeline.isEmpty()) {
+        Text(
+            text = "No chat messages yet. Resume a session and send a prompt.",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+    } else {
+        ChatTimeline(
+            timeline = state.timeline,
+            onToggleToolExpansion = callbacks.onToggleToolExpansion,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun ExtensionUiDialogs(
+    request: ExtensionUiRequest?,
+    onSendResponse: (String, String?, Boolean?, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    when (request) {
+        is ExtensionUiRequest.Select -> {
+            SelectDialog(
+                request = request,
+                onConfirm = { value ->
+                    onSendResponse(request.requestId, value, null, false)
+                },
+                onDismiss = onDismiss,
+            )
+        }
+        is ExtensionUiRequest.Confirm -> {
+            ConfirmDialog(
+                request = request,
+                onConfirm = { confirmed ->
+                    onSendResponse(request.requestId, null, confirmed, false)
+                },
+                onDismiss = onDismiss,
+            )
+        }
+        is ExtensionUiRequest.Input -> {
+            InputDialog(
+                request = request,
+                onConfirm = { value ->
+                    onSendResponse(request.requestId, value, null, false)
+                },
+                onDismiss = onDismiss,
+            )
+        }
+        is ExtensionUiRequest.Editor -> {
+            EditorDialog(
+                request = request,
+                onConfirm = { value ->
+                    onSendResponse(request.requestId, value, null, false)
+                },
+                onDismiss = onDismiss,
+            )
+        }
+        null -> Unit
+    }
+}
+
+@Composable
+private fun SelectDialog(
+    request: ExtensionUiRequest.Select,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(request.title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                request.options.forEach { option ->
+                    TextButton(
+                        onClick = { onConfirm(option) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(option)
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun ConfirmDialog(
+    request: ExtensionUiRequest.Confirm,
+    onConfirm: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(request.title) },
+        text = { Text(request.message) },
+        confirmButton = {
+            Button(onClick = { onConfirm(true) }) {
+                Text("Yes")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onConfirm(false) }) {
+                Text("No")
+            }
+        },
+    )
+}
+
+@Composable
+private fun InputDialog(
+    request: ExtensionUiRequest.Input,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by rememberSaveable { mutableStateOf("") }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(request.title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = request.placeholder?.let { { Text(it) } },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(text) },
+                enabled = text.isNotBlank(),
+            ) {
+                Text("OK")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun EditorDialog(
+    request: ExtensionUiRequest.Editor,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by rememberSaveable { mutableStateOf(request.prefill) }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(request.title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
+                singleLine = false,
+                maxLines = 10,
+            )
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(text) }) {
+                Text("OK")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun NotificationsDisplay(
+    notifications: List<ExtensionNotification>,
+    onClear: (Int) -> Unit,
+) {
+    notifications.forEachIndexed { index, notification ->
+        val color =
+            when (notification.type) {
+                "error" -> MaterialTheme.colorScheme.error
+                "warning" -> MaterialTheme.colorScheme.tertiary
+                else -> MaterialTheme.colorScheme.primary
+            }
+
+        androidx.compose.material3.Snackbar(
+            action = {
+                TextButton(onClick = { onClear(index) }) {
+                    Text("Dismiss")
+                }
+            },
+            modifier = Modifier.padding(8.dp),
+        ) {
+            Text(
+                text = notification.message,
+                color = color,
+            )
+        }
     }
 }
 

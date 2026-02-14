@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.corerpc.AssistantTextAssembler
+import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionEndEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionStartEvent
@@ -160,9 +161,171 @@ class ChatViewModel(
                     is ToolExecutionStartEvent -> handleToolStart(event)
                     is ToolExecutionUpdateEvent -> handleToolUpdate(event)
                     is ToolExecutionEndEvent -> handleToolEnd(event)
+                    is ExtensionUiRequestEvent -> handleExtensionUiRequest(event)
                     else -> Unit
                 }
             }
+        }
+    }
+
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
+    private fun handleExtensionUiRequest(event: ExtensionUiRequestEvent) {
+        when (event.method) {
+            "select" -> showSelectDialog(event)
+            "confirm" -> showConfirmDialog(event)
+            "input" -> showInputDialog(event)
+            "editor" -> showEditorDialog(event)
+            "notify" -> addNotification(event)
+            "setStatus" -> updateExtensionStatus(event)
+            "setWidget" -> updateExtensionWidget(event)
+            "setTitle" -> updateExtensionTitle(event)
+            "set_editor_text" -> updateEditorText(event)
+            else -> Unit
+        }
+    }
+
+    private fun showSelectDialog(event: ExtensionUiRequestEvent) {
+        _uiState.update {
+            it.copy(
+                activeExtensionRequest =
+                    ExtensionUiRequest.Select(
+                        requestId = event.id,
+                        title = event.title ?: "Select",
+                        options = event.options ?: emptyList(),
+                    ),
+            )
+        }
+    }
+
+    private fun showConfirmDialog(event: ExtensionUiRequestEvent) {
+        _uiState.update {
+            it.copy(
+                activeExtensionRequest =
+                    ExtensionUiRequest.Confirm(
+                        requestId = event.id,
+                        title = event.title ?: "Confirm",
+                        message = event.message ?: "",
+                    ),
+            )
+        }
+    }
+
+    private fun showInputDialog(event: ExtensionUiRequestEvent) {
+        _uiState.update {
+            it.copy(
+                activeExtensionRequest =
+                    ExtensionUiRequest.Input(
+                        requestId = event.id,
+                        title = event.title ?: "Input",
+                        placeholder = event.placeholder,
+                    ),
+            )
+        }
+    }
+
+    private fun showEditorDialog(event: ExtensionUiRequestEvent) {
+        _uiState.update {
+            it.copy(
+                activeExtensionRequest =
+                    ExtensionUiRequest.Editor(
+                        requestId = event.id,
+                        title = event.title ?: "Editor",
+                        prefill = event.prefill ?: "",
+                    ),
+            )
+        }
+    }
+
+    private fun addNotification(event: ExtensionUiRequestEvent) {
+        _uiState.update {
+            it.copy(
+                notifications =
+                    it.notifications +
+                        ExtensionNotification(
+                            message = event.message ?: "",
+                            type = event.notifyType ?: "info",
+                        ),
+            )
+        }
+    }
+
+    private fun updateExtensionStatus(event: ExtensionUiRequestEvent) {
+        val key = event.statusKey ?: "default"
+        val text = event.statusText
+        _uiState.update { state ->
+            val newStatuses = state.extensionStatuses.toMutableMap()
+            if (text == null) {
+                newStatuses.remove(key)
+            } else {
+                newStatuses[key] = text
+            }
+            state.copy(extensionStatuses = newStatuses)
+        }
+    }
+
+    private fun updateExtensionWidget(event: ExtensionUiRequestEvent) {
+        val key = event.widgetKey ?: "default"
+        val lines = event.widgetLines
+        _uiState.update { state ->
+            val newWidgets = state.extensionWidgets.toMutableMap()
+            if (lines == null) {
+                newWidgets.remove(key)
+            } else {
+                newWidgets[key] =
+                    ExtensionWidget(
+                        lines = lines,
+                        placement = event.widgetPlacement ?: "aboveEditor",
+                    )
+            }
+            state.copy(extensionWidgets = newWidgets)
+        }
+    }
+
+    private fun updateExtensionTitle(event: ExtensionUiRequestEvent) {
+        event.title?.let { title ->
+            _uiState.update { it.copy(extensionTitle = title) }
+        }
+    }
+
+    private fun updateEditorText(event: ExtensionUiRequestEvent) {
+        event.text?.let { text ->
+            _uiState.update { it.copy(inputText = text) }
+        }
+    }
+
+    fun sendExtensionUiResponse(
+        requestId: String,
+        value: String? = null,
+        confirmed: Boolean? = null,
+        cancelled: Boolean = false,
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(activeExtensionRequest = null) }
+            sessionController.sendExtensionUiResponse(
+                requestId = requestId,
+                value = value,
+                confirmed = confirmed,
+                cancelled = cancelled,
+            )
+        }
+    }
+
+    fun dismissExtensionRequest() {
+        _uiState.value.activeExtensionRequest?.let { request ->
+            sendExtensionUiResponse(
+                requestId = request.requestId,
+                cancelled = true,
+            )
+        }
+    }
+
+    fun clearNotification(index: Int) {
+        _uiState.update { state ->
+            val newNotifications = state.notifications.toMutableList()
+            if (index in newNotifications.indices) {
+                newNotifications.removeAt(index)
+            }
+            state.copy(notifications = newNotifications)
         }
     }
 
@@ -292,7 +455,50 @@ data class ChatUiState(
     val errorMessage: String? = null,
     val currentModel: ModelInfo? = null,
     val thinkingLevel: String? = null,
+    val activeExtensionRequest: ExtensionUiRequest? = null,
+    val notifications: List<ExtensionNotification> = emptyList(),
+    val extensionStatuses: Map<String, String> = emptyMap(),
+    val extensionWidgets: Map<String, ExtensionWidget> = emptyMap(),
+    val extensionTitle: String? = null,
 )
+
+data class ExtensionNotification(
+    val message: String,
+    val type: String,
+)
+
+data class ExtensionWidget(
+    val lines: List<String>,
+    val placement: String,
+)
+
+sealed interface ExtensionUiRequest {
+    val requestId: String
+
+    data class Select(
+        override val requestId: String,
+        val title: String,
+        val options: List<String>,
+    ) : ExtensionUiRequest
+
+    data class Confirm(
+        override val requestId: String,
+        val title: String,
+        val message: String,
+    ) : ExtensionUiRequest
+
+    data class Input(
+        override val requestId: String,
+        val title: String,
+        val placeholder: String?,
+    ) : ExtensionUiRequest
+
+    data class Editor(
+        override val requestId: String,
+        val title: String,
+        val prefill: String,
+    ) : ExtensionUiRequest
+}
 
 sealed interface ChatTimelineItem {
     val id: String
