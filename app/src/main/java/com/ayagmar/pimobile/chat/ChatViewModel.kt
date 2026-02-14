@@ -11,6 +11,7 @@ import com.ayagmar.pimobile.corerpc.ToolExecutionEndEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionStartEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionUpdateEvent
 import com.ayagmar.pimobile.di.AppServices
+import com.ayagmar.pimobile.perf.PerformanceMetrics
 import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionController
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +51,9 @@ class ChatViewModel(
     fun sendPrompt() {
         val message = _uiState.value.inputText.trim()
         if (message.isEmpty()) return
+
+        // Record prompt send for TTFT tracking
+        PerformanceMetrics.recordPromptSend()
 
         viewModelScope.launch {
             _uiState.update { it.copy(inputText = "", errorMessage = null) }
@@ -348,6 +352,8 @@ class ChatViewModel(
                         isStreaming = isStreaming,
                     )
                 } else {
+                    // Record first messages rendered for resume timing
+                    PerformanceMetrics.recordFirstMessagesRendered()
                     state.copy(
                         isLoading = false,
                         errorMessage = null,
@@ -361,7 +367,15 @@ class ChatViewModel(
         }
     }
 
+    private var hasRecordedFirstToken = false
+
     private fun handleMessageUpdate(event: MessageUpdateEvent) {
+        // Record first token received for TTFT tracking
+        if (!hasRecordedFirstToken) {
+            PerformanceMetrics.recordFirstToken()
+            hasRecordedFirstToken = true
+        }
+
         val update = assembler.apply(event) ?: return
         val itemId = "assistant-stream-${update.messageKey}-${update.contentIndex}"
 

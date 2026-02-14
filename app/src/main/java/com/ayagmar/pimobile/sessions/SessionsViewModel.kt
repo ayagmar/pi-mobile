@@ -14,6 +14,7 @@ import com.ayagmar.pimobile.hosts.HostProfileStore
 import com.ayagmar.pimobile.hosts.HostTokenStore
 import com.ayagmar.pimobile.hosts.KeystoreHostTokenStore
 import com.ayagmar.pimobile.hosts.SharedPreferencesHostProfileStore
+import com.ayagmar.pimobile.perf.PerformanceMetrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -100,6 +101,9 @@ class SessionsViewModel(
         val hostId = _uiState.value.selectedHostId ?: return
         val selectedHost = _uiState.value.hosts.firstOrNull { host -> host.id == hostId } ?: return
 
+        // Record resume start for performance tracking
+        PerformanceMetrics.recordResumeStart()
+
         viewModelScope.launch(Dispatchers.IO) {
             val token = tokenStore.getToken(hostId)
             if (token.isNullOrBlank()) {
@@ -140,7 +144,9 @@ class SessionsViewModel(
                     current.copy(
                         isResuming = false,
                         statusMessage = null,
-                        errorMessage = resumeResult.exceptionOrNull()?.message ?: "Failed to resume session",
+                        errorMessage =
+                            resumeResult.exceptionOrNull()?.message
+                                ?: "Failed to resume session",
                     )
                 }
             }
@@ -289,6 +295,10 @@ class SessionsViewModel(
             viewModelScope.launch {
                 repository.observe(hostId, query = _uiState.value.query).collect { state ->
                     _uiState.update { current ->
+                        // Record sessions visible on first successful load
+                        if (current.isLoading && state.groups.isNotEmpty()) {
+                            PerformanceMetrics.recordSessionsVisible()
+                        }
                         current.copy(
                             isLoading = false,
                             groups = mapGroups(state.groups, collapsedCwds),
