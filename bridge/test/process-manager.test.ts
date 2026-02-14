@@ -5,7 +5,11 @@ import {
     createPiProcessManager,
     type ProcessManagerEvent,
 } from "../src/process-manager.js";
-import type { PiRpcForwarder, PiRpcForwarderMessage } from "../src/rpc-forwarder.js";
+import type {
+    PiRpcForwarder,
+    PiRpcForwarderLifecycleEvent,
+    PiRpcForwarderMessage,
+} from "../src/rpc-forwarder.js";
 
 describe("createPiProcessManager", () => {
     it("creates and routes to one RPC forwarder per cwd", () => {
@@ -27,6 +31,11 @@ describe("createPiProcessManager", () => {
         manager.sendRpc("/tmp/project-a", { id: "c", type: "get_messages" });
 
         expect(createdForwarders.size).toBe(2);
+        expect(manager.getStats()).toEqual({
+            activeProcessCount: 2,
+            lockedCwdCount: 0,
+            lockedSessionCount: 0,
+        });
         expect(createdForwarders.get("/tmp/project-a")?.sentPayloads).toEqual([
             { id: "a", type: "get_state" },
             { id: "c", type: "get_messages" },
@@ -119,11 +128,16 @@ class FakeRpcForwarder implements PiRpcForwarder {
     stopped = false;
 
     private messageHandler: (payload: PiRpcForwarderMessage) => void = () => {};
+    private lifecycleHandler: (event: PiRpcForwarderLifecycleEvent) => void = () => {};
 
     constructor() {}
 
     setMessageHandler(handler: (payload: PiRpcForwarderMessage) => void): void {
         this.messageHandler = handler;
+    }
+
+    setLifecycleHandler(handler: (event: PiRpcForwarderLifecycleEvent) => void): void {
+        this.lifecycleHandler = handler;
     }
 
     send(payload: Record<string, unknown>): void {

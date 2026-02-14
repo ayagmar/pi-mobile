@@ -265,11 +265,126 @@ describe("bridge websocket server", () => {
         wsA.close();
         wsB.close();
     });
+
+    it("supports reconnecting with the same clientId after disconnect", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        const { baseUrl, server } = await startBridgeServer({ processManager: fakeProcessManager });
+        bridgeServer = server;
+
+        const wsFirst = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const helloEnvelope = await waitForEnvelope(wsFirst, (envelope) => envelope.payload?.type === "bridge_hello");
+        const clientId = helloEnvelope.payload?.clientId;
+        if (typeof clientId !== "string") {
+            throw new Error("Expected clientId in bridge_hello payload");
+        }
+
+        const waitForInitialCwdSet = waitForEnvelope(wsFirst, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+        wsFirst.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_set_cwd",
+                    cwd: "/tmp/reconnect-project",
+                },
+            }),
+        );
+        await waitForInitialCwdSet;
+
+        const waitForInitialControl = waitForEnvelope(wsFirst, (envelope) => envelope.payload?.type === "bridge_control_acquired");
+        wsFirst.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                },
+            }),
+        );
+        await waitForInitialControl;
+
+        wsFirst.close();
+        await sleep(20);
+
+        const reconnectUrl = `${baseUrl}?clientId=${encodeURIComponent(clientId)}`;
+        const wsReconnected = await connectWebSocket(reconnectUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const helloAfterReconnect = await waitForEnvelope(
+            wsReconnected,
+            (envelope) => envelope.payload?.type === "bridge_hello",
+        );
+        expect(helloAfterReconnect.payload?.clientId).toBe(clientId);
+        expect(helloAfterReconnect.payload?.resumed).toBe(true);
+        expect(helloAfterReconnect.payload?.cwd).toBe("/tmp/reconnect-project");
+
+        const waitForRpcEnvelope = waitForEnvelope(
+            wsReconnected,
+            (envelope) => envelope.channel === "rpc" && envelope.payload?.id === "reconnect-1",
+        );
+        wsReconnected.send(
+            JSON.stringify({
+                channel: "rpc",
+                payload: {
+                    id: "reconnect-1",
+                    type: "get_state",
+                },
+            }),
+        );
+
+        const rpcEnvelope = await waitForRpcEnvelope;
+        expect(rpcEnvelope.payload?.type).toBe("response");
+        expect(fakeProcessManager.sentPayloads.at(-1)).toEqual({
+            cwd: "/tmp/reconnect-project",
+            payload: {
+                id: "reconnect-1",
+                type: "get_state",
+            },
+        });
+
+        wsReconnected.close();
+    });
+
+    it("exposes bridge health status with process and client stats", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        const { baseUrl, server, healthUrl } = await startBridgeServer({ processManager: fakeProcessManager });
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+        await waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_hello");
+
+        const health = await fetchJson(healthUrl);
+
+        expect(health.ok).toBe(true);
+        expect(typeof health.uptimeMs).toBe("number");
+
+        const processes = health.processes as Record<string, unknown>;
+        expect(processes).toEqual({
+            activeProcessCount: 0,
+            lockedCwdCount: 0,
+            lockedSessionCount: 0,
+        });
+
+        const clients = health.clients as Record<string, unknown>;
+        expect(clients.connected).toBe(1);
+
+        ws.close();
+    });
 });
 
 async function startBridgeServer(
     deps?: { processManager?: PiProcessManager; sessionIndexer?: SessionIndexer },
-): Promise<{ baseUrl: string; server: BridgeServer }> {
+): Promise<{ baseUrl: string; healthUrl: string; server: BridgeServer }> {
     const logger = createLogger("silent");
     const server = createBridgeServer(
         {
@@ -278,6 +393,7 @@ async function startBridgeServer(
             logLevel: "silent",
             authToken: "bridge-token",
             processIdleTtlMs: 300_000,
+            reconnectGraceMs: 100,
             sessionDirectory: "/tmp/pi-sessions",
         },
         logger,
@@ -288,13 +404,24 @@ async function startBridgeServer(
 
     return {
         baseUrl: `ws://127.0.0.1:${serverInfo.port}/ws`,
+        healthUrl: `http://127.0.0.1:${serverInfo.port}/health`,
         server,
     };
 }
 
+const envelopeBuffers = new WeakMap<WebSocket, EnvelopeLike[]>();
+
 async function connectWebSocket(url: string, options?: ClientOptions): Promise<WebSocket> {
     return await new Promise<WebSocket>((resolve, reject) => {
         const ws = new WebSocket(url, options);
+        const buffer: EnvelopeLike[] = [];
+
+        ws.on("message", (rawMessage: RawData) => {
+            const rawText = rawDataToString(rawMessage);
+            const parsed = tryParseEnvelope(rawText);
+            if (!parsed) return;
+            buffer.push(parsed);
+        });
 
         const timeoutHandle = setTimeout(() => {
             ws.terminate();
@@ -303,6 +430,7 @@ async function connectWebSocket(url: string, options?: ClientOptions): Promise<W
 
         ws.on("open", () => {
             clearTimeout(timeoutHandle);
+            envelopeBuffers.set(ws, buffer);
             resolve(ws);
         });
 
@@ -310,6 +438,17 @@ async function connectWebSocket(url: string, options?: ClientOptions): Promise<W
             clearTimeout(timeoutHandle);
             reject(error);
         });
+    });
+}
+
+async function fetchJson(url: string): Promise<Record<string, unknown>> {
+    const response = await fetch(url);
+    return (await response.json()) as Record<string, unknown>;
+}
+
+async function sleep(delayMs: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+        setTimeout(resolve, delayMs);
     });
 }
 
@@ -329,44 +468,32 @@ async function waitForEnvelope(
     ws: WebSocket,
     predicate: (envelope: EnvelopeLike) => boolean,
 ): Promise<EnvelopeLike> {
-    return await new Promise<EnvelopeLike>((resolve, reject) => {
-        const timeoutHandle = setTimeout(() => {
-            cleanup();
-            reject(new Error("Timed out waiting for websocket message"));
-        }, 1_000);
+    const buffer = envelopeBuffers.get(ws);
+    if (!buffer) {
+        throw new Error("Missing envelope buffer for websocket");
+    }
 
-        const onMessage = (rawMessage: RawData) => {
-            const rawText = rawDataToString(rawMessage);
+    let cursor = 0;
+    const timeoutAt = Date.now() + 1_000;
 
-            let parsed: unknown;
-            try {
-                parsed = JSON.parse(rawText);
-            } catch {
-                return;
+    while (Date.now() < timeoutAt) {
+        while (cursor < buffer.length) {
+            const envelope = buffer[cursor];
+            cursor += 1;
+
+            if (predicate(envelope)) {
+                return envelope;
             }
+        }
 
-            if (!isEnvelopeLike(parsed)) return;
+        if (ws.readyState === ws.CLOSED || ws.readyState === ws.CLOSING) {
+            throw new Error("Websocket closed while waiting for message");
+        }
 
-            if (predicate(parsed)) {
-                cleanup();
-                resolve(parsed);
-            }
-        };
+        await sleep(10);
+    }
 
-        const onError = (error: Error) => {
-            cleanup();
-            reject(error);
-        };
-
-        const cleanup = () => {
-            clearTimeout(timeoutHandle);
-            ws.off("message", onMessage);
-            ws.off("error", onError);
-        };
-
-        ws.on("message", onMessage);
-        ws.on("error", onError);
-    });
+    throw new Error("Timed out waiting for websocket message");
 }
 
 function rawDataToString(rawData: RawData): string {
@@ -381,6 +508,20 @@ function rawDataToString(rawData: RawData): string {
     }
 
     return rawData.toString("utf-8");
+}
+
+function tryParseEnvelope(rawText: string): EnvelopeLike | undefined {
+    let parsed: unknown;
+
+    try {
+        parsed = JSON.parse(rawText);
+    } catch {
+        return undefined;
+    }
+
+    if (!isEnvelopeLike(parsed)) return undefined;
+
+    return parsed;
 }
 
 function isEnvelopeLike(value: unknown): value is EnvelopeLike {
@@ -469,6 +610,14 @@ class FakeProcessManager implements PiProcessManager {
                 this.lockByCwd.delete(cwd);
             }
         }
+    }
+
+    getStats(): { activeProcessCount: number; lockedCwdCount: number; lockedSessionCount: number } {
+        return {
+            activeProcessCount: 0,
+            lockedCwdCount: this.lockByCwd.size,
+            lockedSessionCount: 0,
+        };
     }
 
     async evictIdleProcesses(): Promise<void> {

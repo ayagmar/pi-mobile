@@ -15,6 +15,7 @@ describe("parseBridgeConfig", () => {
             logLevel: "info",
             authToken: "test-token",
             processIdleTtlMs: 300_000,
+            reconnectGraceMs: 30_000,
             sessionDirectory: path.join(os.homedir(), ".pi", "agent", "sessions"),
         });
     });
@@ -26,6 +27,7 @@ describe("parseBridgeConfig", () => {
             BRIDGE_LOG_LEVEL: "debug",
             BRIDGE_AUTH_TOKEN: "my-token",
             BRIDGE_PROCESS_IDLE_TTL_MS: "90000",
+            BRIDGE_RECONNECT_GRACE_MS: "12000",
             BRIDGE_SESSION_DIR: "./tmp/custom-sessions",
         });
 
@@ -34,6 +36,7 @@ describe("parseBridgeConfig", () => {
         expect(config.logLevel).toBe("debug");
         expect(config.authToken).toBe("my-token");
         expect(config.processIdleTtlMs).toBe(90_000);
+        expect(config.reconnectGraceMs).toBe(12_000);
         expect(config.sessionDirectory).toBe(path.resolve("./tmp/custom-sessions"));
     });
 
@@ -51,5 +54,11 @@ describe("parseBridgeConfig", () => {
         expect(() =>
             parseBridgeConfig({ BRIDGE_AUTH_TOKEN: "test-token", BRIDGE_PROCESS_IDLE_TTL_MS: "900" }),
         ).toThrow("Invalid BRIDGE_PROCESS_IDLE_TTL_MS: 900");
+    });
+
+    it("fails when reconnect grace is invalid", () => {
+        expect(() =>
+            parseBridgeConfig({ BRIDGE_AUTH_TOKEN: "test-token", BRIDGE_RECONNECT_GRACE_MS: "-1" }),
+        ).toThrow("Invalid BRIDGE_RECONNECT_GRACE_MS: -1");
     });
 });

@@ -40,6 +40,43 @@ describe("createPiRpcForwarder", () => {
 
         await forwarder.stop();
     });
+
+    it("restarts crashed subprocess with backoff while active", async () => {
+        const fixtureScriptPath = path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            "fixtures/crashy-rpc-process.mjs",
+        );
+
+        const lifecycleEvents: Array<{ type: string }> = [];
+        const forwarder = createPiRpcForwarder(
+            {
+                command: process.execPath,
+                args: [fixtureScriptPath],
+                cwd: process.cwd(),
+                restartBaseDelayMs: 50,
+                maxRestartDelayMs: 100,
+            },
+            createLogger("silent"),
+        );
+
+        forwarder.setLifecycleHandler((event) => {
+            lifecycleEvents.push({ type: event.type });
+        });
+
+        forwarder.send({
+            id: "trigger",
+            type: "get_state",
+        });
+
+        await waitForCondition(() => lifecycleEvents.filter((event) => event.type === "start").length >= 2);
+
+        await forwarder.stop();
+
+        const startCount = lifecycleEvents.filter((event) => event.type === "start").length;
+        const exitCount = lifecycleEvents.filter((event) => event.type === "exit").length;
+        expect(startCount).toBeGreaterThanOrEqual(2);
+        expect(exitCount).toBeGreaterThanOrEqual(1);
+    });
 });
 
 async function waitForMessage(messages: Record<string, unknown>[]): Promise<Record<string, unknown>> {
@@ -54,6 +91,20 @@ async function waitForMessage(messages: Record<string, unknown>[]): Promise<Reco
     }
 
     throw new Error("Timed out waiting for forwarded RPC message");
+}
+
+async function waitForCondition(predicate: () => boolean): Promise<void> {
+    const timeoutAt = Date.now() + 2_000;
+
+    while (Date.now() < timeoutAt) {
+        if (predicate()) {
+            return;
+        }
+
+        await sleep(25);
+    }
+
+    throw new Error("Timed out waiting for condition");
 }
 
 async function sleep(durationMs: number): Promise<void> {

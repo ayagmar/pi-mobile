@@ -18,6 +18,12 @@ export interface AcquireControlResult {
     reason?: string;
 }
 
+export interface ProcessManagerStats {
+    activeProcessCount: number;
+    lockedCwdCount: number;
+    lockedSessionCount: number;
+}
+
 export interface PiProcessManager {
     setMessageHandler(handler: (event: ProcessManagerEvent) => void): void;
     getOrStart(cwd: string): PiRpcForwarder;
@@ -26,6 +32,7 @@ export interface PiProcessManager {
     hasControl(clientId: string, cwd: string, sessionPath?: string): boolean;
     releaseControl(clientId: string, cwd: string, sessionPath?: string): void;
     releaseClient(clientId: string): void;
+    getStats(): ProcessManagerStats;
     evictIdleProcesses(): Promise<void>;
     stop(): Promise<void>;
 }
@@ -78,6 +85,9 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
         forwarder.setMessageHandler((payload) => {
             entry.lastUsedAt = now();
             messageHandler({ cwd, payload });
+        });
+        forwarder.setLifecycleHandler((event) => {
+            options.logger.info({ cwd, event }, "RPC forwarder lifecycle event");
         });
 
         entries.set(cwd, entry);
@@ -172,6 +182,13 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
                     lockBySession.delete(sessionPath);
                 }
             }
+        },
+        getStats(): ProcessManagerStats {
+            return {
+                activeProcessCount: entries.size,
+                lockedCwdCount: lockByCwd.size,
+                lockedSessionCount: lockBySession.size,
+            };
         },
         async evictIdleProcesses(): Promise<void> {
             await evictIdleProcessesInternal();

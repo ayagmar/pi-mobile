@@ -7,6 +7,7 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
 const DEFAULT_LOG_LEVEL: LevelWithSilent = "info";
 const DEFAULT_PROCESS_IDLE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_RECONNECT_GRACE_MS = 30 * 1000;
 const DEFAULT_SESSION_DIRECTORY = path.join(os.homedir(), ".pi", "agent", "sessions");
 
 export interface BridgeConfig {
@@ -15,6 +16,7 @@ export interface BridgeConfig {
     logLevel: LevelWithSilent;
     authToken: string;
     processIdleTtlMs: number;
+    reconnectGraceMs: number;
     sessionDirectory: string;
 }
 
@@ -24,6 +26,7 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
     const logLevel = parseLogLevel(env.BRIDGE_LOG_LEVEL);
     const authToken = parseAuthToken(env.BRIDGE_AUTH_TOKEN);
     const processIdleTtlMs = parseProcessIdleTtlMs(env.BRIDGE_PROCESS_IDLE_TTL_MS);
+    const reconnectGraceMs = parseReconnectGraceMs(env.BRIDGE_RECONNECT_GRACE_MS);
     const sessionDirectory = parseSessionDirectory(env.BRIDGE_SESSION_DIR);
 
     return {
@@ -32,6 +35,7 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
         logLevel,
         authToken,
         processIdleTtlMs,
+        reconnectGraceMs,
         sessionDirectory,
     };
 }
@@ -87,6 +91,17 @@ function parseProcessIdleTtlMs(ttlRaw: string | undefined): number {
     }
 
     return ttlMs;
+}
+
+function parseReconnectGraceMs(graceRaw: string | undefined): number {
+    if (!graceRaw) return DEFAULT_RECONNECT_GRACE_MS;
+
+    const graceMs = Number.parseInt(graceRaw, 10);
+    if (Number.isNaN(graceMs) || graceMs < 0) {
+        throw new Error(`Invalid BRIDGE_RECONNECT_GRACE_MS: ${graceRaw}`);
+    }
+
+    return graceMs;
 }
 
 function parseSessionDirectory(sessionDirectoryRaw: string | undefined): string {

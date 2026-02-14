@@ -37,21 +37,17 @@ interface ClientConnectionContext {
     cwd?: string;
 }
 
+interface DisconnectedClientState {
+    context: ClientConnectionContext;
+    timer: NodeJS.Timeout;
+}
+
 export function createBridgeServer(
     config: BridgeConfig,
     logger: Logger,
     dependencies: BridgeServerDependencies = {},
 ): BridgeServer {
-    const server = http.createServer((request, response) => {
-        if (request.url === "/health") {
-            response.writeHead(200, { "content-type": "application/json" });
-            response.end(JSON.stringify({ ok: true }));
-            return;
-        }
-
-        response.writeHead(404, { "content-type": "application/json" });
-        response.end(JSON.stringify({ error: "Not Found" }));
-    });
+    const startedAt = Date.now();
 
     const wsServer = new WebSocketServer({ noServer: true });
     const processManager = dependencies.processManager ??
@@ -76,6 +72,29 @@ export function createBridgeServer(
         });
 
     const clientContexts = new Map<WebSocket, ClientConnectionContext>();
+    const disconnectedClients = new Map<string, DisconnectedClientState>();
+
+    const server = http.createServer((request, response) => {
+        if (request.url === "/health") {
+            const processStats = processManager.getStats();
+            response.writeHead(200, { "content-type": "application/json" });
+            response.end(
+                JSON.stringify({
+                    ok: true,
+                    uptimeMs: Date.now() - startedAt,
+                    processes: processStats,
+                    clients: {
+                        connected: clientContexts.size,
+                        reconnectable: disconnectedClients.size,
+                    },
+                }),
+            );
+            return;
+        }
+
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "Not Found" }));
+    });
 
     processManager.setMessageHandler((event) => {
         const rpcEnvelope = JSON.stringify(createRpcEnvelope(event.payload));
@@ -115,14 +134,16 @@ export function createBridgeServer(
     });
 
     wsServer.on("connection", (client: WebSocket, request: http.IncomingMessage) => {
-        const context: ClientConnectionContext = {
-            clientId: randomUUID(),
-        };
-        clientContexts.set(client, context);
+        const requestUrl = parseRequestUrl(request);
+        const requestedClientId = sanitizeClientId(requestUrl?.searchParams.get("clientId") ?? undefined);
+        const restored = restoreOrCreateContext(requestedClientId, disconnectedClients, clientContexts);
+
+        clientContexts.set(client, restored.context);
 
         logger.info(
             {
-                clientId: context.clientId,
+                clientId: restored.context.clientId,
+                resumed: restored.resumed,
                 remoteAddress: request.socket.remoteAddress,
             },
             "WebSocket client connected",
@@ -133,19 +154,29 @@ export function createBridgeServer(
                 createBridgeEnvelope({
                     type: "bridge_hello",
                     message: "Bridge skeleton is running",
+                    clientId: restored.context.clientId,
+                    resumed: restored.resumed,
+                    cwd: restored.context.cwd ?? null,
+                    reconnectGraceMs: config.reconnectGraceMs,
                 }),
             ),
         );
 
         client.on("message", (data: RawData) => {
-            void handleClientMessage(client, data, logger, processManager, sessionIndexer, context);
+            void handleClientMessage(client, data, logger, processManager, sessionIndexer, restored.context);
         });
 
         client.on("close", () => {
-            processManager.releaseClient(context.clientId);
             clientContexts.delete(client);
+            scheduleDisconnectedClientRelease(
+                restored.context,
+                config.reconnectGraceMs,
+                disconnectedClients,
+                processManager,
+                logger,
+            );
 
-            logger.info({ clientId: context.clientId }, "WebSocket client disconnected");
+            logger.info({ clientId: restored.context.clientId }, "WebSocket client disconnected");
         });
     });
 
@@ -179,6 +210,11 @@ export function createBridgeServer(
             wsServer.clients.forEach((client: WebSocket) => {
                 client.close(1001, "Server shutting down");
             });
+
+            for (const disconnectedState of disconnectedClients.values()) {
+                clearTimeout(disconnectedState.timer);
+            }
+            disconnectedClients.clear();
 
             await processManager.stop();
 
@@ -239,7 +275,7 @@ async function handleClientMessage(
     const envelope = parsedEnvelope.envelope;
 
     if (envelope.channel === "bridge") {
-        await handleBridgeControlMessage(client, context, envelope.payload, processManager, sessionIndexer);
+        await handleBridgeControlMessage(client, context, envelope.payload, processManager, sessionIndexer, logger);
         return;
     }
 
@@ -252,6 +288,7 @@ async function handleBridgeControlMessage(
     payload: Record<string, unknown>,
     processManager: PiProcessManager,
     sessionIndexer: SessionIndexer,
+    logger: Logger,
 ): Promise<void> {
     const messageType = payload.type;
 
@@ -278,7 +315,8 @@ async function handleBridgeControlMessage(
                     }),
                 ),
             );
-        } catch {
+        } catch (error: unknown) {
+            logger.error({ error }, "Failed to list sessions");
             client.send(
                 JSON.stringify(
                     createBridgeErrorEnvelope(
@@ -457,6 +495,68 @@ function handleRpcEnvelope(
     }
 }
 
+function restoreOrCreateContext(
+    requestedClientId: string | undefined,
+    disconnectedClients: Map<string, DisconnectedClientState>,
+    activeContexts: Map<WebSocket, ClientConnectionContext>,
+): { context: ClientConnectionContext; resumed: boolean } {
+    if (requestedClientId) {
+        const activeClientIds = new Set(Array.from(activeContexts.values()).map((context) => context.clientId));
+        if (!activeClientIds.has(requestedClientId)) {
+            const disconnected = disconnectedClients.get(requestedClientId);
+            if (disconnected) {
+                clearTimeout(disconnected.timer);
+                disconnectedClients.delete(requestedClientId);
+
+                return {
+                    context: disconnected.context,
+                    resumed: true,
+                };
+            }
+
+            return {
+                context: { clientId: requestedClientId },
+                resumed: false,
+            };
+        }
+    }
+
+    return {
+        context: { clientId: randomUUID() },
+        resumed: false,
+    };
+}
+
+function scheduleDisconnectedClientRelease(
+    context: ClientConnectionContext,
+    reconnectGraceMs: number,
+    disconnectedClients: Map<string, DisconnectedClientState>,
+    processManager: PiProcessManager,
+    logger: Logger,
+): void {
+    if (reconnectGraceMs === 0) {
+        processManager.releaseClient(context.clientId);
+        return;
+    }
+
+    const existing = disconnectedClients.get(context.clientId);
+    if (existing) {
+        clearTimeout(existing.timer);
+    }
+
+    const timer = setTimeout(() => {
+        processManager.releaseClient(context.clientId);
+        disconnectedClients.delete(context.clientId);
+
+        logger.info({ clientId: context.clientId }, "Released client locks after reconnect grace period");
+    }, reconnectGraceMs);
+
+    disconnectedClients.set(context.clientId, {
+        context,
+        timer,
+    });
+}
+
 function getRequestedCwd(payload: Record<string, unknown>, context: ClientConnectionContext): string | undefined {
     if (typeof payload.cwd === "string" && payload.cwd.trim().length > 0) {
         return payload.cwd;
@@ -512,4 +612,14 @@ function getHeaderToken(request: http.IncomingMessage): string | undefined {
     if (typeof tokenHeader === "string") return tokenHeader;
 
     return tokenHeader[0];
+}
+
+function sanitizeClientId(clientIdRaw: string | undefined): string | undefined {
+    if (!clientIdRaw) return undefined;
+
+    const trimmedClientId = clientIdRaw.trim();
+    if (!trimmedClientId) return undefined;
+    if (trimmedClientId.length > 128) return undefined;
+
+    return trimmedClientId;
 }
