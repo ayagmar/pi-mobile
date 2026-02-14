@@ -30,7 +30,7 @@ import kotlin.math.min
 class WebSocketTransport(
     private val client: OkHttpClient = OkHttpClient(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-) {
+) : SocketTransport {
     private val lifecycleMutex = Mutex()
     private val outboundQueue = Channel<String>(Channel.UNLIMITED)
     private val inbound =
@@ -45,10 +45,10 @@ class WebSocketTransport(
     private var target: WebSocketTarget? = null
     private var explicitDisconnect = false
 
-    val inboundMessages: Flow<String> = inbound.asSharedFlow()
-    val connectionState = state.asStateFlow()
+    override val inboundMessages: Flow<String> = inbound.asSharedFlow()
+    override val connectionState = state.asStateFlow()
 
-    suspend fun connect(target: WebSocketTarget) {
+    override suspend fun connect(target: WebSocketTarget) {
         lifecycleMutex.withLock {
             this.target = target
             explicitDisconnect = false
@@ -65,7 +65,7 @@ class WebSocketTransport(
         }
     }
 
-    suspend fun reconnect() {
+    override suspend fun reconnect() {
         lifecycleMutex.withLock {
             if (target == null) {
                 return
@@ -83,7 +83,7 @@ class WebSocketTransport(
         }
     }
 
-    suspend fun disconnect() {
+    override suspend fun disconnect() {
         val jobToCancel: Job?
         lifecycleMutex.withLock {
             explicitDisconnect = true
@@ -100,7 +100,7 @@ class WebSocketTransport(
         state.value = ConnectionState.DISCONNECTED
     }
 
-    suspend fun send(message: String) {
+    override suspend fun send(message: String) {
         outboundQueue.send(message)
     }
 
