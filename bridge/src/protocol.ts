@@ -66,6 +66,13 @@ export function createBridgeEnvelope(payload: Record<string, unknown>): BridgeEn
     };
 }
 
+export function createRpcEnvelope(payload: Record<string, unknown>): BridgeEnvelope {
+    return {
+        channel: "rpc",
+        payload,
+    };
+}
+
 export function createBridgeErrorEnvelope(code: string, message: string): BridgeEnvelope {
     return createBridgeEnvelope({
         type: "bridge_error",

@@ -1,29 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, type ClientOptions, type RawData } from "ws";
 
-import type { BridgeServer } from "../src/server.js";
 import { createLogger } from "../src/logger.js";
+import type { PiRpcForwarder, PiRpcForwarderMessage } from "../src/rpc-forwarder.js";
+import type { BridgeServer } from "../src/server.js";
 import { createBridgeServer } from "../src/server.js";
 
 describe("bridge websocket server", () => {
     let bridgeServer: BridgeServer | undefined;
-    let baseUrl = "";
-
-    beforeEach(async () => {
-        const logger = createLogger("silent");
-        bridgeServer = createBridgeServer(
-            {
-                host: "127.0.0.1",
-                port: 0,
-                logLevel: "silent",
-                authToken: "bridge-token",
-            },
-            logger,
-        );
-
-        const serverInfo = await bridgeServer.start();
-        baseUrl = `ws://127.0.0.1:${serverInfo.port}/ws`;
-    });
 
     afterEach(async () => {
         if (bridgeServer) {
@@ -33,6 +17,9 @@ describe("bridge websocket server", () => {
     });
 
     it("rejects websocket connections without a valid token", async () => {
+        const { baseUrl, server } = await startBridgeServer();
+        bridgeServer = server;
+
         const statusCode = await new Promise<number>((resolve, reject) => {
             const ws = new WebSocket(baseUrl);
 
@@ -60,7 +47,10 @@ describe("bridge websocket server", () => {
         expect(statusCode).toBe(401);
     });
 
-    it("accepts valid auth and returns error envelope for malformed payload", async () => {
+    it("returns bridge_error for malformed envelope", async () => {
+        const { baseUrl, server } = await startBridgeServer();
+        bridgeServer = server;
+
         const ws = await connectWebSocket(baseUrl, {
             headers: {
                 authorization: "Bearer bridge-token",
@@ -70,19 +60,75 @@ describe("bridge websocket server", () => {
         ws.send("{ malformed-json");
 
         const errorEnvelope = await waitForEnvelope(ws, (envelope) => {
-            return envelope?.payload?.type === "bridge_error" && envelope?.payload?.code === "malformed_envelope";
+            return envelope.payload?.type === "bridge_error" && envelope.payload.code === "malformed_envelope";
         });
 
         expect(errorEnvelope.channel).toBe("bridge");
-        if (!errorEnvelope.payload) {
-            throw new Error("Expected payload in error envelope");
-        }
-        expect(errorEnvelope.payload.type).toBe("bridge_error");
-        expect(errorEnvelope.payload.code).toBe("malformed_envelope");
+        expect(errorEnvelope.payload?.type).toBe("bridge_error");
+        expect(errorEnvelope.payload?.code).toBe("malformed_envelope");
+
+        ws.close();
+    });
+
+    it("forwards rpc payloads to the rpc subprocess channel", async () => {
+        const fakeRpcForwarder = new FakeRpcForwarder();
+        const { baseUrl, server } = await startBridgeServer({ rpcForwarder: fakeRpcForwarder });
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        ws.send(
+            JSON.stringify({
+                channel: "rpc",
+                payload: {
+                    id: "req-1",
+                    type: "get_state",
+                },
+            }),
+        );
+
+        const rpcEnvelope = await waitForEnvelope(ws, (envelope) => {
+            return envelope.channel === "rpc" && envelope.payload?.id === "req-1";
+        });
+
+        expect(fakeRpcForwarder.sentPayloads).toEqual([
+            {
+                id: "req-1",
+                type: "get_state",
+            },
+        ]);
+        expect(rpcEnvelope.channel).toBe("rpc");
+        expect(rpcEnvelope.payload?.type).toBe("response");
+        expect(rpcEnvelope.payload?.command).toBe("get_state");
 
         ws.close();
     });
 });
+
+async function startBridgeServer(deps?: { rpcForwarder?: PiRpcForwarder }): Promise<{ baseUrl: string; server: BridgeServer }> {
+    const logger = createLogger("silent");
+    const server = createBridgeServer(
+        {
+            host: "127.0.0.1",
+            port: 0,
+            logLevel: "silent",
+            authToken: "bridge-token",
+        },
+        logger,
+        deps,
+    );
+
+    const serverInfo = await server.start();
+
+    return {
+        baseUrl: `ws://127.0.0.1:${serverInfo.port}/ws`,
+        server,
+    };
+}
 
 async function connectWebSocket(url: string, options?: ClientOptions): Promise<WebSocket> {
     return await new Promise<WebSocket>((resolve, reject) => {
@@ -108,8 +154,11 @@ async function connectWebSocket(url: string, options?: ClientOptions): Promise<W
 interface EnvelopeLike {
     channel?: string;
     payload?: {
+        [key: string]: unknown;
         type?: string;
         code?: string;
+        id?: string;
+        command?: string;
     };
 }
 
@@ -183,4 +232,31 @@ function isEnvelopeLike(value: unknown): value is EnvelopeLike {
     if (typeof envelope.payload !== "object" || envelope.payload === null) return false;
 
     return true;
+}
+
+class FakeRpcForwarder implements PiRpcForwarder {
+    sentPayloads: Record<string, unknown>[] = [];
+    private messageHandler: (payload: PiRpcForwarderMessage) => void = () => {};
+
+    setMessageHandler(handler: (payload: PiRpcForwarderMessage) => void): void {
+        this.messageHandler = handler;
+    }
+
+    send(payload: Record<string, unknown>): void {
+        this.sentPayloads.push(payload);
+
+        this.messageHandler({
+            id: payload.id,
+            type: "response",
+            command: payload.type,
+            success: true,
+            data: {
+                forwarded: true,
+            },
+        });
+    }
+
+    async stop(): Promise<void> {
+        return;
+    }
 }

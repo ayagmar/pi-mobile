@@ -1,10 +1,20 @@
 import http from "node:http";
 
 import type { Logger } from "pino";
-import { WebSocketServer, type RawData, type WebSocket } from "ws";
+import { WebSocket as WsWebSocket, WebSocketServer, type RawData, type WebSocket } from "ws";
 
 import type { BridgeConfig } from "./config.js";
-import { createBridgeEnvelope, createBridgeErrorEnvelope, parseBridgeEnvelope } from "./protocol.js";
+import {
+    createBridgeEnvelope,
+    createBridgeErrorEnvelope,
+    createRpcEnvelope,
+    parseBridgeEnvelope,
+} from "./protocol.js";
+import {
+    createPiRpcForwarder,
+    type PiRpcForwarder,
+    type PiRpcForwarderMessage,
+} from "./rpc-forwarder.js";
 
 export interface BridgeServerStartInfo {
     host: string;
@@ -16,7 +26,15 @@ export interface BridgeServer {
     stop(): Promise<void>;
 }
 
-export function createBridgeServer(config: BridgeConfig, logger: Logger): BridgeServer {
+interface BridgeServerDependencies {
+    rpcForwarder?: PiRpcForwarder;
+}
+
+export function createBridgeServer(
+    config: BridgeConfig,
+    logger: Logger,
+    dependencies: BridgeServerDependencies = {},
+): BridgeServer {
     const server = http.createServer((request, response) => {
         if (request.url === "/health") {
             response.writeHead(200, { "content-type": "application/json" });
@@ -29,6 +47,25 @@ export function createBridgeServer(config: BridgeConfig, logger: Logger): Bridge
     });
 
     const wsServer = new WebSocketServer({ noServer: true });
+    const rpcForwarder = dependencies.rpcForwarder ??
+        createPiRpcForwarder(
+            {
+                command: "pi",
+                args: ["--mode", "rpc"],
+                cwd: process.cwd(),
+            },
+            logger.child({ component: "rpc-forwarder" }),
+        );
+
+    rpcForwarder.setMessageHandler((payload: PiRpcForwarderMessage) => {
+        const rpcEnvelope = JSON.stringify(createRpcEnvelope(payload));
+
+        wsServer.clients.forEach((client) => {
+            if (client.readyState === WsWebSocket.OPEN) {
+                client.send(rpcEnvelope);
+            }
+        });
+    });
 
     server.on("upgrade", (request, socket, head) => {
         const requestUrl = parseRequestUrl(request);
@@ -74,7 +111,7 @@ export function createBridgeServer(config: BridgeConfig, logger: Logger): Bridge
         );
 
         client.on("message", (data: RawData) => {
-            handleClientMessage(client, data, logger);
+            handleClientMessage(client, data, logger, rpcForwarder);
         });
 
         client.on("close", () => {
@@ -113,6 +150,8 @@ export function createBridgeServer(config: BridgeConfig, logger: Logger): Bridge
                 client.close(1001, "Server shutting down");
             });
 
+            await rpcForwarder.stop();
+
             await new Promise<void>((resolve, reject) => {
                 wsServer.close((error?: Error) => {
                     if (error) {
@@ -136,7 +175,12 @@ export function createBridgeServer(config: BridgeConfig, logger: Logger): Bridge
     };
 }
 
-function handleClientMessage(client: WebSocket, data: RawData, logger: Logger): void {
+function handleClientMessage(
+    client: WebSocket,
+    data: RawData,
+    logger: Logger,
+    rpcForwarder: PiRpcForwarder,
+): void {
     const dataAsString = asUtf8String(data);
     const parsedEnvelope = parseBridgeEnvelope(dataAsString);
 
@@ -186,14 +230,31 @@ function handleClientMessage(client: WebSocket, data: RawData, logger: Logger): 
         return;
     }
 
-    client.send(
-        JSON.stringify(
-            createBridgeErrorEnvelope(
-                "rpc_not_ready",
-                "RPC forwarding is not implemented yet",
+    if (typeof envelope.payload.type !== "string") {
+        client.send(
+            JSON.stringify(
+                createBridgeErrorEnvelope(
+                    "invalid_rpc_payload",
+                    "RPC payload must contain a string type field",
+                ),
             ),
-        ),
-    );
+        );
+        return;
+    }
+
+    try {
+        rpcForwarder.send(envelope.payload);
+    } catch (error: unknown) {
+        logger.error({ error }, "Failed to forward RPC payload");
+        client.send(
+            JSON.stringify(
+                createBridgeErrorEnvelope(
+                    "rpc_forward_failed",
+                    "Failed to forward RPC payload",
+                ),
+            ),
+        );
+    }
 }
 
 function asUtf8String(data: RawData): string {
