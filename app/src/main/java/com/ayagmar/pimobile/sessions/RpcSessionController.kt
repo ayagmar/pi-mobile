@@ -52,59 +52,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
 
 @Suppress("TooManyFunctions")
-interface SessionController {
-    val rpcEvents: SharedFlow<RpcIncomingMessage>
-    val connectionState: StateFlow<ConnectionState>
-    val isStreaming: StateFlow<Boolean>
-
-    suspend fun resume(
-        hostProfile: HostProfile,
-        token: String,
-        session: SessionRecord,
-    ): Result<String?>
-
-    suspend fun getMessages(): Result<RpcResponse>
-
-    suspend fun getState(): Result<RpcResponse>
-
-    suspend fun sendPrompt(message: String): Result<Unit>
-
-    suspend fun abort(): Result<Unit>
-
-    suspend fun steer(message: String): Result<Unit>
-
-    suspend fun followUp(message: String): Result<Unit>
-
-    suspend fun renameSession(name: String): Result<String?>
-
-    suspend fun compactSession(): Result<String?>
-
-    suspend fun exportSession(): Result<String>
-
-    suspend fun forkSessionFromLatestMessage(): Result<String?>
-
-    suspend fun cycleModel(): Result<ModelInfo?>
-
-    suspend fun cycleThinkingLevel(): Result<String?>
-
-    suspend fun sendExtensionUiResponse(
-        requestId: String,
-        value: String? = null,
-        confirmed: Boolean? = null,
-        cancelled: Boolean? = null,
-    ): Result<Unit>
-
-    suspend fun newSession(): Result<Unit>
-}
-
-data class ModelInfo(
-    val id: String,
-    val name: String,
-    val provider: String,
-    val thinkingLevel: String,
-)
-
-@Suppress("TooManyFunctions")
 class RpcSessionController(
     private val connectionFactory: () -> PiRpcConnection = { PiRpcConnection() },
     private val connectTimeoutMs: Long = DEFAULT_TIMEOUT_MS,
@@ -258,26 +205,59 @@ class RpcSessionController(
                     parseForkEntryIds(forkMessagesResponse.data).lastOrNull()
                         ?: error("No user messages available for fork")
 
-                val forkResponse =
+                forkWithEntryId(connection, latestEntryId)
+            }
+        }
+    }
+
+    override suspend fun forkSessionFromEntryId(entryId: String): Result<String?> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                forkWithEntryId(connection, entryId)
+            }
+        }
+    }
+
+    override suspend fun getForkMessages(): Result<List<ForkableMessage>> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val response =
                     sendAndAwaitResponse(
                         connection = connection,
                         requestTimeoutMs = requestTimeoutMs,
-                        command =
-                            ForkCommand(
-                                id = UUID.randomUUID().toString(),
-                                entryId = latestEntryId,
-                            ),
-                        expectedCommand = FORK_COMMAND,
-                    ).requireSuccess("Failed to fork session")
+                        command = GetForkMessagesCommand(id = UUID.randomUUID().toString()),
+                        expectedCommand = GET_FORK_MESSAGES_COMMAND,
+                    ).requireSuccess("Failed to load fork messages")
 
-                val cancelled = forkResponse.data.booleanField("cancelled") ?: false
-                check(!cancelled) {
-                    "Fork was cancelled"
-                }
-
-                refreshCurrentSessionPath(connection)
+                parseForkableMessages(response.data)
             }
         }
+    }
+
+    private suspend fun forkWithEntryId(
+        connection: PiRpcConnection,
+        entryId: String,
+    ): String? {
+        val forkResponse =
+            sendAndAwaitResponse(
+                connection = connection,
+                requestTimeoutMs = requestTimeoutMs,
+                command =
+                    ForkCommand(
+                        id = UUID.randomUUID().toString(),
+                        entryId = entryId,
+                    ),
+                expectedCommand = FORK_COMMAND,
+            ).requireSuccess("Failed to fork session")
+
+        val cancelled = forkResponse.data.booleanField("cancelled") ?: false
+        check(!cancelled) {
+            "Fork was cancelled"
+        }
+
+        return refreshCurrentSessionPath(connection)
     }
 
     override suspend fun sendPrompt(message: String): Result<Unit> {
@@ -516,6 +496,23 @@ private fun parseForkEntryIds(data: JsonObject?): List<String> {
     return messages.mapNotNull { messageElement ->
         val messageObject = messageElement.jsonObject
         messageObject.stringField("entryId")
+    }
+}
+
+private fun parseForkableMessages(data: JsonObject?): List<ForkableMessage> {
+    val messages = runCatching { data?.get("messages")?.jsonArray }.getOrNull() ?: JsonArray(emptyList())
+
+    return messages.mapNotNull { messageElement ->
+        val messageObject = messageElement.jsonObject
+        val entryId = messageObject.stringField("entryId") ?: return@mapNotNull null
+        val preview = messageObject.stringField("preview") ?: "(no preview)"
+        val timestamp = messageObject["timestamp"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+
+        ForkableMessage(
+            entryId = entryId,
+            preview = preview,
+            timestamp = timestamp,
+        )
     }
 }
 

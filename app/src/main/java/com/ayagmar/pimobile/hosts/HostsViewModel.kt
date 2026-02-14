@@ -15,6 +15,7 @@ import java.util.UUID
 class HostsViewModel(
     private val profileStore: HostProfileStore,
     private val tokenStore: HostTokenStore,
+    private val diagnostics: ConnectionDiagnostics = ConnectionDiagnostics(),
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(HostsUiState(isLoading = true))
     val uiState: StateFlow<HostsUiState> = _uiState.asStateFlow()
@@ -24,7 +25,13 @@ class HostsViewModel(
     }
 
     fun refresh() {
-        _uiState.update { previous -> previous.copy(isLoading = true, errorMessage = null) }
+        _uiState.update { previous ->
+            previous.copy(
+                isLoading = true,
+                errorMessage = null,
+                diagnosticResults = emptyMap(),
+            )
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
             val profiles = profileStore.list()
@@ -35,6 +42,7 @@ class HostsViewModel(
                         HostProfileItem(
                             profile = profile,
                             hasToken = tokenStore.hasToken(profile.id),
+                            diagnosticStatus = DiagnosticStatus.NONE,
                         )
                     }
 
@@ -43,7 +51,67 @@ class HostsViewModel(
                     isLoading = false,
                     profiles = items,
                     errorMessage = null,
+                    diagnosticResults = emptyMap(),
                 )
+        }
+    }
+
+    fun testConnection(hostId: String) {
+        val profile = _uiState.value.profiles.find { it.profile.id == hostId }?.profile ?: return
+        val token = tokenStore.getToken(hostId)
+
+        if (token.isNullOrBlank()) {
+            _uiState.update { current ->
+                current.copy(
+                    diagnosticResults =
+                        current.diagnosticResults + (
+                            hostId to
+                                DiagnosticsResult.AuthError(
+                                    hostProfile = profile,
+                                    message = "No token configured",
+                                )
+                        ),
+                )
+            }
+            return
+        }
+
+        // Mark as testing
+        _uiState.update { current ->
+            current.copy(
+                profiles =
+                    current.profiles.map { item ->
+                        if (item.profile.id == hostId) {
+                            item.copy(diagnosticStatus = DiagnosticStatus.TESTING)
+                        } else {
+                            item
+                        }
+                    },
+            )
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = diagnostics.testHost(profile, token)
+
+            _uiState.update { current ->
+                current.copy(
+                    profiles =
+                        current.profiles.map { item ->
+                            if (item.profile.id == hostId) {
+                                item.copy(
+                                    diagnosticStatus =
+                                        when (result) {
+                                            is DiagnosticsResult.Success -> DiagnosticStatus.SUCCESS
+                                            else -> DiagnosticStatus.FAILED
+                                        },
+                                )
+                            } else {
+                                item
+                            }
+                        },
+                    diagnosticResults = current.diagnosticResults + (hostId to result),
+                )
+            }
         }
     }
 
@@ -87,6 +155,7 @@ data class HostsUiState(
     val isLoading: Boolean = false,
     val profiles: List<HostProfileItem> = emptyList(),
     val errorMessage: String? = null,
+    val diagnosticResults: Map<String, DiagnosticsResult> = emptyMap(),
 )
 
 class HostsViewModelFactory(

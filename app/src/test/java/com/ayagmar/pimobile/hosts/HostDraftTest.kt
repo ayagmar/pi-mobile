@@ -11,7 +11,7 @@ class HostDraftTest {
             HostDraft(
                 name = "Laptop",
                 host = "100.64.0.10",
-                port = "8765",
+                port = "8787",
                 useTls = true,
             )
 
@@ -21,7 +21,7 @@ class HostDraftTest {
         val valid = validation as HostValidationResult.Valid
         assertEquals("Laptop", valid.profile.name)
         assertEquals("100.64.0.10", valid.profile.host)
-        assertEquals(8765, valid.profile.port)
+        assertEquals(8787, valid.profile.port)
         assertEquals(true, valid.profile.useTls)
     }
 

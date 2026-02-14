@@ -8,11 +8,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -30,6 +34,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ayagmar.pimobile.hosts.DiagnosticStatus
+import com.ayagmar.pimobile.hosts.DiagnosticsResult
 import com.ayagmar.pimobile.hosts.HostDraft
 import com.ayagmar.pimobile.hosts.HostProfileItem
 import com.ayagmar.pimobile.hosts.HostsUiState
@@ -63,6 +69,9 @@ fun HostsRoute() {
         onDeleteClick = { hostId ->
             hostsViewModel.deleteHost(hostId)
         },
+        onTestClick = { hostId ->
+            hostsViewModel.testConnection(hostId)
+        },
     )
 
     val activeDraft = editorDraft
@@ -86,6 +95,7 @@ private fun HostsScreen(
     onAddClick: () -> Unit,
     onEditClick: (HostProfileItem) -> Unit,
     onDeleteClick: (String) -> Unit,
+    onTestClick: (String) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -140,8 +150,10 @@ private fun HostsScreen(
             ) { item ->
                 HostCard(
                     item = item,
+                    diagnosticResult = state.diagnosticResults[item.profile.id],
                     onEditClick = { onEditClick(item) },
                     onDeleteClick = { onDeleteClick(item.profile.id) },
+                    onTestClick = { onTestClick(item.profile.id) },
                 )
             }
         }
@@ -151,8 +163,10 @@ private fun HostsScreen(
 @Composable
 private fun HostCard(
     item: HostProfileItem,
+    diagnosticResult: DiagnosticsResult?,
     onEditClick: () -> Unit,
     onDeleteClick: () -> Unit,
+    onTestClick: () -> Unit,
 ) {
     Card(
         colors = CardDefaults.cardColors(),
@@ -162,22 +176,47 @@ private fun HostCard(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = item.profile.name,
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = item.profile.name,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                DiagnosticStatusIcon(status = item.diagnosticStatus)
+            }
+
             Text(
                 text = item.profile.endpoint,
                 style = MaterialTheme.typography.bodyMedium,
             )
+
             Text(
                 text = if (item.hasToken) "Token stored securely" else "No token configured",
                 style = MaterialTheme.typography.bodySmall,
             )
+
+            // Show diagnostic result details if available
+            diagnosticResult?.let { result ->
+                DiagnosticResultDetail(result = result)
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
+                TextButton(
+                    onClick = onTestClick,
+                    enabled = item.diagnosticStatus != DiagnosticStatus.TESTING,
+                ) {
+                    if (item.diagnosticStatus == DiagnosticStatus.TESTING) {
+                        Text("Testing...")
+                    } else {
+                        Text("Test")
+                    }
+                }
                 TextButton(onClick = onEditClick) {
                     Text("Edit")
                 }
@@ -185,6 +224,81 @@ private fun HostCard(
                     Text("Delete")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticStatusIcon(status: DiagnosticStatus) {
+    when (status) {
+        DiagnosticStatus.NONE -> {}
+        DiagnosticStatus.TESTING -> {
+            CircularProgressIndicator(
+                modifier = Modifier.padding(4.dp),
+                strokeWidth = 2.dp,
+            )
+        }
+        DiagnosticStatus.SUCCESS -> {
+            Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = "Connection successful",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        DiagnosticStatus.FAILED -> {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = "Connection failed",
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticResultDetail(result: DiagnosticsResult) {
+    when (result) {
+        is DiagnosticsResult.Success -> {
+            Column {
+                Text(
+                    text = "Connected",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                result.model?.let {
+                    Text(
+                        text = "Model: $it",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                result.cwd?.let {
+                    Text(
+                        text = "CWD: $it",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+        is DiagnosticsResult.NetworkError -> {
+            Text(
+                text = "Network: ${result.message}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        is DiagnosticsResult.AuthError -> {
+            Text(
+                text = "Auth: ${result.message}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        is DiagnosticsResult.RpcError -> {
+            Text(
+                text = "RPC: ${result.message}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }

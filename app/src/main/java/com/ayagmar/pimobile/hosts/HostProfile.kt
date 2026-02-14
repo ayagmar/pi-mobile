@@ -17,7 +17,15 @@ data class HostProfile(
 data class HostProfileItem(
     val profile: HostProfile,
     val hasToken: Boolean,
+    val diagnosticStatus: DiagnosticStatus = DiagnosticStatus.NONE,
 )
+
+enum class DiagnosticStatus {
+    NONE,
+    TESTING,
+    SUCCESS,
+    FAILED,
+}
 
 data class HostDraft(
     val id: String? = null,

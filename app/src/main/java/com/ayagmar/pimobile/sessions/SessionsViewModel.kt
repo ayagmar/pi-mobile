@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+@Suppress("TooManyFunctions")
 class SessionsViewModel(
     private val profileStore: HostProfileStore,
     private val tokenStore: HostTokenStore,
@@ -156,7 +157,78 @@ class SessionsViewModel(
     fun runSessionAction(action: SessionAction) {
         when (action) {
             is SessionAction.Export -> runExportAction()
+            is SessionAction.ForkFromEntry -> runForkFromEntryAction(action)
             else -> runStandardAction(action)
+        }
+    }
+
+    fun loadForkMessages(onLoaded: (List<ForkableMessage>) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(isLoadingForkMessages = true) }
+
+            val result = sessionController.getForkMessages()
+
+            _uiState.update { it.copy(isLoadingForkMessages = false) }
+
+            if (result.isSuccess) {
+                onLoaded(result.getOrNull() ?: emptyList())
+            } else {
+                _uiState.update { current ->
+                    current.copy(
+                        errorMessage = result.exceptionOrNull()?.message ?: "Failed to load fork messages",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun runForkFromEntryAction(action: SessionAction.ForkFromEntry) {
+        val activeSessionPath = _uiState.value.activeSessionPath
+        if (activeSessionPath == null) {
+            _uiState.update { current ->
+                current.copy(
+                    errorMessage = "Resume a session before forking",
+                    statusMessage = null,
+                )
+            }
+            return
+        }
+
+        val hostId = _uiState.value.selectedHostId ?: return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { current ->
+                current.copy(
+                    isPerformingAction = true,
+                    isResuming = false,
+                    errorMessage = null,
+                    statusMessage = null,
+                )
+            }
+
+            val result = sessionController.forkSessionFromEntryId(action.entryId)
+
+            if (result.isSuccess) {
+                repository.refresh(hostId)
+            }
+
+            _uiState.update { current ->
+                if (result.isSuccess) {
+                    val updatedPath = result.getOrNull() ?: current.activeSessionPath
+                    current.copy(
+                        isPerformingAction = false,
+                        activeSessionPath = updatedPath,
+                        statusMessage = "Forked from selected message",
+                        errorMessage = null,
+                    )
+                } else {
+                    current.copy(
+                        isPerformingAction = false,
+                        statusMessage = null,
+                        errorMessage = result.exceptionOrNull()?.message ?: "Fork failed",
+                    )
+                }
+            }
         }
     }
 
@@ -342,6 +414,16 @@ sealed interface SessionAction {
         }
     }
 
+    data class ForkFromEntry(
+        val entryId: String,
+    ) : SessionAction {
+        override val successMessage: String = "Forked from selected message"
+
+        override suspend fun execute(controller: SessionController): Result<String?> {
+            return controller.forkSessionFromEntryId(entryId)
+        }
+    }
+
     data object Export : SessionAction {
         override val successMessage: String = "Exported active session"
 
@@ -386,6 +468,7 @@ data class SessionsUiState(
     val isRefreshing: Boolean = false,
     val isResuming: Boolean = false,
     val isPerformingAction: Boolean = false,
+    val isLoadingForkMessages: Boolean = false,
     val activeSessionPath: String? = null,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
