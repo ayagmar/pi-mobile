@@ -4,9 +4,9 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Task | Status | Commit | Verification | Notes |
 |---|---|---|---|---|
-| 1.1 Bootstrap Android app + modules | DONE | HEAD | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Bootstrapped Android app + modular core-rpc/core-net/core-sessions with Compose navigation placeholders. |
-| 1.2 Quality gates + CI | TODO |  |  |  |
-| 1.3 RPC/cwd spike validation | TODO |  |  |  |
+| 1.1 Bootstrap Android app + modules | DONE | e9f80a2 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Bootstrapped Android app + modular core-rpc/core-net/core-sessions with Compose navigation placeholders. |
+| 1.2 Quality gates + CI | DONE | bd8a0a0 | ✅ ktlintCheck, detekt, test | Added .editorconfig, detekt.yml, root quality plugin config, and GitHub Actions CI workflow. |
+| 1.3 RPC/cwd spike validation | DONE | HEAD | ✅ ktlintCheck, detekt, test | Added reproducible spike doc validating JSONL interleaving/id-correlation and switch_session vs cwd behavior. |
 | 2.1 Bridge skeleton | TODO |  |  |  |
 | 2.2 WS envelope + auth | TODO |  |  |  |
 | 2.3 RPC forwarding | TODO |  |  |  |
