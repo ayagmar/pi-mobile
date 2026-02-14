@@ -10,8 +10,8 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 2.1 Bridge skeleton | DONE | 0624eb8 | ✅ ktlintCheck, detekt, test, bridge check | Bootstrapped TypeScript bridge with scripts (dev/start/check/test), config/logging, HTTP health + WS skeleton, and Vitest/ESLint setup. |
 | 2.2 WS envelope + auth | DONE | 2c3c269 | ✅ ktlintCheck, detekt, test, bridge check | Added auth-token handshake validation, envelope parser/validation, and safe bridge_error responses for malformed/unsupported payloads. |
 | 2.3 RPC forwarding | DONE | dc89183 | ✅ ktlintCheck, detekt, test, bridge check | Added pi subprocess forwarder (stdin/stdout JSONL + stderr logging isolation), rpc channel forwarding, and E2E bridge get_state websocket check. |
-| 2.4 Multi-cwd process manager | DONE | HEAD | ✅ ktlintCheck, detekt, test, bridge check | Added per-cwd process manager with control locks, server control APIs (set cwd/acquire/release), and idle TTL eviction with tests for lock rejection and cwd routing. |
-| 2.5 Session indexing API | TODO |  |  |  |
+| 2.4 Multi-cwd process manager | DONE | eff1bdf | ✅ ktlintCheck, detekt, test, bridge check | Added per-cwd process manager with control locks, server control APIs (set cwd/acquire/release), and idle TTL eviction with tests for lock rejection and cwd routing. |
+| 2.5 Session indexing API | DONE | HEAD | ✅ ktlintCheck, detekt, test, bridge check | Added bridge_list_sessions API backed by JSONL session indexer (header/session_info/preview/messageCount/lastModel), fixture tests, and local ~/.pi session smoke run. |
 | 2.6 Bridge resilience | TODO |  |  |  |
 | 3.1 RPC models/parser | TODO |  |  |  |
 | 3.2 Streaming assembler/throttle | TODO |  |  |  |

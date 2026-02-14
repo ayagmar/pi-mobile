@@ -1,3 +1,6 @@
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { parseBridgeConfig } from "../src/config.js";
@@ -12,6 +15,7 @@ describe("parseBridgeConfig", () => {
             logLevel: "info",
             authToken: "test-token",
             processIdleTtlMs: 300_000,
+            sessionDirectory: path.join(os.homedir(), ".pi", "agent", "sessions"),
         });
     });
 
@@ -22,6 +26,7 @@ describe("parseBridgeConfig", () => {
             BRIDGE_LOG_LEVEL: "debug",
             BRIDGE_AUTH_TOKEN: "my-token",
             BRIDGE_PROCESS_IDLE_TTL_MS: "90000",
+            BRIDGE_SESSION_DIR: "./tmp/custom-sessions",
         });
 
         expect(config.host).toBe("100.64.0.10");
@@ -29,6 +34,7 @@ describe("parseBridgeConfig", () => {
         expect(config.logLevel).toBe("debug");
         expect(config.authToken).toBe("my-token");
         expect(config.processIdleTtlMs).toBe(90_000);
+        expect(config.sessionDirectory).toBe(path.resolve("./tmp/custom-sessions"));
     });
 
     it("fails on invalid port", () => {

@@ -7,6 +7,8 @@ import { WebSocket as WsWebSocket, WebSocketServer, type RawData, type WebSocket
 import type { BridgeConfig } from "./config.js";
 import type { PiProcessManager } from "./process-manager.js";
 import { createPiProcessManager } from "./process-manager.js";
+import type { SessionIndexer } from "./session-indexer.js";
+import { createSessionIndexer } from "./session-indexer.js";
 import {
     createBridgeEnvelope,
     createBridgeErrorEnvelope,
@@ -27,6 +29,7 @@ export interface BridgeServer {
 
 interface BridgeServerDependencies {
     processManager?: PiProcessManager;
+    sessionIndexer?: SessionIndexer;
 }
 
 interface ClientConnectionContext {
@@ -65,6 +68,11 @@ export function createBridgeServer(
                     logger.child({ component: "rpc-forwarder", cwd }),
                 );
             },
+        });
+    const sessionIndexer = dependencies.sessionIndexer ??
+        createSessionIndexer({
+            sessionsDirectory: config.sessionDirectory,
+            logger: logger.child({ component: "session-indexer" }),
         });
 
     const clientContexts = new Map<WebSocket, ClientConnectionContext>();
@@ -130,7 +138,7 @@ export function createBridgeServer(
         );
 
         client.on("message", (data: RawData) => {
-            handleClientMessage(client, data, logger, processManager, context);
+            void handleClientMessage(client, data, logger, processManager, sessionIndexer, context);
         });
 
         client.on("close", () => {
@@ -197,13 +205,14 @@ export function createBridgeServer(
     };
 }
 
-function handleClientMessage(
+async function handleClientMessage(
     client: WebSocket,
     data: RawData,
     logger: Logger,
     processManager: PiProcessManager,
+    sessionIndexer: SessionIndexer,
     context: ClientConnectionContext,
-): void {
+): Promise<void> {
     const dataAsString = asUtf8String(data);
     const parsedEnvelope = parseBridgeEnvelope(dataAsString);
 
@@ -230,19 +239,20 @@ function handleClientMessage(
     const envelope = parsedEnvelope.envelope;
 
     if (envelope.channel === "bridge") {
-        handleBridgeControlMessage(client, context, envelope.payload, processManager);
+        await handleBridgeControlMessage(client, context, envelope.payload, processManager, sessionIndexer);
         return;
     }
 
     handleRpcEnvelope(client, context, envelope.payload, processManager, logger);
 }
 
-function handleBridgeControlMessage(
+async function handleBridgeControlMessage(
     client: WebSocket,
     context: ClientConnectionContext,
     payload: Record<string, unknown>,
     processManager: PiProcessManager,
-): void {
+    sessionIndexer: SessionIndexer,
+): Promise<void> {
     const messageType = payload.type;
 
     if (messageType === "bridge_ping") {
@@ -253,6 +263,32 @@ function handleBridgeControlMessage(
                 }),
             ),
         );
+        return;
+    }
+
+    if (messageType === "bridge_list_sessions") {
+        try {
+            const groupedSessions = await sessionIndexer.listSessions();
+
+            client.send(
+                JSON.stringify(
+                    createBridgeEnvelope({
+                        type: "bridge_sessions",
+                        groups: groupedSessions,
+                    }),
+                ),
+            );
+        } catch {
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "session_index_failed",
+                        "Failed to list sessions",
+                    ),
+                ),
+            );
+        }
+
         return;
     }
 

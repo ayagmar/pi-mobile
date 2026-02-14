@@ -1,0 +1,236 @@
+import type { Dirent } from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+import type { Logger } from "pino";
+
+export interface SessionIndexEntry {
+    sessionPath: string;
+    cwd: string;
+    createdAt: string;
+    updatedAt: string;
+    displayName?: string;
+    firstUserMessagePreview?: string;
+    messageCount: number;
+    lastModel?: string;
+}
+
+export interface SessionIndexGroup {
+    cwd: string;
+    sessions: SessionIndexEntry[];
+}
+
+export interface SessionIndexer {
+    listSessions(): Promise<SessionIndexGroup[]>;
+}
+
+export interface SessionIndexerOptions {
+    sessionsDirectory: string;
+    logger: Logger;
+}
+
+export function createSessionIndexer(options: SessionIndexerOptions): SessionIndexer {
+    return {
+        async listSessions(): Promise<SessionIndexGroup[]> {
+            const sessionFiles = await findSessionFiles(options.sessionsDirectory, options.logger);
+            const sessions: SessionIndexEntry[] = [];
+
+            for (const sessionFile of sessionFiles) {
+                const entry = await parseSessionFile(sessionFile, options.logger);
+                if (!entry) continue;
+                sessions.push(entry);
+            }
+
+            const groups = new Map<string, SessionIndexEntry[]>();
+            for (const session of sessions) {
+                const byCwd = groups.get(session.cwd) ?? [];
+                byCwd.push(session);
+                groups.set(session.cwd, byCwd);
+            }
+
+            const groupedSessions: SessionIndexGroup[] = [];
+            for (const [cwd, groupedEntries] of groups.entries()) {
+                groupedEntries.sort((a, b) => compareIsoDesc(a.updatedAt, b.updatedAt));
+                groupedSessions.push({ cwd, sessions: groupedEntries });
+            }
+
+            groupedSessions.sort((a, b) => a.cwd.localeCompare(b.cwd));
+
+            return groupedSessions;
+        },
+    };
+}
+
+async function findSessionFiles(rootDir: string, logger: Logger): Promise<string[]> {
+    let directoryEntries: Dirent[];
+
+    try {
+        directoryEntries = await fs.readdir(rootDir, { withFileTypes: true });
+    } catch (error: unknown) {
+        if (isErrorWithCode(error, "ENOENT")) {
+            logger.warn({ rootDir }, "Session directory does not exist");
+            return [];
+        }
+
+        throw error;
+    }
+
+    const sessionFiles: string[] = [];
+
+    for (const directoryEntry of directoryEntries) {
+        const absolutePath = path.join(rootDir, directoryEntry.name);
+
+        if (directoryEntry.isDirectory()) {
+            const nestedFiles = await findSessionFiles(absolutePath, logger);
+            sessionFiles.push(...nestedFiles);
+            continue;
+        }
+
+        if (directoryEntry.isFile() && absolutePath.endsWith(".jsonl")) {
+            sessionFiles.push(absolutePath);
+        }
+    }
+
+    return sessionFiles;
+}
+
+async function parseSessionFile(sessionPath: string, logger: Logger): Promise<SessionIndexEntry | undefined> {
+    let fileContent: string;
+
+    try {
+        fileContent = await fs.readFile(sessionPath, "utf-8");
+    } catch (error: unknown) {
+        logger.warn({ sessionPath, error }, "Failed to read session file");
+        return undefined;
+    }
+
+    const lines = fileContent
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+    if (lines.length === 0) {
+        return undefined;
+    }
+
+    const header = tryParseJson(lines[0]);
+    if (!header || header.type !== "session" || typeof header.cwd !== "string") {
+        logger.warn({ sessionPath }, "Skipping invalid session header");
+        return undefined;
+    }
+
+    const fileStats = await fs.stat(sessionPath);
+
+    const createdAt = getValidIsoTimestamp(header.timestamp) ?? fileStats.birthtime.toISOString();
+    let updatedAt = getValidIsoTimestamp(header.timestamp) ?? fileStats.mtime.toISOString();
+    let displayName: string | undefined;
+    let firstUserMessagePreview: string | undefined;
+    let messageCount = 0;
+    let lastModel: string | undefined;
+
+    for (const line of lines.slice(1)) {
+        const entry = tryParseJson(line);
+        if (!entry) continue;
+
+        const entryTimestamp = getValidIsoTimestamp(entry.timestamp);
+        if (entryTimestamp && compareIsoDesc(entryTimestamp, updatedAt) < 0) {
+            updatedAt = entryTimestamp;
+        }
+
+        if (entry.type === "session_info" && typeof entry.name === "string") {
+            displayName = entry.name;
+            continue;
+        }
+
+        if (entry.type !== "message" || !isRecord(entry.message)) {
+            continue;
+        }
+
+        messageCount += 1;
+
+        const role = entry.message.role;
+        if (!firstUserMessagePreview && role === "user") {
+            firstUserMessagePreview = extractUserPreview(entry.message.content);
+        }
+
+        if (role === "assistant" && typeof entry.message.model === "string") {
+            lastModel = entry.message.model;
+        }
+    }
+
+    return {
+        sessionPath,
+        cwd: header.cwd,
+        createdAt,
+        updatedAt,
+        displayName,
+        firstUserMessagePreview,
+        messageCount,
+        lastModel,
+    };
+}
+
+function extractUserPreview(content: unknown): string | undefined {
+    if (typeof content === "string") {
+        return normalizePreview(content);
+    }
+
+    if (!Array.isArray(content)) return undefined;
+
+    for (const item of content) {
+        if (!isRecord(item)) continue;
+
+        if (item.type === "text" && typeof item.text === "string") {
+            return normalizePreview(item.text);
+        }
+    }
+
+    return undefined;
+}
+
+function normalizePreview(value: string): string | undefined {
+    const compact = value.replace(/\s+/g, " ").trim();
+    if (!compact) return undefined;
+
+    const maxLength = 140;
+    if (compact.length <= maxLength) return compact;
+
+    return `${compact.slice(0, maxLength - 1)}…`;
+}
+
+function tryParseJson(value: string): Record<string, unknown> | undefined {
+    let parsed: unknown;
+
+    try {
+        parsed = JSON.parse(value);
+    } catch {
+        return undefined;
+    }
+
+    if (!isRecord(parsed)) return undefined;
+
+    return parsed;
+}
+
+function getValidIsoTimestamp(value: unknown): string | undefined {
+    if (typeof value !== "string") return undefined;
+
+    const timestamp = Date.parse(value);
+    if (Number.isNaN(timestamp)) return undefined;
+
+    return new Date(timestamp).toISOString();
+}
+
+function compareIsoDesc(a: string, b: string): number {
+    if (a === b) return 0;
+
+    return a > b ? -1 : 1;
+}
+
+function isErrorWithCode(error: unknown, code: string): boolean {
+    return isRecord(error) && error.code === code;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}

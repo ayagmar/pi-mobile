@@ -1,9 +1,13 @@
+import os from "node:os";
+import path from "node:path";
+
 import type { LevelWithSilent } from "pino";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
 const DEFAULT_LOG_LEVEL: LevelWithSilent = "info";
 const DEFAULT_PROCESS_IDLE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_SESSION_DIRECTORY = path.join(os.homedir(), ".pi", "agent", "sessions");
 
 export interface BridgeConfig {
     host: string;
@@ -11,6 +15,7 @@ export interface BridgeConfig {
     logLevel: LevelWithSilent;
     authToken: string;
     processIdleTtlMs: number;
+    sessionDirectory: string;
 }
 
 export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
@@ -19,6 +24,7 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
     const logLevel = parseLogLevel(env.BRIDGE_LOG_LEVEL);
     const authToken = parseAuthToken(env.BRIDGE_AUTH_TOKEN);
     const processIdleTtlMs = parseProcessIdleTtlMs(env.BRIDGE_PROCESS_IDLE_TTL_MS);
+    const sessionDirectory = parseSessionDirectory(env.BRIDGE_SESSION_DIR);
 
     return {
         host,
@@ -26,6 +32,7 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
         logLevel,
         authToken,
         processIdleTtlMs,
+        sessionDirectory,
     };
 }
 
@@ -80,4 +87,11 @@ function parseProcessIdleTtlMs(ttlRaw: string | undefined): number {
     }
 
     return ttlMs;
+}
+
+function parseSessionDirectory(sessionDirectoryRaw: string | undefined): string {
+    const fromEnv = sessionDirectoryRaw?.trim();
+    if (!fromEnv) return DEFAULT_SESSION_DIRECTORY;
+
+    return path.resolve(fromEnv);
 }

@@ -11,6 +11,7 @@ import type {
 import type { PiRpcForwarder } from "../src/rpc-forwarder.js";
 import type { BridgeServer } from "../src/server.js";
 import { createBridgeServer } from "../src/server.js";
+import type { SessionIndexGroup, SessionIndexer } from "../src/session-indexer.js";
 
 describe("bridge websocket server", () => {
     let bridgeServer: BridgeServer | undefined;
@@ -73,6 +74,68 @@ describe("bridge websocket server", () => {
         expect(errorEnvelope.channel).toBe("bridge");
         expect(errorEnvelope.payload?.type).toBe("bridge_error");
         expect(errorEnvelope.payload?.code).toBe("malformed_envelope");
+
+        ws.close();
+    });
+
+    it("returns grouped session metadata via bridge_list_sessions", async () => {
+        const fakeSessionIndexer = new FakeSessionIndexer([
+            {
+                cwd: "/tmp/project-a",
+                sessions: [
+                    {
+                        sessionPath: "/tmp/session-a.jsonl",
+                        cwd: "/tmp/project-a",
+                        createdAt: "2026-02-01T00:00:00.000Z",
+                        updatedAt: "2026-02-01T00:05:00.000Z",
+                        displayName: "Session A",
+                        firstUserMessagePreview: "hello",
+                        messageCount: 2,
+                        lastModel: "gpt-5",
+                    },
+                ],
+            },
+        ]);
+        const { baseUrl, server } = await startBridgeServer({ sessionIndexer: fakeSessionIndexer });
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const waitForSessions = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_sessions");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_list_sessions",
+                },
+            }),
+        );
+
+        const sessionsEnvelope = await waitForSessions;
+
+        expect(fakeSessionIndexer.listCalls).toBe(1);
+        expect(sessionsEnvelope.payload?.type).toBe("bridge_sessions");
+        expect(sessionsEnvelope.payload?.groups).toEqual([
+            {
+                cwd: "/tmp/project-a",
+                sessions: [
+                    {
+                        sessionPath: "/tmp/session-a.jsonl",
+                        cwd: "/tmp/project-a",
+                        createdAt: "2026-02-01T00:00:00.000Z",
+                        updatedAt: "2026-02-01T00:05:00.000Z",
+                        displayName: "Session A",
+                        firstUserMessagePreview: "hello",
+                        messageCount: 2,
+                        lastModel: "gpt-5",
+                    },
+                ],
+            },
+        ]);
 
         ws.close();
     });
@@ -205,7 +268,7 @@ describe("bridge websocket server", () => {
 });
 
 async function startBridgeServer(
-    deps?: { processManager?: PiProcessManager },
+    deps?: { processManager?: PiProcessManager; sessionIndexer?: SessionIndexer },
 ): Promise<{ baseUrl: string; server: BridgeServer }> {
     const logger = createLogger("silent");
     const server = createBridgeServer(
@@ -215,6 +278,7 @@ async function startBridgeServer(
             logLevel: "silent",
             authToken: "bridge-token",
             processIdleTtlMs: 300_000,
+            sessionDirectory: "/tmp/pi-sessions",
         },
         logger,
         deps,
@@ -331,6 +395,17 @@ function isEnvelopeLike(value: unknown): value is EnvelopeLike {
     if (typeof envelope.payload !== "object" || envelope.payload === null) return false;
 
     return true;
+}
+
+class FakeSessionIndexer implements SessionIndexer {
+    listCalls = 0;
+
+    constructor(private readonly groups: SessionIndexGroup[]) {}
+
+    async listSessions(): Promise<SessionIndexGroup[]> {
+        this.listCalls += 1;
+        return this.groups;
+    }
 }
 
 class FakeProcessManager implements PiProcessManager {
