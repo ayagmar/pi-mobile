@@ -7,8 +7,8 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 1.1 Bootstrap Android app + modules | DONE | e9f80a2 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Bootstrapped Android app + modular core-rpc/core-net/core-sessions with Compose navigation placeholders. |
 | 1.2 Quality gates + CI | DONE | bd8a0a0 | ✅ ktlintCheck, detekt, test | Added .editorconfig, detekt.yml, root quality plugin config, and GitHub Actions CI workflow. |
 | 1.3 RPC/cwd spike validation | DONE | 2817cf5 | ✅ ktlintCheck, detekt, test | Added reproducible spike doc validating JSONL interleaving/id-correlation and switch_session vs cwd behavior. |
-| 2.1 Bridge skeleton | DONE | HEAD | ✅ ktlintCheck, detekt, test, bridge check | Bootstrapped TypeScript bridge with scripts (dev/start/check/test), config/logging, HTTP health + WS skeleton, and Vitest/ESLint setup. |
-| 2.2 WS envelope + auth | TODO |  |  |  |
+| 2.1 Bridge skeleton | DONE | 0624eb8 | ✅ ktlintCheck, detekt, test, bridge check | Bootstrapped TypeScript bridge with scripts (dev/start/check/test), config/logging, HTTP health + WS skeleton, and Vitest/ESLint setup. |
+| 2.2 WS envelope + auth | DONE | b9a5c55 | ✅ ktlintCheck, detekt, test, bridge check | Added auth-token handshake validation, envelope parser/validation, and safe bridge_error responses for malformed/unsupported payloads. |
 | 2.3 RPC forwarding | TODO |  |  |  |
 | 2.4 Multi-cwd process manager | TODO |  |  |  |
 | 2.5 Session indexing API | TODO |  |  |  |

@@ -8,17 +8,20 @@ export interface BridgeConfig {
     host: string;
     port: number;
     logLevel: LevelWithSilent;
+    authToken: string;
 }
 
 export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     const host = env.BRIDGE_HOST?.trim() || DEFAULT_HOST;
     const port = parsePort(env.BRIDGE_PORT);
     const logLevel = parseLogLevel(env.BRIDGE_LOG_LEVEL);
+    const authToken = parseAuthToken(env.BRIDGE_AUTH_TOKEN);
 
     return {
         host,
         port,
         logLevel,
+        authToken,
     };
 }
 
@@ -53,4 +56,13 @@ function parseLogLevel(levelRaw: string | undefined): LevelWithSilent {
     }
 
     return level as LevelWithSilent;
+}
+
+function parseAuthToken(tokenRaw: string | undefined): string {
+    const token = tokenRaw?.trim();
+    if (!token) {
+        throw new Error("BRIDGE_AUTH_TOKEN is required");
+    }
+
+    return token;
 }
