@@ -1,18 +1,11 @@
 package com.ayagmar.pimobile.corenet
 
-import com.ayagmar.pimobile.corerpc.AbortCommand
-import com.ayagmar.pimobile.corerpc.ExtensionUiResponseCommand
-import com.ayagmar.pimobile.corerpc.FollowUpCommand
 import com.ayagmar.pimobile.corerpc.GetMessagesCommand
 import com.ayagmar.pimobile.corerpc.GetStateCommand
-import com.ayagmar.pimobile.corerpc.PromptCommand
 import com.ayagmar.pimobile.corerpc.RpcCommand
 import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
 import com.ayagmar.pimobile.corerpc.RpcMessageParser
 import com.ayagmar.pimobile.corerpc.RpcResponse
-import com.ayagmar.pimobile.corerpc.SetSessionNameCommand
-import com.ayagmar.pimobile.corerpc.SteerCommand
-import com.ayagmar.pimobile.corerpc.SwitchSessionCommand
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -371,40 +364,6 @@ private fun encodeEnvelope(
         }
 
     return json.encodeToString(envelope)
-}
-
-private fun encodeRpcCommand(
-    json: Json,
-    command: RpcCommand,
-): JsonObject {
-    val basePayload =
-        when (command) {
-            is PromptCommand -> json.encodeToJsonElement(PromptCommand.serializer(), command).jsonObject
-            is SteerCommand -> json.encodeToJsonElement(SteerCommand.serializer(), command).jsonObject
-            is FollowUpCommand -> json.encodeToJsonElement(FollowUpCommand.serializer(), command).jsonObject
-            is AbortCommand -> json.encodeToJsonElement(AbortCommand.serializer(), command).jsonObject
-            is GetStateCommand -> json.encodeToJsonElement(GetStateCommand.serializer(), command).jsonObject
-            is GetMessagesCommand -> json.encodeToJsonElement(GetMessagesCommand.serializer(), command).jsonObject
-            is SwitchSessionCommand -> json.encodeToJsonElement(SwitchSessionCommand.serializer(), command).jsonObject
-            is SetSessionNameCommand -> json.encodeToJsonElement(SetSessionNameCommand.serializer(), command).jsonObject
-            is ExtensionUiResponseCommand ->
-                json.encodeToJsonElement(ExtensionUiResponseCommand.serializer(), command).jsonObject
-        }
-
-    return buildJsonObject {
-        basePayload.forEach { (key, value) ->
-            put(key, value)
-        }
-
-        if (!basePayload.containsKey("type")) {
-            put("type", command.type)
-        }
-
-        val commandId = command.id
-        if (commandId != null && !basePayload.containsKey("id")) {
-            put("id", commandId)
-        }
-    }
 }
 
 private fun appendClientId(

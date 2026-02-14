@@ -26,7 +26,7 @@ class SessionsViewModel(
     private val profileStore: HostProfileStore,
     private val tokenStore: HostTokenStore,
     private val repository: SessionIndexRepository,
-    private val sessionResumer: SessionResumer,
+    private val sessionController: SessionController,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SessionsUiState(isLoading = true))
     val uiState: StateFlow<SessionsUiState> = _uiState.asStateFlow()
@@ -51,13 +51,16 @@ class SessionsViewModel(
                 selectedHostId = hostId,
                 isLoading = true,
                 groups = emptyList(),
+                activeSessionPath = null,
                 statusMessage = null,
                 errorMessage = null,
             )
         }
 
         observeHost(hostId)
-        initializeHost(hostId)
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.initialize(hostId)
+        }
     }
 
     fun onSearchQueryChanged(query: String) {
@@ -80,7 +83,7 @@ class SessionsViewModel(
         }
 
         _uiState.update { current ->
-            current.copy(groups = remapGroups(current.groups))
+            current.copy(groups = remapGroups(current.groups, collapsedCwds))
         }
     }
 
@@ -111,13 +114,14 @@ class SessionsViewModel(
             _uiState.update { current ->
                 current.copy(
                     isResuming = true,
+                    isPerformingAction = false,
                     errorMessage = null,
                     statusMessage = null,
                 )
             }
 
             val resumeResult =
-                sessionResumer.resume(
+                sessionController.resume(
                     hostProfile = selectedHost,
                     token = token,
                     session = session,
@@ -127,8 +131,8 @@ class SessionsViewModel(
                 if (resumeResult.isSuccess) {
                     current.copy(
                         isResuming = false,
-                        activeSessionPath = session.sessionPath,
-                        statusMessage = "Resumed ${session.displayTitle}",
+                        activeSessionPath = resumeResult.getOrNull() ?: session.sessionPath,
+                        statusMessage = "Resumed ${session.summaryTitle()}",
                         errorMessage = null,
                     )
                 } else {
@@ -136,6 +140,105 @@ class SessionsViewModel(
                         isResuming = false,
                         statusMessage = null,
                         errorMessage = resumeResult.exceptionOrNull()?.message ?: "Failed to resume session",
+                    )
+                }
+            }
+        }
+    }
+
+    fun runSessionAction(action: SessionAction) {
+        when (action) {
+            is SessionAction.Export -> runExportAction()
+            else -> runStandardAction(action)
+        }
+    }
+
+    private fun runStandardAction(action: SessionAction) {
+        val activeSessionPath = _uiState.value.activeSessionPath
+        if (activeSessionPath == null) {
+            _uiState.update { current ->
+                current.copy(
+                    errorMessage = "Resume a session before running this action",
+                    statusMessage = null,
+                )
+            }
+            return
+        }
+
+        val hostId = _uiState.value.selectedHostId ?: return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { current ->
+                current.copy(
+                    isPerformingAction = true,
+                    isResuming = false,
+                    errorMessage = null,
+                    statusMessage = null,
+                )
+            }
+
+            val result = action.execute(sessionController)
+
+            if (result.isSuccess) {
+                repository.refresh(hostId)
+            }
+
+            _uiState.update { current ->
+                if (result.isSuccess) {
+                    val updatedPath = result.getOrNull() ?: current.activeSessionPath
+                    current.copy(
+                        isPerformingAction = false,
+                        activeSessionPath = updatedPath,
+                        statusMessage = action.successMessage,
+                        errorMessage = null,
+                    )
+                } else {
+                    current.copy(
+                        isPerformingAction = false,
+                        statusMessage = null,
+                        errorMessage = result.exceptionOrNull()?.message ?: "Session action failed",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun runExportAction() {
+        val activeSessionPath = _uiState.value.activeSessionPath
+        if (activeSessionPath == null) {
+            _uiState.update { current ->
+                current.copy(
+                    errorMessage = "Resume a session before exporting",
+                    statusMessage = null,
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { current ->
+                current.copy(
+                    isPerformingAction = true,
+                    isResuming = false,
+                    errorMessage = null,
+                    statusMessage = null,
+                )
+            }
+
+            val exportResult = sessionController.exportSession()
+
+            _uiState.update { current ->
+                if (exportResult.isSuccess) {
+                    current.copy(
+                        isPerformingAction = false,
+                        statusMessage = "Exported HTML to ${exportResult.getOrNull()}",
+                        errorMessage = null,
+                    )
+                } else {
+                    current.copy(
+                        isPerformingAction = false,
+                        statusMessage = null,
+                        errorMessage = exportResult.exceptionOrNull()?.message ?: "Failed to export session",
                     )
                 }
             }
@@ -173,13 +276,9 @@ class SessionsViewModel(
             }
 
             observeHost(selectedHostId)
-            initializeHost(selectedHostId)
-        }
-    }
-
-    private fun initializeHost(hostId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.initialize(hostId)
+            viewModelScope.launch(Dispatchers.IO) {
+                repository.initialize(selectedHostId)
+            }
         }
     }
 
@@ -191,7 +290,7 @@ class SessionsViewModel(
                     _uiState.update { current ->
                         current.copy(
                             isLoading = false,
-                            groups = mapGroups(state.groups),
+                            groups = mapGroups(state.groups, collapsedCwds),
                             isRefreshing = state.isRefreshing,
                             errorMessage = state.errorMessage,
                         )
@@ -199,22 +298,72 @@ class SessionsViewModel(
                 }
             }
     }
+}
 
-    private fun mapGroups(groups: List<SessionGroup>): List<CwdSessionGroupUiState> {
-        return groups.map { group ->
-            CwdSessionGroupUiState(
-                cwd = group.cwd,
-                sessions = group.sessions,
-                isExpanded = !collapsedCwds.contains(group.cwd),
-            )
+sealed interface SessionAction {
+    val successMessage: String
+
+    suspend fun execute(controller: SessionController): Result<String?>
+
+    data class Rename(
+        val name: String,
+    ) : SessionAction {
+        override val successMessage: String = "Renamed active session"
+
+        override suspend fun execute(controller: SessionController): Result<String?> {
+            return controller.renameSession(name)
         }
     }
 
-    private fun remapGroups(groups: List<CwdSessionGroupUiState>): List<CwdSessionGroupUiState> {
-        return groups.map { group ->
-            group.copy(isExpanded = !collapsedCwds.contains(group.cwd))
+    data object Compact : SessionAction {
+        override val successMessage: String = "Compacted active session"
+
+        override suspend fun execute(controller: SessionController): Result<String?> {
+            return controller.compactSession()
         }
     }
+
+    data object Fork : SessionAction {
+        override val successMessage: String = "Forked active session"
+
+        override suspend fun execute(controller: SessionController): Result<String?> {
+            return controller.forkSessionFromLatestMessage()
+        }
+    }
+
+    data object Export : SessionAction {
+        override val successMessage: String = "Exported active session"
+
+        override suspend fun execute(controller: SessionController): Result<String?> {
+            return controller.exportSession().map { null }
+        }
+    }
+}
+
+private fun mapGroups(
+    groups: List<SessionGroup>,
+    collapsedCwds: Set<String>,
+): List<CwdSessionGroupUiState> {
+    return groups.map { group ->
+        CwdSessionGroupUiState(
+            cwd = group.cwd,
+            sessions = group.sessions,
+            isExpanded = !collapsedCwds.contains(group.cwd),
+        )
+    }
+}
+
+private fun remapGroups(
+    groups: List<CwdSessionGroupUiState>,
+    collapsedCwds: Set<String>,
+): List<CwdSessionGroupUiState> {
+    return groups.map { group ->
+        group.copy(isExpanded = !collapsedCwds.contains(group.cwd))
+    }
+}
+
+private fun SessionRecord.summaryTitle(): String {
+    return displayName ?: firstUserMessagePreview ?: sessionPath.substringAfterLast('/')
 }
 
 data class SessionsUiState(
@@ -225,6 +374,7 @@ data class SessionsUiState(
     val groups: List<CwdSessionGroupUiState> = emptyList(),
     val isRefreshing: Boolean = false,
     val isResuming: Boolean = false,
+    val isPerformingAction: Boolean = false,
     val activeSessionPath: String? = null,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
@@ -235,11 +385,6 @@ data class CwdSessionGroupUiState(
     val sessions: List<SessionRecord>,
     val isExpanded: Boolean,
 )
-
-private val SessionRecord.displayTitle: String
-    get() {
-        return displayName ?: firstUserMessagePreview ?: sessionPath.substringAfterLast('/')
-    }
 
 class SessionsViewModelFactory(
     context: Context,
@@ -265,7 +410,7 @@ class SessionsViewModelFactory(
             profileStore = profileStore,
             tokenStore = tokenStore,
             repository = repository,
-            sessionResumer = RpcSessionResumer(),
+            sessionController = RpcSessionController(),
         ) as T
     }
 }

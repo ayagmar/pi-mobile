@@ -20,7 +20,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -29,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ayagmar.pimobile.coresessions.SessionRecord
 import com.ayagmar.pimobile.sessions.CwdSessionGroupUiState
+import com.ayagmar.pimobile.sessions.SessionAction
 import com.ayagmar.pimobile.sessions.SessionsUiState
 import com.ayagmar.pimobile.sessions.SessionsViewModel
 import com.ayagmar.pimobile.sessions.SessionsViewModelFactory
@@ -49,6 +52,10 @@ fun SessionsRoute() {
                 onCwdToggle = sessionsViewModel::onCwdToggle,
                 onRefreshClick = sessionsViewModel::refreshSessions,
                 onResumeClick = sessionsViewModel::resumeSession,
+                onRename = { name -> sessionsViewModel.runSessionAction(SessionAction.Rename(name)) },
+                onFork = { sessionsViewModel.runSessionAction(SessionAction.Fork) },
+                onExport = { sessionsViewModel.runSessionAction(SessionAction.Export) },
+                onCompact = { sessionsViewModel.runSessionAction(SessionAction.Compact) },
             ),
     )
 }
@@ -59,6 +66,23 @@ private data class SessionsScreenCallbacks(
     val onCwdToggle: (String) -> Unit,
     val onRefreshClick: () -> Unit,
     val onResumeClick: (SessionRecord) -> Unit,
+    val onRename: (String) -> Unit,
+    val onFork: () -> Unit,
+    val onExport: () -> Unit,
+    val onCompact: () -> Unit,
+)
+
+private data class ActiveSessionActionCallbacks(
+    val onRename: () -> Unit,
+    val onFork: () -> Unit,
+    val onExport: () -> Unit,
+    val onCompact: () -> Unit,
+)
+
+private data class SessionsListCallbacks(
+    val onCwdToggle: (String) -> Unit,
+    val onResumeClick: (SessionRecord) -> Unit,
+    val actions: ActiveSessionActionCallbacks,
 )
 
 @Composable
@@ -66,6 +90,9 @@ private fun SessionsScreen(
     state: SessionsUiState,
     callbacks: SessionsScreenCallbacks,
 ) {
+    var renameDraft by remember { mutableStateOf("") }
+    var showRenameDialog by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -95,8 +122,30 @@ private fun SessionsScreen(
 
         SessionsContent(
             state = state,
-            onCwdToggle = callbacks.onCwdToggle,
-            onResumeClick = callbacks.onResumeClick,
+            callbacks = callbacks,
+            activeSessionActions =
+                ActiveSessionActionCallbacks(
+                    onRename = {
+                        renameDraft = ""
+                        showRenameDialog = true
+                    },
+                    onFork = callbacks.onFork,
+                    onExport = callbacks.onExport,
+                    onCompact = callbacks.onCompact,
+                ),
+        )
+    }
+
+    if (showRenameDialog) {
+        RenameSessionDialog(
+            name = renameDraft,
+            isBusy = state.isPerformingAction,
+            onNameChange = { renameDraft = it },
+            onDismiss = { showRenameDialog = false },
+            onConfirm = {
+                callbacks.onRename(renameDraft)
+                showRenameDialog = false
+            },
         )
     }
 }
@@ -146,8 +195,8 @@ private fun StatusMessages(
 @Composable
 private fun SessionsContent(
     state: SessionsUiState,
-    onCwdToggle: (String) -> Unit,
-    onResumeClick: (SessionRecord) -> Unit,
+    callbacks: SessionsScreenCallbacks,
+    activeSessionActions: ActiveSessionActionCallbacks,
 ) {
     when {
         state.isLoading -> {
@@ -177,9 +226,13 @@ private fun SessionsContent(
             SessionsList(
                 groups = state.groups,
                 activeSessionPath = state.activeSessionPath,
-                isResuming = state.isResuming,
-                onCwdToggle = onCwdToggle,
-                onResumeClick = onResumeClick,
+                isBusy = state.isResuming || state.isPerformingAction,
+                callbacks =
+                    SessionsListCallbacks(
+                        onCwdToggle = callbacks.onCwdToggle,
+                        onResumeClick = callbacks.onResumeClick,
+                        actions = activeSessionActions,
+                    ),
             )
         }
     }
@@ -209,9 +262,8 @@ private fun HostSelector(
 private fun SessionsList(
     groups: List<CwdSessionGroupUiState>,
     activeSessionPath: String?,
-    isResuming: Boolean,
-    onCwdToggle: (String) -> Unit,
-    onResumeClick: (SessionRecord) -> Unit,
+    isBusy: Boolean,
+    callbacks: SessionsListCallbacks,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -221,7 +273,7 @@ private fun SessionsList(
             item(key = "header-${group.cwd}") {
                 CwdHeader(
                     group = group,
-                    onToggle = { onCwdToggle(group.cwd) },
+                    onToggle = { callbacks.onCwdToggle(group.cwd) },
                 )
             }
 
@@ -230,8 +282,9 @@ private fun SessionsList(
                     SessionCard(
                         session = session,
                         isActive = activeSessionPath == session.sessionPath,
-                        isResuming = isResuming,
-                        onResumeClick = { onResumeClick(session) },
+                        isBusy = isBusy,
+                        onResumeClick = { callbacks.onResumeClick(session) },
+                        actions = callbacks.actions,
                     )
                 }
             }
@@ -264,8 +317,9 @@ private fun CwdHeader(
 private fun SessionCard(
     session: SessionRecord,
     isActive: Boolean,
-    isResuming: Boolean,
+    isBusy: Boolean,
     onResumeClick: () -> Unit,
+    actions: ActiveSessionActionCallbacks,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -300,17 +354,22 @@ private fun SessionCard(
                 )
 
                 Button(
-                    enabled = !isResuming && !isActive,
+                    enabled = !isBusy && !isActive,
                     onClick = onResumeClick,
                 ) {
                     Text(if (isActive) "Active" else "Resume")
                 }
             }
+
+            if (isActive) {
+                SessionActionsRow(
+                    isBusy = isBusy,
+                    onRenameClick = actions.onRename,
+                    onForkClick = actions.onFork,
+                    onExportClick = actions.onExport,
+                    onCompactClick = actions.onCompact,
+                )
+            }
         }
     }
 }
-
-private val SessionRecord.displayTitle: String
-    get() {
-        return displayName ?: firstUserMessagePreview ?: sessionPath.substringAfterLast('/')
-    }

@@ -68,6 +68,33 @@ data class SetSessionNameCommand(
 ) : RpcCommand
 
 @Serializable
+data class GetForkMessagesCommand(
+    override val id: String? = null,
+    override val type: String = "get_fork_messages",
+) : RpcCommand
+
+@Serializable
+data class ForkCommand(
+    override val id: String? = null,
+    override val type: String = "fork",
+    val entryId: String,
+) : RpcCommand
+
+@Serializable
+data class ExportHtmlCommand(
+    override val id: String? = null,
+    override val type: String = "export_html",
+    val outputPath: String? = null,
+) : RpcCommand
+
+@Serializable
+data class CompactCommand(
+    override val id: String? = null,
+    override val type: String = "compact",
+    val customInstructions: String? = null,
+) : RpcCommand
+
+@Serializable
 data class ExtensionUiResponseCommand(
     override val id: String? = null,
     override val type: String = "extension_ui_response",
