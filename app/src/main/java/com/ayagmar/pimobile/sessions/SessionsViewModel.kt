@@ -131,6 +131,15 @@ class SessionsViewModel(
         }
     }
 
+    /**
+     * Creates a new session.
+     *
+     * FIXME (C4): This is a quick fix that establishes a connection before creating the session.
+     * Once C4 (persistent bridge connection) is implemented, this should be simplified to just
+     * send the new_session command over the existing connection.
+     *
+     * See: docs/ai/pi-mobile-final-adjustments-plan.md task C4
+     */
     fun newSession() {
         val hostId = _uiState.value.selectedHostId ?: return
         val selectedHost = _uiState.value.hosts.firstOrNull { host -> host.id == hostId } ?: return
@@ -146,7 +155,7 @@ class SessionsViewModel(
                 current.copy(isResuming = true, isPerformingAction = false, errorMessage = null)
             }
 
-            // Connect first, then create new session
+            // FIXME (C4): Remove this connection step once persistent bridge connection is in place
             val connectResult = connectForNewSession(selectedHost, token)
 
             if (connectResult.isSuccess) {
