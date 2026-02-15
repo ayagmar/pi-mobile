@@ -156,9 +156,48 @@ describe("createSessionIndexer", () => {
             logger: createLogger("silent"),
         });
 
-        await expect(sessionIndexer.getSessionTree("/etc/passwd")).rejects.toThrow(
+        await expect(sessionIndexer.getSessionTree("/etc/passwd.jsonl")).rejects.toThrow(
             "Session path is outside configured session directory",
         );
+    });
+
+    it("rejects symlinked session paths that resolve outside the session root", async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-tree-symlink-"));
+
+        try {
+            const sessionsRoot = path.join(tempRoot, "sessions");
+            const outsideRoot = path.join(tempRoot, "outside");
+
+            await fs.mkdir(sessionsRoot, { recursive: true });
+            await fs.mkdir(outsideRoot, { recursive: true });
+
+            const outsideSessionPath = path.join(outsideRoot, "outside.jsonl");
+            await fs.writeFile(
+                outsideSessionPath,
+                JSON.stringify({
+                    type: "session",
+                    version: 3,
+                    id: "outside",
+                    timestamp: "2026-02-03T00:00:00.000Z",
+                    cwd: "/tmp/outside",
+                }),
+                "utf-8",
+            );
+
+            const symlinkSessionPath = path.join(sessionsRoot, "linked-outside.jsonl");
+            await fs.symlink(outsideSessionPath, symlinkSessionPath);
+
+            const sessionIndexer = createSessionIndexer({
+                sessionsDirectory: sessionsRoot,
+                logger: createLogger("silent"),
+            });
+
+            await expect(sessionIndexer.getSessionTree(symlinkSessionPath)).rejects.toThrow(
+                "Session path is outside configured session directory",
+            );
+        } finally {
+            await fs.rm(tempRoot, { recursive: true, force: true });
+        }
     });
 
     it("returns an empty list if session directory does not exist", async () => {

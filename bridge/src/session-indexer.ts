@@ -83,28 +83,43 @@ export function createSessionIndexer(options: SessionIndexerOptions): SessionInd
         },
 
         async getSessionTree(sessionPath: string, filter?: SessionTreeFilter): Promise<SessionTreeSnapshot> {
-            const resolvedSessionPath = resolveSessionPath(sessionPath, sessionsRoot);
+            const resolvedSessionPath = await resolveSessionPath(sessionPath, sessionsRoot);
             return parseSessionTreeFile(resolvedSessionPath, options.logger, filter);
         },
     };
 }
 
-function resolveSessionPath(sessionPath: string, sessionsRoot: string): string {
+async function resolveSessionPath(sessionPath: string, sessionsRoot: string): Promise<string> {
     const resolvedSessionPath = path.resolve(sessionPath);
-
-    const isWithinSessionsRoot =
-        resolvedSessionPath === sessionsRoot ||
-        resolvedSessionPath.startsWith(`${sessionsRoot}${path.sep}`);
-
-    if (!isWithinSessionsRoot) {
-        throw new Error("Session path is outside configured session directory");
-    }
 
     if (!resolvedSessionPath.endsWith(".jsonl")) {
         throw new Error("Session path must point to a .jsonl file");
     }
 
+    const realSessionsRoot = await resolveRealPathOrFallback(sessionsRoot);
+    const realSessionPath = await resolveRealPathOrFallback(resolvedSessionPath);
+
+    const isWithinSessionsRoot =
+        realSessionPath === realSessionsRoot ||
+        realSessionPath.startsWith(`${realSessionsRoot}${path.sep}`);
+
+    if (!isWithinSessionsRoot) {
+        throw new Error("Session path is outside configured session directory");
+    }
+
     return resolvedSessionPath;
+}
+
+async function resolveRealPathOrFallback(filePath: string): Promise<string> {
+    try {
+        return await fs.realpath(filePath);
+    } catch (error: unknown) {
+        if (isErrorWithCode(error, "ENOENT")) {
+            return path.resolve(filePath);
+        }
+
+        throw error;
+    }
 }
 
 async function findSessionFiles(rootDir: string, logger: Logger): Promise<string[]> {
