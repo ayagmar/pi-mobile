@@ -53,6 +53,7 @@ import com.ayagmar.pimobile.sessions.SlashCommandInfo
 private data class ChatCallbacks(
     val onToggleToolExpansion: (String) -> Unit,
     val onToggleThinkingExpansion: (String) -> Unit,
+    val onToggleDiffExpansion: (String) -> Unit,
     val onInputTextChanged: (String) -> Unit,
     val onSendPrompt: () -> Unit,
     val onAbort: () -> Unit,
@@ -80,6 +81,7 @@ fun ChatRoute() {
             ChatCallbacks(
                 onToggleToolExpansion = chatViewModel::toggleToolExpansion,
                 onToggleThinkingExpansion = chatViewModel::toggleThinkingExpansion,
+                onToggleDiffExpansion = chatViewModel::toggleDiffExpansion,
                 onInputTextChanged = chatViewModel::onInputTextChanged,
                 onSendPrompt = chatViewModel::sendPrompt,
                 onAbort = chatViewModel::abort,
@@ -236,6 +238,7 @@ private fun ChatBody(
             timeline = state.timeline,
             onToggleToolExpansion = callbacks.onToggleToolExpansion,
             onToggleThinkingExpansion = callbacks.onToggleThinkingExpansion,
+            onToggleDiffExpansion = callbacks.onToggleDiffExpansion,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -563,6 +566,7 @@ private fun ChatTimeline(
     timeline: List<ChatTimelineItem>,
     onToggleToolExpansion: (String) -> Unit,
     onToggleThinkingExpansion: (String) -> Unit,
+    onToggleDiffExpansion: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -583,6 +587,7 @@ private fun ChatTimeline(
                     ToolCard(
                         item = item,
                         onToggleToolExpansion = onToggleToolExpansion,
+                        onToggleDiffExpansion = onToggleDiffExpansion,
                     )
                 }
             }
@@ -702,13 +707,9 @@ private fun ThinkingBlock(
 private fun ToolCard(
     item: ChatTimelineItem.Tool,
     onToggleToolExpansion: (String) -> Unit,
+    onToggleDiffExpansion: (String) -> Unit,
 ) {
-    val displayOutput =
-        if (item.isCollapsed && item.output.length > COLLAPSED_OUTPUT_LENGTH) {
-            item.output.take(COLLAPSED_OUTPUT_LENGTH) + "…"
-        } else {
-            item.output
-        }
+    val isEditTool = item.toolName == "edit" && item.editDiff != null
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -726,14 +727,32 @@ private fun ToolCard(
                 text = "Tool: ${item.toolName} $suffix".trim(),
                 style = MaterialTheme.typography.titleSmall,
             )
-            Text(
-                text = displayOutput.ifBlank { "(no output yet)" },
-                style = MaterialTheme.typography.bodyMedium,
-            )
 
-            if (item.output.length > COLLAPSED_OUTPUT_LENGTH) {
-                TextButton(onClick = { onToggleToolExpansion(item.id) }) {
-                    Text(if (item.isCollapsed) "Expand" else "Collapse")
+            // Show diff viewer for edit tools, otherwise show standard output
+            if (isEditTool && item.editDiff != null) {
+                DiffViewer(
+                    diffInfo = item.editDiff,
+                    isCollapsed = !item.isDiffExpanded,
+                    onToggleCollapse = { onToggleDiffExpansion(item.id) },
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            } else {
+                val displayOutput =
+                    if (item.isCollapsed && item.output.length > COLLAPSED_OUTPUT_LENGTH) {
+                        item.output.take(COLLAPSED_OUTPUT_LENGTH) + "…"
+                    } else {
+                        item.output
+                    }
+
+                Text(
+                    text = displayOutput.ifBlank { "(no output yet)" },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+
+                if (item.output.length > COLLAPSED_OUTPUT_LENGTH) {
+                    TextButton(onClick = { onToggleToolExpansion(item.id) }) {
+                        Text(if (item.isCollapsed) "Expand" else "Collapse")
+                    }
                 }
             }
         }

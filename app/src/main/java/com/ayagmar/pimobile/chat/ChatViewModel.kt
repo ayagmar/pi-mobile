@@ -194,6 +194,21 @@ class ChatViewModel(
         }
     }
 
+    fun toggleDiffExpansion(itemId: String) {
+        _uiState.update { state ->
+            state.copy(
+                timeline =
+                    state.timeline.map { item ->
+                        if (item is ChatTimelineItem.Tool && item.id == itemId) {
+                            item.copy(isDiffExpanded = !item.isDiffExpanded)
+                        } else {
+                            item
+                        }
+                    },
+            )
+        }
+    }
+
     private fun observeConnection() {
         viewModelScope.launch {
             sessionController.connectionState.collect { state ->
@@ -529,6 +544,9 @@ class ChatViewModel(
     }
 
     private fun handleToolStart(event: ToolExecutionStartEvent) {
+        val arguments = extractToolArguments(event.args)
+        val editDiff = if (event.toolName == "edit") extractEditDiff(event.args) else null
+
         val nextItem =
             ChatTimelineItem.Tool(
                 id = "tool-${event.toolCallId}",
@@ -537,6 +555,8 @@ class ChatViewModel(
                 isCollapsed = true,
                 isStreaming = true,
                 isError = false,
+                arguments = arguments,
+                editDiff = editDiff,
             )
 
         upsertTimelineItem(nextItem)
@@ -546,6 +566,7 @@ class ChatViewModel(
         val output = extractToolOutput(event.partialResult)
         val itemId = "tool-${event.toolCallId}"
         val isCollapsed = output.length > TOOL_COLLAPSE_THRESHOLD
+        val existingTool = _uiState.value.timeline.find { it.id == itemId } as? ChatTimelineItem.Tool
 
         val nextItem =
             ChatTimelineItem.Tool(
@@ -555,6 +576,8 @@ class ChatViewModel(
                 isCollapsed = isCollapsed,
                 isStreaming = true,
                 isError = false,
+                arguments = existingTool?.arguments ?: emptyMap(),
+                editDiff = existingTool?.editDiff,
             )
 
         upsertTimelineItem(nextItem)
@@ -564,6 +587,7 @@ class ChatViewModel(
         val output = extractToolOutput(event.result)
         val itemId = "tool-${event.toolCallId}"
         val isCollapsed = output.length > TOOL_COLLAPSE_THRESHOLD
+        val existingTool = _uiState.value.timeline.find { it.id == itemId } as? ChatTimelineItem.Tool
 
         val nextItem =
             ChatTimelineItem.Tool(
@@ -573,6 +597,8 @@ class ChatViewModel(
                 isCollapsed = isCollapsed,
                 isStreaming = false,
                 isError = event.isError,
+                arguments = existingTool?.arguments ?: emptyMap(),
+                editDiff = existingTool?.editDiff,
             )
 
         upsertTimelineItem(nextItem)
@@ -592,7 +618,12 @@ class ChatViewModel(
                             when {
                                 existing is ChatTimelineItem.Tool && item is ChatTimelineItem.Tool -> {
                                     // Preserve user toggled expansion state across streaming updates.
-                                    item.copy(isCollapsed = existing.isCollapsed)
+                                    // Also preserve arguments and editDiff if new item doesn't have them.
+                                    item.copy(
+                                        isCollapsed = existing.isCollapsed,
+                                        arguments = item.arguments.takeIf { it.isNotEmpty() } ?: existing.arguments,
+                                        editDiff = item.editDiff ?: existing.editDiff,
+                                    )
                                 }
                                 existing is ChatTimelineItem.Assistant &&
                                     item is ChatTimelineItem.Assistant &&
@@ -705,8 +736,20 @@ sealed interface ChatTimelineItem {
         val isCollapsed: Boolean,
         val isStreaming: Boolean,
         val isError: Boolean,
+        val arguments: Map<String, String> = emptyMap(),
+        val editDiff: EditDiffInfo? = null,
+        val isDiffExpanded: Boolean = false,
     ) : ChatTimelineItem
 }
+
+/**
+ * Information about a file edit for diff display.
+ */
+data class EditDiffInfo(
+    val path: String,
+    val oldString: String,
+    val newString: String,
+)
 
 class ChatViewModelFactory : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -751,6 +794,8 @@ private fun parseHistoryItems(data: JsonObject?): List<ChatTimelineItem> {
                     isCollapsed = output.length > 400,
                     isStreaming = false,
                     isError = message.booleanField("isError") ?: false,
+                    arguments = emptyMap(),
+                    editDiff = null,
                 )
             }
 
@@ -841,5 +886,38 @@ private fun parseModelInfo(data: JsonObject?): ModelInfo? {
         name = model.stringField("name") ?: "Unknown Model",
         provider = model.stringField("provider") ?: "unknown",
         thinkingLevel = data.stringField("thinkingLevel") ?: "off",
+    )
+}
+
+/**
+ * Extracts tool arguments from JSON object as a map of string keys to string values.
+ * Only extracts primitive string arguments for display purposes.
+ */
+private fun extractToolArguments(args: JsonObject?): Map<String, String> {
+    if (args == null) return emptyMap()
+    return args
+        .mapNotNull { (key, value) ->
+            when {
+                value is kotlinx.serialization.json.JsonPrimitive &&
+                    value.isString -> key to value.content
+                else -> null
+            }
+        }.toMap()
+}
+
+/**
+ * Extracts edit tool diff information from arguments.
+ * Returns null if not an edit tool or required fields are missing.
+ */
+@Suppress("ReturnCount")
+private fun extractEditDiff(args: JsonObject?): EditDiffInfo? {
+    if (args == null) return null
+    val path = args.stringField("path") ?: return null
+    val oldString = args.stringField("oldString") ?: return null
+    val newString = args.stringField("newString") ?: return null
+    return EditDiffInfo(
+        path = path,
+        oldString = oldString,
+        newString = newString,
     )
 }
