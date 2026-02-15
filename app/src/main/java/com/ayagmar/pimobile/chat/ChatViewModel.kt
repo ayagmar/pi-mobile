@@ -68,6 +68,7 @@ class ChatViewModel(
     private var historyWindowMessages: List<JsonObject> = emptyList()
     private var historyWindowAbsoluteOffset: Int = 0
     private var historyParsedStartIndex: Int = 0
+    private val pendingLocalUserIds = ArrayDeque<String>()
 
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -124,7 +125,7 @@ class ChatViewModel(
         }
 
         // Record prompt send for TTFT tracking
-        PerformanceMetrics.recordPromptSend()
+        recordMetricsSafely { PerformanceMetrics.recordPromptSend() }
         hasRecordedFirstToken = false
 
         val optimisticUserId = "$LOCAL_USER_ITEM_PREFIX${UUID.randomUUID()}"
@@ -136,6 +137,7 @@ class ChatViewModel(
                 imageUris = pendingImages.map { it.uri },
             ),
         )
+        pendingLocalUserIds.addLast(optimisticUserId)
 
         viewModelScope.launch {
             val imagePayloads =
@@ -146,7 +148,7 @@ class ChatViewModel(
                 }
 
             if (message.isEmpty() && imagePayloads.isEmpty()) {
-                removeTimelineItemById(optimisticUserId)
+                discardPendingLocalUserItem(optimisticUserId)
                 _uiState.update {
                     it.copy(errorMessage = "Unable to attach image. Please try again.")
                 }
@@ -156,7 +158,7 @@ class ChatViewModel(
             _uiState.update { it.copy(inputText = "", pendingImages = emptyList(), errorMessage = null) }
             val result = sessionController.sendPrompt(message, imagePayloads)
             if (result.isFailure) {
-                removeTimelineItemById(optimisticUserId)
+                discardPendingLocalUserItem(optimisticUserId)
                 _uiState.update {
                     it.copy(
                         inputText = currentState.inputText,
@@ -528,6 +530,10 @@ class ChatViewModel(
         return itemId
     }
 
+    private inline fun recordMetricsSafely(record: () -> Unit) {
+        runCatching(record)
+    }
+
     @Suppress("CyclomaticComplexMethod")
     private fun observeEvents() {
         // Observe session changes and reload timeline
@@ -538,6 +544,7 @@ class ChatViewModel(
                 resetStreamingUpdateState()
                 fullTimeline = emptyList()
                 visibleTimelineSize = 0
+                pendingLocalUserIds.clear()
                 resetHistoryWindow()
                 loadInitialMessages()
             }
@@ -921,7 +928,7 @@ class ChatViewModel(
                 val stateResult = sessionController.getState()
 
                 if (messagesResult.isSuccess) {
-                    PerformanceMetrics.recordFirstMessagesRendered()
+                    recordMetricsSafely { PerformanceMetrics.recordFirstMessagesRendered() }
                 }
 
                 val stateData = stateResult.getOrNull()?.data
@@ -959,6 +966,7 @@ class ChatViewModel(
     ): ChatUiState {
         fullTimeline = emptyList()
         visibleTimelineSize = 0
+        pendingLocalUserIds.clear()
         resetHistoryWindow()
 
         return state.copy(
@@ -1027,7 +1035,7 @@ class ChatViewModel(
     private fun handleMessageUpdate(event: MessageUpdateEvent) {
         // Record first token received for TTFT tracking
         if (!hasRecordedFirstToken) {
-            PerformanceMetrics.recordFirstToken()
+            recordMetricsSafely { PerformanceMetrics.recordFirstToken() }
             hasRecordedFirstToken = true
         }
 
@@ -1539,15 +1547,9 @@ class ChatViewModel(
     }
 
     private fun replacePendingUserItemOrUpsert(userItem: ChatTimelineItem.User) {
-        val pendingIndex =
-            fullTimeline.indexOfFirst { item ->
-                item is ChatTimelineItem.User &&
-                    item.id.startsWith(LOCAL_USER_ITEM_PREFIX) &&
-                    item.text == userItem.text &&
-                    item.imageCount >= userItem.imageCount
-            }
+        val pendingIndex = consumeNextPendingLocalUserIndex() ?: findMatchingPendingUserIndex(userItem)
 
-        if (pendingIndex < 0) {
+        if (pendingIndex == null) {
             upsertTimelineItem(userItem)
             return
         }
@@ -1565,6 +1567,41 @@ class ChatViewModel(
             }
 
         publishVisibleTimeline()
+    }
+
+    private fun consumeNextPendingLocalUserIndex(): Int? {
+        while (pendingLocalUserIds.isNotEmpty()) {
+            val pendingId = pendingLocalUserIds.removeFirst()
+            val index = fullTimeline.indexOfFirst { it.id == pendingId }
+            if (index >= 0) {
+                return index
+            }
+        }
+
+        return null
+    }
+
+    private fun findMatchingPendingUserIndex(userItem: ChatTimelineItem.User): Int? {
+        val fallbackIndex =
+            fullTimeline.indexOfLast { item ->
+                item is ChatTimelineItem.User &&
+                    item.id.startsWith(LOCAL_USER_ITEM_PREFIX) &&
+                    item.text == userItem.text &&
+                    item.imageCount >= userItem.imageCount
+            }
+
+        if (fallbackIndex < 0) {
+            return null
+        }
+
+        val pendingItemId = fullTimeline[fallbackIndex].id
+        pendingLocalUserIds.remove(pendingItemId)
+        return fallbackIndex
+    }
+
+    private fun discardPendingLocalUserItem(itemId: String) {
+        pendingLocalUserIds.remove(itemId)
+        removeTimelineItemById(itemId)
     }
 
     private fun removeTimelineItemById(itemId: String) {
@@ -1663,6 +1700,7 @@ class ChatViewModel(
     override fun onCleared() {
         initialLoadJob?.cancel()
         resetStreamingUpdateState()
+        pendingLocalUserIds.clear()
         super.onCleared()
     }
 

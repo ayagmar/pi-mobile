@@ -63,6 +63,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -518,11 +519,21 @@ private fun ChatTimeline(
     modifier: Modifier = Modifier,
 ) {
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val shouldAutoScrollToBottom by
+        remember {
+            derivedStateOf {
+                val layoutInfo = listState.layoutInfo
+                val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                val lastItemIndex = layoutInfo.totalItemsCount - 1
 
-    // Auto-scroll only when a new tail item appears (avoid jumping to bottom when loading older history).
-    // Use immediate scroll instead of animation to reduce per-update jank while streaming.
-    LaunchedEffect(timeline.lastOrNull()?.id) {
-        if (timeline.isNotEmpty()) {
+                lastItemIndex <= 0 || lastVisibleIndex >= lastItemIndex - AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS
+            }
+        }
+
+    // Auto-scroll only while the user stays near the bottom.
+    // This avoids jumping when loading older history or reading past messages.
+    LaunchedEffect(timeline.lastOrNull(), timeline.size, shouldAutoScrollToBottom) {
+        if (timeline.isNotEmpty() && shouldAutoScrollToBottom) {
             listState.scrollToItem(timeline.size - 1)
         }
     }
@@ -616,16 +627,7 @@ private fun UserCard(
                         items = imageUris.take(MAX_INLINE_USER_IMAGE_PREVIEWS),
                         key = { index, uri -> "$uri-$index" },
                     ) { _, uriString ->
-                        val uri = remember(uriString) { Uri.parse(uriString) }
-                        AsyncImage(
-                            model = uri,
-                            contentDescription = "Sent image preview",
-                            modifier =
-                                Modifier
-                                    .size(56.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
-                            contentScale = ContentScale.Crop,
-                        )
+                        UserImagePreview(uriString = uriString)
                     }
 
                     val remaining = imageUris.size - MAX_INLINE_USER_IMAGE_PREVIEWS
@@ -655,6 +657,43 @@ private fun UserCard(
             }
         }
     }
+}
+
+@Composable
+private fun UserImagePreview(uriString: String) {
+    val uri = remember(uriString) { Uri.parse(uriString) }
+    var loadFailed by remember(uriString) { mutableStateOf(false) }
+
+    if (loadFailed) {
+        Box(
+            modifier =
+                Modifier
+                    .size(USER_IMAGE_PREVIEW_SIZE_DP.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "IMG",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+
+    AsyncImage(
+        model = uri,
+        contentDescription = "Sent image preview",
+        modifier =
+            Modifier
+                .size(USER_IMAGE_PREVIEW_SIZE_DP.dp)
+                .clip(RoundedCornerShape(8.dp)),
+        contentScale = ContentScale.Crop,
+        onError = {
+            loadFailed = true
+        },
+    )
 }
 
 @Composable
@@ -1794,6 +1833,8 @@ private const val COLLAPSED_OUTPUT_LENGTH = 280
 private const val THINKING_COLLAPSE_THRESHOLD = 280
 private const val MAX_ARG_DISPLAY_LENGTH = 100
 private const val MAX_INLINE_USER_IMAGE_PREVIEWS = 4
+private const val USER_IMAGE_PREVIEW_SIZE_DP = 56
+private const val AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS = 2
 private const val TOOL_HIGHLIGHT_MAX_LENGTH = 1_000
 private const val STREAMING_FRAME_LOG_TAG = "StreamingFrameMetrics"
 private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")

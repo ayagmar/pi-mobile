@@ -557,6 +557,135 @@ class ChatViewModelThinkingExpansionTest {
             assertEquals("retry this branch", viewModel.uiState.value.inputText)
         }
 
+    @Test
+    fun repeatedPromptTextReplacesOptimisticUserItemsInOrder() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("repeat")
+            viewModel.sendPrompt()
+            viewModel.onInputTextChanged("repeat")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val initialTail = viewModel.userItems().lastOrNull()
+            assertTrue(initialTail?.id?.startsWith("local-user-") == true)
+
+            controller.emitEvent(
+                MessageEndEvent(
+                    type = "message_end",
+                    message =
+                        buildJsonObject {
+                            put("role", "user")
+                            put("entryId", "server-1")
+                            put("content", "repeat")
+                        },
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val afterFirstTail = viewModel.userItems().lastOrNull()
+            assertTrue(afterFirstTail?.id?.startsWith("local-user-") == true)
+
+            controller.emitEvent(
+                MessageEndEvent(
+                    type = "message_end",
+                    message =
+                        buildJsonObject {
+                            put("role", "user")
+                            put("entryId", "server-2")
+                            put("content", "repeat")
+                        },
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val afterSecondTail = viewModel.userItems().lastOrNull()
+            assertEquals("user-server-2", afterSecondTail?.id)
+            assertEquals("repeat", afterSecondTail?.text)
+        }
+
+    @Test
+    fun sendPromptFailureRemovesOptimisticUserItem() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.sendPromptResult = Result.failure(IllegalStateException("rpc failed"))
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("will fail")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+            waitForState(viewModel) { state ->
+                state.errorMessage == "rpc failed"
+            }
+
+            assertTrue(viewModel.userItems().none { it.id.startsWith("local-user-") })
+            assertEquals("rpc failed", viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
+    fun serverUserMessagePreservesPendingImageUris() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            val imageUri = "content://test/image-1"
+            viewModel.addImage(
+                PendingImage(
+                    uri = imageUri,
+                    mimeType = "image/png",
+                    sizeBytes = 128,
+                    displayName = "image.png",
+                ),
+            )
+            viewModel.onInputTextChanged("with image")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            controller.emitEvent(
+                MessageEndEvent(
+                    type = "message_end",
+                    message =
+                        buildJsonObject {
+                            put("role", "user")
+                            put("entryId", "server-image")
+                            put(
+                                "content",
+                                buildJsonArray {
+                                    add(
+                                        buildJsonObject {
+                                            put("type", "text")
+                                            put("text", "with image")
+                                        },
+                                    )
+                                    add(
+                                        buildJsonObject {
+                                            put("type", "image")
+                                            put("imageUrl", "https://example.test/image.png")
+                                        },
+                                    )
+                                },
+                            )
+                        },
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val userItem = viewModel.userItems().single { it.id == "user-server-image" }
+            assertEquals(1, userItem.imageCount)
+            assertEquals(listOf(imageUri), userItem.imageUris)
+        }
+
+    private fun ChatViewModel.userItems(): List<ChatTimelineItem.User> =
+        uiState.value.timeline.filterIsInstance<ChatTimelineItem.User>()
+
     private fun ChatViewModel.assistantItems(): List<ChatTimelineItem.Assistant> =
         uiState.value.timeline.filterIsInstance<ChatTimelineItem.Assistant>()
 
@@ -579,6 +708,21 @@ class ChatViewModelThinkingExpansionTest {
             "Timed out waiting for initial chat history load: " +
                 "isLoading=${state.isLoading}, error=${state.errorMessage}, timeline=${state.timeline.size}",
         )
+    }
+
+    private fun waitForState(
+        viewModel: ChatViewModel,
+        predicate: (ChatUiState) -> Boolean,
+    ) {
+        repeat(INITIAL_LOAD_WAIT_ATTEMPTS) {
+            dispatcher.scheduler.advanceUntilIdle()
+            if (predicate(viewModel.uiState.value)) {
+                return
+            }
+            Thread.sleep(INITIAL_LOAD_WAIT_STEP_MS)
+        }
+
+        error("Timed out waiting for expected ViewModel state")
     }
 
     private fun thinkingUpdate(
