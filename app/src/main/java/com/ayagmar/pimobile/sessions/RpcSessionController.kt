@@ -86,7 +86,7 @@ class RpcSessionController(
     private var activeConnection: PiRpcConnection? = null
     private var activeContext: ActiveConnectionContext? = null
     private var transportPreference: TransportPreference = TransportPreference.AUTO
-    private var clientId: String = UUID.randomUUID().toString()
+    private val clientId: String = UUID.randomUUID().toString()
     private var rpcEventsJob: Job? = null
     private var connectionStateJob: Job? = null
     private var streamingMonitorJob: Job? = null
