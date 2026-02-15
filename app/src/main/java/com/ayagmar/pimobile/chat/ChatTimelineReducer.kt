@@ -38,18 +38,19 @@ internal object ChatTimelineReducer {
         itemId: String,
     ): ChatUiState {
         val existingIndex = state.timeline.indexOfFirst { it.id == itemId }
-        if (existingIndex < 0) return state
+        val existing = state.timeline.getOrNull(existingIndex)
+        val assistantItem = existing as? ChatTimelineItem.Assistant
 
-        val existing = state.timeline[existingIndex]
-        if (existing !is ChatTimelineItem.Assistant) return state
-
-        val updatedTimeline = state.timeline.toMutableList()
-        updatedTimeline[existingIndex] =
-            existing.copy(
-                isThinkingExpanded = !existing.isThinkingExpanded,
-            )
-
-        return state.copy(timeline = updatedTimeline)
+        return if (existingIndex < 0 || assistantItem == null) {
+            state
+        } else {
+            val updatedTimeline = state.timeline.toMutableList()
+            updatedTimeline[existingIndex] =
+                assistantItem.copy(
+                    isThinkingExpanded = !assistantItem.isThinkingExpanded,
+                )
+            state.copy(timeline = updatedTimeline)
+        }
     }
 
     fun toggleToolArgumentsExpansion(

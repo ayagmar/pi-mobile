@@ -50,6 +50,17 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
+        warningsAsErrors = true
+        baseline = file("lint-baseline.xml")
+    }
+}
+
+tasks.named("check") {
+    dependsOn("lintDebug")
 }
 
 dependencies {

@@ -30,13 +30,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.delay
 import com.ayagmar.pimobile.coresessions.SessionRecord
 import com.ayagmar.pimobile.sessions.CwdSessionGroupUiState
 import com.ayagmar.pimobile.sessions.SessionAction
 import com.ayagmar.pimobile.sessions.SessionsUiState
 import com.ayagmar.pimobile.sessions.SessionsViewModel
 import com.ayagmar.pimobile.sessions.SessionsViewModelFactory
+import kotlinx.coroutines.delay
 
 @Composable
 fun SessionsRoute() {
@@ -54,7 +54,7 @@ fun SessionsRoute() {
 
     LaunchedEffect(transientStatusMessage) {
         if (transientStatusMessage != null) {
-            delay(3_000)
+            delay(STATUS_MESSAGE_DURATION_MS)
             transientStatusMessage = null
         }
     }
@@ -430,3 +430,5 @@ private fun SessionCard(
         }
     }
 }
+
+private const val STATUS_MESSAGE_DURATION_MS = 3_000L

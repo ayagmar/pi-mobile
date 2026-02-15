@@ -91,7 +91,7 @@ class SessionsViewModel(
         searchDebounceJob?.cancel()
         searchDebounceJob =
             viewModelScope.launch {
-                delay(250)
+                delay(SEARCH_DEBOUNCE_MS)
                 observeHost(hostId)
             }
     }
@@ -467,6 +467,8 @@ class SessionsViewModel(
         super.onCleared()
     }
 }
+
+private const val SEARCH_DEBOUNCE_MS = 250L
 
 sealed interface SessionAction {
     val successMessage: String
