@@ -216,15 +216,6 @@ data class ImagePayload(
     val mimeType: String,
 )
 
-@Serializable
-data class SlashCommand(
-    val name: String,
-    val description: String? = null,
-    val source: String,
-    val location: String? = null,
-    val path: String? = null,
-)
-
 /**
  * Result of a bash command execution.
  */
