@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, type ClientOptions, type RawData } from "ws";
@@ -573,6 +574,160 @@ describe("bridge websocket server", () => {
         expect(rpcEnvelope.payload?.command).toBe("get_state");
 
         ws.close();
+    });
+
+    it("normalizes cwd paths for set_cwd, acquire_control, and rpc forwarding", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        const { baseUrl, server } = await startBridgeServer({ processManager: fakeProcessManager });
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const requestedCwd = path.join(process.cwd(), "bridge-test", "..", "bridge-test") + path.sep;
+        const normalizedCwd = path.resolve(requestedCwd);
+
+        const waitForCwdSet = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_set_cwd",
+                    cwd: requestedCwd,
+                },
+            }),
+        );
+
+        const cwdSetEnvelope = await waitForCwdSet;
+        expect(cwdSetEnvelope.payload?.cwd).toBe(normalizedCwd);
+
+        const waitForControlAcquired =
+            waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_control_acquired");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                    cwd: path.join(normalizedCwd, "."),
+                },
+            }),
+        );
+
+        const controlAcquiredEnvelope = await waitForControlAcquired;
+        expect(controlAcquiredEnvelope.payload?.cwd).toBe(normalizedCwd);
+
+        const waitForRpcEnvelope = waitForEnvelope(ws, (envelope) => {
+            return envelope.channel === "rpc" && envelope.payload?.id === "req-normalized";
+        });
+
+        ws.send(
+            JSON.stringify({
+                channel: "rpc",
+                payload: {
+                    id: "req-normalized",
+                    type: "get_state",
+                },
+            }),
+        );
+
+        await waitForRpcEnvelope;
+
+        expect(fakeProcessManager.sentPayloads.at(-1)).toEqual({
+            cwd: normalizedCwd,
+            payload: {
+                id: "req-normalized",
+                type: "get_state",
+            },
+        });
+
+        ws.close();
+    });
+
+    it("releases prior cwd lock when bridge_set_cwd changes cwd", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        const { baseUrl, server } = await startBridgeServer({ processManager: fakeProcessManager });
+        bridgeServer = server;
+
+        const cwdA = path.resolve(process.cwd(), "project-a");
+        const cwdB = path.resolve(process.cwd(), "project-b");
+
+        const wsA = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const wsB = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const waitForACwdSet = waitForEnvelope(wsA, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+        wsA.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_set_cwd",
+                    cwd: cwdA,
+                },
+            }),
+        );
+        await waitForACwdSet;
+
+        const waitForAControl = waitForEnvelope(wsA, (envelope) => envelope.payload?.type === "bridge_control_acquired");
+        wsA.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                },
+            }),
+        );
+        await waitForAControl;
+
+        const waitForASecondCwdSet = waitForEnvelope(wsA, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+        wsA.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_set_cwd",
+                    cwd: cwdB,
+                },
+            }),
+        );
+        await waitForASecondCwdSet;
+
+        const waitForBCwdSet = waitForEnvelope(wsB, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+        wsB.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_set_cwd",
+                    cwd: cwdA,
+                },
+            }),
+        );
+        await waitForBCwdSet;
+
+        const waitForBControl = waitForEnvelope(wsB, (envelope) => envelope.payload?.type === "bridge_control_acquired");
+        wsB.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                },
+            }),
+        );
+
+        const controlEnvelope = await waitForBControl;
+        expect(controlEnvelope.payload?.cwd).toBe(cwdA);
+
+        wsA.close();
+        wsB.close();
     });
 
     it("isolates rpc events to the controlling client for a shared cwd", async () => {

@@ -627,10 +627,14 @@ async function handleBridgeControlMessage(
     }
 
     if (messageType === "bridge_set_cwd") {
-        const cwd = payload.cwd;
-        if (typeof cwd !== "string" || cwd.trim().length === 0) {
+        const cwd = normalizeCwd(payload.cwd);
+        if (!cwd) {
             client.send(JSON.stringify(createBridgeErrorEnvelope("invalid_cwd", "cwd must be a non-empty string")));
             return;
+        }
+
+        if (context.cwd && context.cwd !== cwd) {
+            processManager.releaseControl(context.clientId, context.cwd);
         }
 
         context.cwd = cwd;
@@ -660,7 +664,7 @@ async function handleBridgeControlMessage(
             return;
         }
 
-        const sessionPath = typeof payload.sessionPath === "string" ? payload.sessionPath : undefined;
+        const sessionPath = normalizeOptionalString(payload.sessionPath);
         const lockResult = processManager.acquireControl({
             clientId: context.clientId,
             cwd,
@@ -707,7 +711,7 @@ async function handleBridgeControlMessage(
             return;
         }
 
-        const sessionPath = typeof payload.sessionPath === "string" ? payload.sessionPath : undefined;
+        const sessionPath = normalizeOptionalString(payload.sessionPath);
         processManager.releaseControl(context.clientId, cwd, sessionPath);
 
         client.send(
@@ -995,11 +999,29 @@ function scheduleDisconnectedClientRelease(
 }
 
 function getRequestedCwd(payload: Record<string, unknown>, context: ClientConnectionContext): string | undefined {
-    if (typeof payload.cwd === "string" && payload.cwd.trim().length > 0) {
-        return payload.cwd;
+    return normalizeCwd(payload.cwd) ?? normalizeCwd(context.cwd);
+}
+
+function normalizeCwd(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+        return undefined;
     }
 
-    return context.cwd;
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+
+    return path.resolve(trimmed);
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+
+    const trimmed = value.trim();
+    return trimmed || undefined;
 }
 
 function canReceiveRpcEvent(
