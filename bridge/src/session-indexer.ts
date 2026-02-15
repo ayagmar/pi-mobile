@@ -229,7 +229,7 @@ async function parseSessionFile(
     }
 
     const createdAt = getValidIsoTimestamp(header.timestamp) ?? fileStats.birthtime.toISOString();
-    let updatedAt = getValidIsoTimestamp(header.timestamp) ?? fileStats.mtime.toISOString();
+    let updatedAtEpoch = getTimestampEpoch(header.timestamp) ?? Number(fileStats.mtimeMs);
     let displayName: string | undefined;
     let firstUserMessagePreview: string | undefined;
     let messageCount = 0;
@@ -239,9 +239,9 @@ async function parseSessionFile(
         const entry = tryParseJson(line);
         if (!entry) continue;
 
-        const entryTimestamp = getValidIsoTimestamp(entry.timestamp);
-        if (entryTimestamp && compareIsoDesc(entryTimestamp, updatedAt) < 0) {
-            updatedAt = entryTimestamp;
+        const activityEpoch = getSessionActivityEpoch(entry);
+        if (activityEpoch !== undefined && activityEpoch > updatedAtEpoch) {
+            updatedAtEpoch = activityEpoch;
         }
 
         if (entry.type === "session_info" && typeof entry.name === "string") {
@@ -269,7 +269,7 @@ async function parseSessionFile(
         sessionPath,
         cwd: header.cwd,
         createdAt,
-        updatedAt,
+        updatedAt: new Date(updatedAtEpoch).toISOString(),
         displayName,
         firstUserMessagePreview,
         messageCount,
@@ -305,21 +305,20 @@ async function parseSessionTreeFile(
         throw new Error("Invalid session header");
     }
 
-    const rawEntries = lines.slice(1).map(tryParseJson).filter((entry): entry is Record<string, unknown> => !!entry);
+    const parsedEntries = lines.slice(1).map(tryParseJson).filter((entry): entry is Record<string, unknown> => !!entry);
+    const rawEntries = normalizeTreeEntries(parsedEntries);
     const labelsByTargetId = collectLabelsByTargetId(rawEntries);
 
     const entries: SessionTreeEntry[] = [];
 
     for (const entry of rawEntries) {
-        const entryId = typeof entry.id === "string" ? entry.id : undefined;
-        if (!entryId) continue;
-
+        const entryId = entry.id as string;
         const parentId = typeof entry.parentId === "string" ? entry.parentId : null;
         const entryType = typeof entry.type === "string" ? entry.type : "unknown";
         const timestamp = getValidIsoTimestamp(entry.timestamp);
 
         const messageRecord = isRecord(entry.message) ? entry.message : undefined;
-        const role = typeof messageRecord?.role === "string" ? messageRecord.role : undefined;
+        const role = extractTreeRole(entry, messageRecord);
         const preview = extractEntryPreview(entry, messageRecord);
         const label = labelsByTargetId.get(entryId);
 
@@ -335,9 +334,10 @@ async function parseSessionTreeFile(
         });
     }
 
-    const currentLeafId = entries.length > 0 ? entries[entries.length - 1].entryId : undefined;
+    const currentLeafIdRaw = entries.length > 0 ? entries[entries.length - 1].entryId : undefined;
     const filteredEntries = applyTreeFilter(entries, filter);
     const filteredEntryIds = new Set(filteredEntries.map((entry) => entry.entryId));
+    const parentIdsByEntryId = new Map(entries.map((entry) => [entry.entryId, entry.parentId]));
     const rootIds = filteredEntries
         .filter((entry) => entry.parentId === null || !filteredEntryIds.has(entry.parentId))
         .map((entry) => entry.entryId);
@@ -345,9 +345,74 @@ async function parseSessionTreeFile(
     return {
         sessionPath,
         rootIds,
-        currentLeafId,
+        currentLeafId: resolveVisibleLeafId(currentLeafIdRaw, filteredEntryIds, parentIdsByEntryId),
         entries: filteredEntries,
     };
+}
+
+function normalizeTreeEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
+    const normalizedEntries: Record<string, unknown>[] = [];
+    const seenIds = new Set<string>();
+    let previousEntryId: string | null = null;
+
+    for (let index = 0; index < entries.length; index += 1) {
+        const source = entries[index];
+        const normalized: Record<string, unknown> = { ...source };
+
+        const existingId = typeof source.id === "string" && source.id.length > 0 ? source.id : undefined;
+        const generatedId = `legacy-${index.toString(16).padStart(8, "0")}`;
+        const idCandidate = existingId ?? generatedId;
+        const entryId = seenIds.has(idCandidate) ? `${idCandidate}-${index}` : idCandidate;
+        seenIds.add(entryId);
+        normalized.id = entryId;
+
+        const hasExplicitNullParent = source.parentId === null;
+        const explicitParentId = typeof source.parentId === "string" ? source.parentId : undefined;
+        const inferredParentId = explicitParentId ?? (hasExplicitNullParent ? null : previousEntryId);
+        normalized.parentId = inferredParentId ?? null;
+
+        if (source.type === "message" && isRecord(source.message) && source.message.role === "hookMessage") {
+            normalized.message = {
+                ...source.message,
+                role: "custom",
+            };
+        }
+
+        normalizedEntries.push(normalized);
+        previousEntryId = entryId;
+    }
+
+    return normalizedEntries;
+}
+
+function extractTreeRole(
+    entry: Record<string, unknown>,
+    messageRecord?: Record<string, unknown>,
+): string | undefined {
+    if (entry.type === "custom_message") {
+        return "custom";
+    }
+
+    return typeof messageRecord?.role === "string" ? messageRecord.role : undefined;
+}
+
+function resolveVisibleLeafId(
+    leafId: string | undefined,
+    visibleEntryIds: Set<string>,
+    parentIdsByEntryId: Map<string, string | null>,
+): string | undefined {
+    let current = leafId;
+
+    while (current) {
+        if (visibleEntryIds.has(current)) {
+            return current;
+        }
+
+        const parentId = parentIdsByEntryId.get(current);
+        current = parentId ?? undefined;
+    }
+
+    return undefined;
 }
 
 function collectLabelsByTargetId(entries: Record<string, unknown>[]): Map<string, string> {
@@ -405,6 +470,21 @@ function extractEntryPreview(
         return normalizePreview(entry.summary) ?? "branch summary";
     }
 
+    if (entry.type === "compaction" && typeof entry.summary === "string") {
+        return normalizePreview(`[compaction] ${entry.summary}`) ?? "compaction";
+    }
+
+    if (entry.type === "custom_message") {
+        const fromContent = extractUserPreview(entry.content);
+        if (fromContent) return fromContent;
+
+        if (typeof entry.customType === "string") {
+            return normalizePreview(`[custom:${entry.customType}]`) ?? "custom message";
+        }
+
+        return "custom message";
+    }
+
     if (messageRecord) {
         const fromContent = extractUserPreview(messageRecord.content);
         if (fromContent) return fromContent;
@@ -412,6 +492,22 @@ function extractEntryPreview(
         if (typeof messageRecord.content === "string") {
             return normalizePreview(messageRecord.content) ?? "message";
         }
+
+        if (messageRecord.role === "toolResult" && typeof messageRecord.toolName === "string") {
+            return normalizePreview(`[tool] ${messageRecord.toolName}`) ?? "tool result";
+        }
+    }
+
+    if (entry.type === "model_change" && typeof entry.modelId === "string") {
+        return normalizePreview(`[model] ${entry.modelId}`) ?? "model change";
+    }
+
+    if (entry.type === "thinking_level_change" && typeof entry.thinkingLevel === "string") {
+        return normalizePreview(`[thinking] ${entry.thinkingLevel}`) ?? "thinking level change";
+    }
+
+    if (entry.type === "custom" && typeof entry.customType === "string") {
+        return normalizePreview(`[custom:${entry.customType}]`) ?? "custom";
     }
 
     return "entry";
@@ -424,15 +520,21 @@ function extractUserPreview(content: unknown): string | undefined {
 
     if (!Array.isArray(content)) return undefined;
 
+    const textParts: string[] = [];
+
     for (const item of content) {
         if (!isRecord(item)) continue;
 
         if (item.type === "text" && typeof item.text === "string") {
-            return normalizePreview(item.text);
+            textParts.push(item.text);
         }
     }
 
-    return undefined;
+    if (textParts.length === 0) {
+        return undefined;
+    }
+
+    return normalizePreview(textParts.join(" "));
 }
 
 function normalizePreview(value: string): string | undefined {
@@ -459,11 +561,41 @@ function tryParseJson(value: string): Record<string, unknown> | undefined {
     return parsed;
 }
 
-function getValidIsoTimestamp(value: unknown): string | undefined {
-    if (typeof value !== "string") return undefined;
+function getSessionActivityEpoch(entry: Record<string, unknown>): number | undefined {
+    if (entry.type !== "message" || !isRecord(entry.message)) {
+        return undefined;
+    }
+
+    const role = entry.message.role;
+    if (role !== "user" && role !== "assistant") {
+        return undefined;
+    }
+
+    if (typeof entry.message.timestamp === "number" && Number.isFinite(entry.message.timestamp)) {
+        return entry.message.timestamp;
+    }
+
+    return getTimestampEpoch(entry.timestamp);
+}
+
+function getTimestampEpoch(value: unknown): number | undefined {
+    if (typeof value !== "string") {
+        return undefined;
+    }
 
     const timestamp = Date.parse(value);
-    if (Number.isNaN(timestamp)) return undefined;
+    if (Number.isNaN(timestamp)) {
+        return undefined;
+    }
+
+    return timestamp;
+}
+
+function getValidIsoTimestamp(value: unknown): string | undefined {
+    const timestamp = getTimestampEpoch(value);
+    if (timestamp === undefined) {
+        return undefined;
+    }
 
     return new Date(timestamp).toISOString();
 }

@@ -35,7 +35,7 @@ describe("createSessionIndexer", () => {
         expect(projectA.sessions[0].firstUserMessagePreview).toBe("Implement feature A with tests");
         expect(projectA.sessions[0].messageCount).toBe(2);
         expect(projectA.sessions[0].lastModel).toBe("gpt-5.3-codex");
-        expect(projectA.sessions[0].updatedAt).toBe("2026-02-01T00:00:06.000Z");
+        expect(projectA.sessions[0].updatedAt).toBe("2026-02-01T00:00:05.000Z");
 
         const projectB = groups.find((group) => group.cwd === "/tmp/project-b");
         if (!projectB) throw new Error("Expected /tmp/project-b group");
@@ -148,6 +148,143 @@ describe("createSessionIndexer", () => {
 
             const allTree = await sessionIndexer.getSessionTree(sessionPath, "all");
             expect(allTree.entries.map((entry) => entry.entryId)).toEqual(["m1", "l1", "c1"]);
+        } finally {
+            await fs.rm(tempRoot, { recursive: true, force: true });
+        }
+    });
+
+    it("maps current leaf to nearest visible ancestor when filter hides tail entries", async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-tree-active-leaf-"));
+
+        try {
+            const projectDir = path.join(tempRoot, "--tmp-project-tree-leaf--");
+            await fs.mkdir(projectDir, { recursive: true });
+
+            const sessionPath = path.join(projectDir, "2026-02-03T00-00-00-000Z_l2222222.jsonl");
+            await fs.writeFile(
+                sessionPath,
+                [
+                    JSON.stringify({
+                        type: "session",
+                        version: 3,
+                        id: "l2222222",
+                        timestamp: "2026-02-03T00:00:00.000Z",
+                        cwd: "/tmp/project-tree-leaf",
+                    }),
+                    JSON.stringify({
+                        type: "message",
+                        id: "m1",
+                        parentId: null,
+                        timestamp: "2026-02-03T00:00:01.000Z",
+                        message: { role: "user", content: "hello" },
+                    }),
+                    JSON.stringify({
+                        type: "message",
+                        id: "m2",
+                        parentId: "m1",
+                        timestamp: "2026-02-03T00:00:02.000Z",
+                        message: { role: "assistant", content: [{ type: "text", text: "reply" }] },
+                    }),
+                    JSON.stringify({
+                        type: "label",
+                        id: "l1",
+                        parentId: "m2",
+                        timestamp: "2026-02-03T00:00:03.000Z",
+                        targetId: "m2",
+                        label: "checkpoint",
+                    }),
+                ].join("\n"),
+                "utf-8",
+            );
+
+            const sessionIndexer = createSessionIndexer({
+                sessionsDirectory: tempRoot,
+                logger: createLogger("silent"),
+            });
+
+            const allTree = await sessionIndexer.getSessionTree(sessionPath, "all");
+            expect(allTree.currentLeafId).toBe("l1");
+
+            const defaultTree = await sessionIndexer.getSessionTree(sessionPath, "default");
+            expect(defaultTree.entries.map((entry) => entry.entryId)).toEqual(["m1", "m2"]);
+            expect(defaultTree.currentLeafId).toBe("m2");
+        } finally {
+            await fs.rm(tempRoot, { recursive: true, force: true });
+        }
+    });
+
+    it("normalizes legacy entries without ids and preserves linear ancestry", async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-tree-legacy-format-"));
+
+        try {
+            const projectDir = path.join(tempRoot, "--tmp-project-legacy--");
+            await fs.mkdir(projectDir, { recursive: true });
+
+            const sessionPath = path.join(projectDir, "2026-02-03T00-00-00-000Z_v1111111.jsonl");
+            await fs.writeFile(
+                sessionPath,
+                [
+                    JSON.stringify({
+                        type: "session",
+                        version: 1,
+                        id: "v1111111",
+                        timestamp: "2026-02-03T00:00:00.000Z",
+                        cwd: "/tmp/project-legacy",
+                    }),
+                    JSON.stringify({
+                        type: "message",
+                        timestamp: "2026-02-03T00:00:01.000Z",
+                        message: {
+                            role: "user",
+                            content: [
+                                { type: "text", text: "hello" },
+                                { type: "text", text: "world" },
+                            ],
+                        },
+                    }),
+                    JSON.stringify({
+                        type: "message",
+                        timestamp: "2026-02-03T00:00:02.000Z",
+                        message: {
+                            role: "assistant",
+                            content: [{ type: "text", text: "done" }],
+                            model: "gpt-5.3-codex",
+                        },
+                    }),
+                    JSON.stringify({
+                        type: "custom_message",
+                        timestamp: "2026-02-03T00:00:03.000Z",
+                        customType: "pi-mobile",
+                        content: [{ type: "text", text: "extension note" }],
+                        display: true,
+                    }),
+                ].join("\n"),
+                "utf-8",
+            );
+
+            const sessionIndexer = createSessionIndexer({
+                sessionsDirectory: tempRoot,
+                logger: createLogger("silent"),
+            });
+
+            const groups = await sessionIndexer.listSessions();
+            expect(groups[0]?.sessions[0]?.firstUserMessagePreview).toBe("hello world");
+
+            const tree = await sessionIndexer.getSessionTree(sessionPath, "default");
+            expect(tree.entries.map((entry) => entry.entryId)).toEqual([
+                "legacy-00000000",
+                "legacy-00000001",
+                "legacy-00000002",
+            ]);
+            expect(tree.entries.map((entry) => entry.parentId)).toEqual([
+                null,
+                "legacy-00000000",
+                "legacy-00000001",
+            ]);
+            expect(tree.entries[2]?.role).toBe("custom");
+            expect(tree.entries[2]?.preview).toBe("extension note");
+            expect(tree.currentLeafId).toBe("legacy-00000002");
+            expect(tree.rootIds).toEqual(["legacy-00000000"]);
         } finally {
             await fs.rm(tempRoot, { recursive: true, force: true });
         }

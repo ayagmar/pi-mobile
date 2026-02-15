@@ -93,7 +93,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
 | 23 | H1 True `/tree` parity (in-place navigate) | DONE | feat(tree): add bridge-backed in-place tree navigation parity |  | ktlint✅ detekt✅ test✅ bridge✅ | Added bridge `bridge_navigate_tree` flow powered by internal Pi extension command (`ctx.navigateTree`), wired Chat jump action to in-place navigation (not fork), and propagated runtime current leaf to tree responses |
-| 24 | H2 Session parsing alignment with Pi internals | TODO |  |  |  |  |
+| 24 | H2 Session parsing alignment with Pi internals | DONE | refactor(bridge): align session index parsing with pi metadata semantics |  | ktlint✅ detekt✅ test✅ bridge✅ | Added resilient tree normalization for legacy entries without ids, aligned `updatedAt` to user/assistant activity semantics, and mapped hidden active leaves to visible ancestors under tree filters with compatibility tests |
 | 25 | H3 Incremental session history loading strategy | TODO |  |  |  |  |
 | 26 | H4 Extension-ize selected hardcoded workflows | TODO |  |  |  |  |
 
@@ -500,15 +500,33 @@ Notes/blockers:
 - Bridge now tracks runtime current leaf from navigation results and overlays it into `bridge_get_session_tree` responses for active sessions.
 ```
 
+### 2026-02-15
+
+```text
+Task: H2
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Reworked bridge session index parsing to normalize legacy/id-missing entries into deterministic tree ids and linear parent chains.
+- Aligned `updatedAt` metadata with Pi internals by using last user/assistant activity timestamps instead of arbitrary last entry timestamps.
+- Improved tree snapshot parity by mapping hidden active leaves to nearest visible ancestors and expanding compatibility coverage in `session-indexer` tests.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 23
+- Backlog done: 24
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 3
+- Backlog remaining (not done): 2
 - Reference completed items (not counted in backlog): 6
 
 ---
