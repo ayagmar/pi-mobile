@@ -1,13 +1,18 @@
 package com.ayagmar.pimobile.chat
 
 import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
+import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
+import com.ayagmar.pimobile.testutil.FakeSessionController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -153,6 +158,37 @@ class ChatViewModelWorkflowCommandTest {
             assertTrue(viewModel.uiState.value.isStatsSheetVisible)
         }
 
+    @Test
+    fun sessionSwitchResponseReloadsTimelineFromActiveSession() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.messagesPayload = historyWithUserMessages(prefix = "old")
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            assertTrue(
+                viewModel.uiState.value.timeline
+                    .filterIsInstance<ChatTimelineItem.User>()
+                    .any { it.text == "old" },
+            )
+
+            controller.messagesPayload = historyWithUserMessages(prefix = "new")
+            controller.emitEvent(
+                RpcResponse(
+                    type = "response",
+                    command = "switch_session",
+                    success = true,
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitTimelineContainsText(viewModel = viewModel, expectedText = "new")
+
+            val userMessages = viewModel.uiState.value.timeline.filterIsInstance<ChatTimelineItem.User>()
+            assertTrue(userMessages.any { it.text == "new" })
+            assertTrue(userMessages.none { it.text == "old" })
+        }
+
     private fun awaitInitialLoad(viewModel: ChatViewModel) {
         repeat(INITIAL_LOAD_WAIT_ATTEMPTS) {
             if (!viewModel.uiState.value.isLoading) {
@@ -166,6 +202,40 @@ class ChatViewModelWorkflowCommandTest {
             "Timed out waiting for initial chat history load: " +
                 "isLoading=${state.isLoading}, error=${state.errorMessage}, timeline=${state.timeline.size}",
         )
+    }
+
+    private fun historyWithUserMessages(prefix: String) =
+        buildJsonObject {
+            put(
+                "messages",
+                buildJsonArray {
+                    add(
+                        buildJsonObject {
+                            put("role", "user")
+                            put("content", prefix)
+                        },
+                    )
+                },
+            )
+        }
+
+    private fun awaitTimelineContainsText(
+        viewModel: ChatViewModel,
+        expectedText: String,
+    ) {
+        repeat(INITIAL_LOAD_WAIT_ATTEMPTS) {
+            val hasExpectedText =
+                viewModel.uiState.value.timeline
+                    .filterIsInstance<ChatTimelineItem.User>()
+                    .any { it.text == expectedText }
+            if (hasExpectedText) {
+                return
+            }
+            Thread.sleep(INITIAL_LOAD_WAIT_STEP_MS)
+        }
+
+        val userMessages = viewModel.uiState.value.timeline.filterIsInstance<ChatTimelineItem.User>()
+        error("Timed out waiting for timeline to contain '$expectedText'. Current users=$userMessages")
     }
 
     private companion object {
