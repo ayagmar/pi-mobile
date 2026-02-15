@@ -30,7 +30,10 @@ interface SessionController {
 
     suspend fun getState(): Result<RpcResponse>
 
-    suspend fun sendPrompt(message: String): Result<Unit>
+    suspend fun sendPrompt(
+        message: String,
+        images: List<com.ayagmar.pimobile.corerpc.ImagePayload> = emptyList(),
+    ): Result<Unit>
 
     suspend fun abort(): Result<Unit>
 

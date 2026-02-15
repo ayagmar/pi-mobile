@@ -55,12 +55,12 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 
 | Task | Status | Commit | Verification | Notes |
 |------|--------|--------|--------------|-------|
-| **4.1** Auto-Compaction Toggle | `TODO` | - | - | Settings toggles for auto features |
-| **4.2** Image Attachment Support | `TODO` | - | - | Photo picker + camera for image prompts |
+| **4.1** Auto-Compaction Toggle | `DONE` | 6c2153d | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Settings toggles with SharedPreferences persistence |
+| **4.2** Image Attachment Support | `DONE` | 932628a | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Photo picker, thumbnails, base64 encoding, size limit |
 
 ### Phase 4 Completion Criteria
-- [ ] Auto-compaction/retry toggles work
-- [ ] Images can be attached to prompts
+- [x] Auto-compaction/retry toggles work
+- [x] Images can be attached to prompts
 
 ---
 
@@ -104,8 +104,8 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 | `get_session_stats` | ✅ DONE | For stats display |
 | `bash` | ✅ DONE | For bash execution |
 | `abort_bash` | ✅ DONE | For bash cancellation |
-| `set_auto_compaction` | ⬜ TODO | Need for settings toggle |
-| `set_auto_retry` | ⬜ TODO | Need for settings toggle |
+| `set_auto_compaction` | ✅ DONE | For settings toggle |
+| `set_auto_retry` | ✅ DONE | For settings toggle |
 | `set_steering_mode` | ⬜ TODO | Low priority |
 | `set_follow_up_mode` | ⬜ TODO | Low priority |
 

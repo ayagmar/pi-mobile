@@ -24,6 +24,7 @@ import com.ayagmar.pimobile.corerpc.GetAvailableModelsCommand
 import com.ayagmar.pimobile.corerpc.GetCommandsCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
 import com.ayagmar.pimobile.corerpc.GetSessionStatsCommand
+import com.ayagmar.pimobile.corerpc.ImagePayload
 import com.ayagmar.pimobile.corerpc.NewSessionCommand
 import com.ayagmar.pimobile.corerpc.PromptCommand
 import com.ayagmar.pimobile.corerpc.RpcCommand
@@ -252,7 +253,10 @@ class RpcSessionController(
         return refreshCurrentSessionPath(connection)
     }
 
-    override suspend fun sendPrompt(message: String): Result<Unit> {
+    override suspend fun sendPrompt(
+        message: String,
+        images: List<ImagePayload>,
+    ): Result<Unit> {
         return mutex.withLock {
             runCatching {
                 val connection = ensureActiveConnection()
@@ -261,6 +265,7 @@ class RpcSessionController(
                     PromptCommand(
                         id = UUID.randomUUID().toString(),
                         message = message,
+                        images = images,
                         streamingBehavior = if (isCurrentlyStreaming) "steer" else null,
                     )
                 connection.sendCommand(command)

@@ -39,6 +39,7 @@ import kotlinx.serialization.json.jsonPrimitive
 @Suppress("TooManyFunctions", "LargeClass")
 class ChatViewModel(
     private val sessionController: SessionController,
+    private val imageEncoder: ImageEncoder? = null,
 ) : ViewModel() {
     private val assembler = AssistantTextAssembler()
     private val _uiState = MutableStateFlow(ChatUiState(isLoading = true))
@@ -63,9 +64,15 @@ class ChatViewModel(
         PerformanceMetrics.recordPromptSend()
         hasRecordedFirstToken = false
 
+        val images = _uiState.value.pendingImages
+
         viewModelScope.launch {
-            _uiState.update { it.copy(inputText = "", errorMessage = null) }
-            val result = sessionController.sendPrompt(message)
+            val imagePayloads =
+                images.mapNotNull { pending ->
+                    imageEncoder?.encodeToPayload(pending)
+                }
+            _uiState.update { it.copy(inputText = "", pendingImages = emptyList(), errorMessage = null) }
+            val result = sessionController.sendPrompt(message, imagePayloads)
             if (result.isFailure) {
                 _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
             }
@@ -831,6 +838,28 @@ class ChatViewModel(
         }
     }
 
+    fun addImage(pendingImage: PendingImage) {
+        if (pendingImage.sizeBytes > ImageEncoder.MAX_IMAGE_SIZE_BYTES) {
+            _uiState.update { it.copy(errorMessage = "Image too large (max 5MB)") }
+            return
+        }
+        _uiState.update { state ->
+            state.copy(pendingImages = state.pendingImages + pendingImage)
+        }
+    }
+
+    fun removeImage(index: Int) {
+        _uiState.update { state ->
+            state.copy(
+                pendingImages = state.pendingImages.filterIndexed { i, _ -> i != index },
+            )
+        }
+    }
+
+    fun clearImages() {
+        _uiState.update { it.copy(pendingImages = emptyList()) }
+    }
+
     companion object {
         private const val TOOL_COLLAPSE_THRESHOLD = 400
         private const val THINKING_COLLAPSE_THRESHOLD = 280
@@ -876,6 +905,15 @@ data class ChatUiState(
     val availableModels: List<AvailableModel> = emptyList(),
     val modelsQuery: String = "",
     val isLoadingModels: Boolean = false,
+    // Image attachments
+    val pendingImages: List<PendingImage> = emptyList(),
+)
+
+data class PendingImage(
+    val uri: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val displayName: String?,
 )
 
 data class ExtensionNotification(
@@ -955,14 +993,19 @@ data class EditDiffInfo(
     val newString: String,
 )
 
-class ChatViewModelFactory : ViewModelProvider.Factory {
+class ChatViewModelFactory(
+    private val imageEncoder: ImageEncoder? = null,
+) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         check(modelClass == ChatViewModel::class.java) {
             "Unsupported ViewModel class: ${modelClass.name}"
         }
 
         @Suppress("UNCHECKED_CAST")
-        return ChatViewModel(sessionController = AppServices.sessionController()) as T
+        return ChatViewModel(
+            sessionController = AppServices.sessionController(),
+            imageEncoder = imageEncoder,
+        ) as T
     }
 }
 

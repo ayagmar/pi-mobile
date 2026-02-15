@@ -2,6 +2,10 @@
 
 package com.ayagmar.pimobile.ui.chat
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,7 +20,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -25,6 +31,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -63,13 +70,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.ayagmar.pimobile.chat.ChatTimelineItem
 import com.ayagmar.pimobile.chat.ChatUiState
 import com.ayagmar.pimobile.chat.ChatViewModel
@@ -77,6 +87,8 @@ import com.ayagmar.pimobile.chat.ChatViewModelFactory
 import com.ayagmar.pimobile.chat.ExtensionNotification
 import com.ayagmar.pimobile.chat.ExtensionUiRequest
 import com.ayagmar.pimobile.chat.ExtensionWidget
+import com.ayagmar.pimobile.chat.ImageEncoder
+import com.ayagmar.pimobile.chat.PendingImage
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.SessionStats
 import com.ayagmar.pimobile.sessions.ModelInfo
@@ -117,11 +129,17 @@ private data class ChatCallbacks(
     val onHideModelPicker: () -> Unit,
     val onModelsQueryChanged: (String) -> Unit,
     val onSelectModel: (AvailableModel) -> Unit,
+    // Image attachment callbacks
+    val onAddImage: (PendingImage) -> Unit,
+    val onRemoveImage: (Int) -> Unit,
+    val onClearImages: () -> Unit,
 )
 
 @Composable
 fun ChatRoute() {
-    val factory = remember { ChatViewModelFactory() }
+    val context = LocalContext.current
+    val imageEncoder = remember { ImageEncoder(context) }
+    val factory = remember { ChatViewModelFactory(imageEncoder = imageEncoder) }
     val chatViewModel: ChatViewModel = viewModel(factory = factory)
     val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
 
@@ -159,6 +177,9 @@ fun ChatRoute() {
                 onHideModelPicker = chatViewModel::hideModelPicker,
                 onModelsQueryChanged = chatViewModel::onModelsQueryChanged,
                 onSelectModel = chatViewModel::selectModel,
+                onAddImage = chatViewModel::addImage,
+                onRemoveImage = chatViewModel::removeImage,
+                onClearImages = chatViewModel::clearImages,
             )
         }
 
@@ -1089,9 +1110,12 @@ private fun PromptControls(
         PromptInputRow(
             inputText = state.inputText,
             isStreaming = state.isStreaming,
+            pendingImages = state.pendingImages,
             onInputTextChanged = callbacks.onInputTextChanged,
             onSendPrompt = callbacks.onSendPrompt,
             onShowCommandPalette = callbacks.onShowCommandPalette,
+            onAddImage = callbacks.onAddImage,
+            onRemoveImage = callbacks.onRemoveImage,
         )
     }
 
@@ -1161,50 +1185,194 @@ private fun StreamingControls(
     }
 }
 
+@Suppress("LongMethod", "LongParameterList")
 @Composable
 private fun PromptInputRow(
     inputText: String,
     isStreaming: Boolean,
+    pendingImages: List<PendingImage>,
     onInputTextChanged: (String) -> Unit,
     onSendPrompt: () -> Unit,
     onShowCommandPalette: () -> Unit = {},
+    onAddImage: (PendingImage) -> Unit,
+    onRemoveImage: (Int) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        OutlinedTextField(
-            value = inputText,
-            onValueChange = onInputTextChanged,
-            modifier = Modifier.weight(1f),
-            placeholder = { Text("Type a message...") },
-            singleLine = false,
-            maxLines = 4,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { onSendPrompt() }),
-            enabled = !isStreaming,
-            trailingIcon = {
-                if (inputText.isEmpty() && !isStreaming) {
-                    IconButton(onClick = onShowCommandPalette) {
-                        Icon(
-                            imageVector = androidx.compose.material.icons.Icons.Default.Menu,
-                            contentDescription = "Commands",
-                        )
-                    }
-                }
-            },
-        )
+    val context = LocalContext.current
+    val imageEncoder = remember { ImageEncoder(context) }
 
-        IconButton(
-            onClick = onSendPrompt,
-            enabled = inputText.isNotBlank() && !isStreaming,
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Send,
-                contentDescription = "Send",
+    val photoPickerLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.PickMultipleVisualMedia(),
+        ) { uris ->
+            uris.forEach { uri ->
+                imageEncoder.getImageInfo(uri)?.let { info -> onAddImage(info) }
+            }
+        }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Pending images strip
+        if (pendingImages.isNotEmpty()) {
+            ImageAttachmentStrip(
+                images = pendingImages,
+                onRemove = onRemoveImage,
             )
         }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Attachment button
+            IconButton(
+                onClick = {
+                    photoPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                },
+                enabled = !isStreaming,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AttachFile,
+                    contentDescription = "Attach Image",
+                )
+            }
+
+            OutlinedTextField(
+                value = inputText,
+                onValueChange = onInputTextChanged,
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Type a message...") },
+                singleLine = false,
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { onSendPrompt() }),
+                enabled = !isStreaming,
+                trailingIcon = {
+                    if (inputText.isEmpty() && !isStreaming) {
+                        IconButton(onClick = onShowCommandPalette) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Commands",
+                            )
+                        }
+                    }
+                },
+            )
+
+            IconButton(
+                onClick = onSendPrompt,
+                enabled = (inputText.isNotBlank() || pendingImages.isNotEmpty()) && !isStreaming,
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImageAttachmentStrip(
+    images: List<PendingImage>,
+    onRemove: (Int) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        itemsIndexed(images) { index, image ->
+            ImageThumbnail(
+                image = image,
+                onRemove = { onRemove(index) },
+            )
+        }
+    }
+}
+
+@Suppress("MagicNumber", "LongMethod")
+@Composable
+private fun ImageThumbnail(
+    image: PendingImage,
+    onRemove: () -> Unit,
+) {
+    Box(
+        modifier =
+            Modifier
+                .size(72.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        val uri = remember(image.uri) { Uri.parse(image.uri) }
+        AsyncImage(
+            model = uri,
+            contentDescription = image.displayName,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+
+        // Size warning badge
+        if (image.sizeBytes > ImageEncoder.MAX_IMAGE_SIZE_BYTES) {
+            Box(
+                modifier =
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .padding(2.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.error)
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    text = ">5MB",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onError,
+                )
+            }
+        }
+
+        // Remove button
+        IconButton(
+            onClick = onRemove,
+            modifier =
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .size(20.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Remove",
+                modifier = Modifier.size(14.dp),
+            )
+        }
+
+        // File name / size label
+        Box(
+            modifier =
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
+                    .padding(2.dp),
+        ) {
+            Text(
+                text = formatFileSize(image.sizeBytes),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+    }
+}
+
+@Suppress("MagicNumber")
+private fun formatFileSize(bytes: Long): String {
+    return when {
+        bytes >= 1_048_576 -> String.format(java.util.Locale.US, "%.1fMB", bytes / 1_048_576.0)
+        bytes >= 1_024 -> String.format(java.util.Locale.US, "%.0fKB", bytes / 1_024.0)
+        else -> "${bytes}B"
     }
 }
 
