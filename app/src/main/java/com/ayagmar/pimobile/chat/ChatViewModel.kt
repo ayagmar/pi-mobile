@@ -10,12 +10,17 @@ import com.ayagmar.pimobile.corerpc.AutoCompactionStartEvent
 import com.ayagmar.pimobile.corerpc.AutoRetryEndEvent
 import com.ayagmar.pimobile.corerpc.AutoRetryStartEvent
 import com.ayagmar.pimobile.corerpc.AvailableModel
+import com.ayagmar.pimobile.corerpc.ExtensionErrorEvent
 import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
+import com.ayagmar.pimobile.corerpc.MessageEndEvent
+import com.ayagmar.pimobile.corerpc.MessageStartEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
 import com.ayagmar.pimobile.corerpc.SessionStats
 import com.ayagmar.pimobile.corerpc.ToolExecutionEndEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionStartEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionUpdateEvent
+import com.ayagmar.pimobile.corerpc.TurnEndEvent
+import com.ayagmar.pimobile.corerpc.TurnStartEvent
 import com.ayagmar.pimobile.di.AppServices
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import com.ayagmar.pimobile.sessions.ModelInfo
@@ -238,15 +243,21 @@ class ChatViewModel(
         }
     }
 
+    @Suppress("CyclomaticComplexMethod")
     private fun observeEvents() {
         viewModelScope.launch {
             sessionController.rpcEvents.collect { event ->
                 when (event) {
                     is MessageUpdateEvent -> handleMessageUpdate(event)
+                    is MessageStartEvent -> handleMessageStart(event)
+                    is MessageEndEvent -> handleMessageEnd(event)
+                    is TurnStartEvent -> handleTurnStart()
+                    is TurnEndEvent -> handleTurnEnd(event)
                     is ToolExecutionStartEvent -> handleToolStart(event)
                     is ToolExecutionUpdateEvent -> handleToolUpdate(event)
                     is ToolExecutionEndEvent -> handleToolEnd(event)
                     is ExtensionUiRequestEvent -> handleExtensionUiRequest(event)
+                    is ExtensionErrorEvent -> handleExtensionError(event)
                     is AutoCompactionStartEvent -> handleCompactionStart(event)
                     is AutoCompactionEndEvent -> handleCompactionEnd(event)
                     is AutoRetryStartEvent -> handleRetryStart(event)
@@ -326,16 +337,10 @@ class ChatViewModel(
     }
 
     private fun addNotification(event: ExtensionUiRequestEvent) {
-        _uiState.update {
-            it.copy(
-                notifications =
-                    it.notifications +
-                        ExtensionNotification(
-                            message = event.message ?: "",
-                            type = event.notifyType ?: "info",
-                        ),
-            )
-        }
+        appendNotification(
+            message = event.message.orEmpty(),
+            type = event.notifyType ?: "info",
+        )
     }
 
     private fun updateExtensionStatus(event: ExtensionUiRequestEvent) {
@@ -382,6 +387,33 @@ class ChatViewModel(
         }
     }
 
+    private fun handleMessageStart(event: MessageStartEvent) {
+        val role = event.message?.stringField("role") ?: "assistant"
+        addSystemNotification("$role message started", "info")
+    }
+
+    private fun handleMessageEnd(event: MessageEndEvent) {
+        val role = event.message?.stringField("role") ?: "assistant"
+        addSystemNotification("$role message completed", "info")
+    }
+
+    private fun handleTurnStart() {
+        addSystemNotification("Turn started", "info")
+    }
+
+    private fun handleTurnEnd(event: TurnEndEvent) {
+        val toolResultCount = event.toolResults?.size ?: 0
+        val summary = if (toolResultCount > 0) "Turn completed ($toolResultCount tool results)" else "Turn completed"
+        addSystemNotification(summary, "info")
+    }
+
+    private fun handleExtensionError(event: ExtensionErrorEvent) {
+        val extension = firstNonBlank(event.extensionPath, event.path, "unknown-extension")
+        val sourceEvent = firstNonBlank(event.event, event.extensionEvent, "unknown-event")
+        val error = firstNonBlank(event.error, event.message, "Unknown extension error")
+        addSystemNotification("Extension error [$extension:$sourceEvent] $error", "error")
+    }
+
     private fun handleCompactionStart(event: AutoCompactionStartEvent) {
         val message =
             when (event.reason) {
@@ -424,16 +456,23 @@ class ChatViewModel(
         message: String,
         type: String,
     ) {
-        _uiState.update {
-            it.copy(
-                notifications =
-                    it.notifications +
-                        ExtensionNotification(
-                            message = message,
-                            type = type,
-                        ),
-            )
+        appendNotification(message = message, type = type)
+    }
+
+    private fun appendNotification(
+        message: String,
+        type: String,
+    ) {
+        _uiState.update { state ->
+            val nextNotifications =
+                (state.notifications + ExtensionNotification(message = message, type = type))
+                    .takeLast(MAX_NOTIFICATIONS)
+            state.copy(notifications = nextNotifications)
         }
+    }
+
+    private fun firstNonBlank(vararg values: String?): String {
+        return values.firstOrNull { !it.isNullOrBlank() }.orEmpty()
     }
 
     fun sendExtensionUiResponse(
@@ -864,6 +903,7 @@ class ChatViewModel(
         private const val TOOL_COLLAPSE_THRESHOLD = 400
         private const val THINKING_COLLAPSE_THRESHOLD = 280
         private const val BASH_HISTORY_SIZE = 10
+        private const val MAX_NOTIFICATIONS = 6
     }
 }
 
