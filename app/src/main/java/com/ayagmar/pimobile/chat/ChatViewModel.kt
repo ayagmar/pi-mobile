@@ -49,6 +49,10 @@ class ChatViewModel(
 ) : ViewModel() {
     private val assembler = AssistantTextAssembler()
     private val _uiState = MutableStateFlow(ChatUiState(isLoading = true))
+    private val recentLifecycleNotificationTimestamps = ArrayDeque<Long>()
+    private var lastLifecycleNotificationMessage: String? = null
+    private var lastLifecycleNotificationTimestampMs: Long = 0L
+
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     init {
@@ -390,22 +394,22 @@ class ChatViewModel(
 
     private fun handleMessageStart(event: MessageStartEvent) {
         val role = event.message?.stringField("role") ?: "assistant"
-        addSystemNotification("$role message started", "info")
+        addLifecycleNotification("$role message started")
     }
 
     private fun handleMessageEnd(event: MessageEndEvent) {
         val role = event.message?.stringField("role") ?: "assistant"
-        addSystemNotification("$role message completed", "info")
+        addLifecycleNotification("$role message completed")
     }
 
     private fun handleTurnStart() {
-        addSystemNotification("Turn started", "info")
+        addLifecycleNotification("Turn started")
     }
 
     private fun handleTurnEnd(event: TurnEndEvent) {
         val toolResultCount = event.toolResults?.size ?: 0
         val summary = if (toolResultCount > 0) "Turn completed ($toolResultCount tool results)" else "Turn completed"
-        addSystemNotification(summary, "info")
+        addLifecycleNotification(summary)
     }
 
     private fun handleExtensionError(event: ExtensionErrorEvent) {
@@ -469,6 +473,37 @@ class ChatViewModel(
                 (state.notifications + ExtensionNotification(message = message, type = type))
                     .takeLast(MAX_NOTIFICATIONS)
             state.copy(notifications = nextNotifications)
+        }
+    }
+
+    private fun addLifecycleNotification(message: String) {
+        val now = System.currentTimeMillis()
+
+        trimLifecycleNotificationWindow(now)
+
+        val shouldDropAsDuplicate =
+            lastLifecycleNotificationMessage == message &&
+                now - lastLifecycleNotificationTimestampMs < LIFECYCLE_DUPLICATE_WINDOW_MS
+
+        val shouldDropAsBurst = recentLifecycleNotificationTimestamps.size >= MAX_LIFECYCLE_NOTIFICATIONS_PER_WINDOW
+
+        if (shouldDropAsDuplicate || shouldDropAsBurst) {
+            return
+        }
+
+        recentLifecycleNotificationTimestamps.addLast(now)
+        lastLifecycleNotificationMessage = message
+        lastLifecycleNotificationTimestampMs = now
+        addSystemNotification(message, "info")
+    }
+
+    private fun trimLifecycleNotificationWindow(now: Long) {
+        while (recentLifecycleNotificationTimestamps.isNotEmpty()) {
+            val oldest = recentLifecycleNotificationTimestamps.first()
+            if (now - oldest <= LIFECYCLE_NOTIFICATION_WINDOW_MS) {
+                return
+            }
+            recentLifecycleNotificationTimestamps.removeFirst()
         }
     }
 
@@ -961,6 +996,9 @@ class ChatViewModel(
         private const val THINKING_COLLAPSE_THRESHOLD = 280
         private const val BASH_HISTORY_SIZE = 10
         private const val MAX_NOTIFICATIONS = 6
+        private const val LIFECYCLE_NOTIFICATION_WINDOW_MS = 5_000L
+        private const val LIFECYCLE_DUPLICATE_WINDOW_MS = 1_200L
+        private const val MAX_LIFECYCLE_NOTIFICATIONS_PER_WINDOW = 4
     }
 }
 
