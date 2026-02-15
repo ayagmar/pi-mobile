@@ -6,9 +6,14 @@ An Android client for the [Pi coding agent](https://github.com/badlogic/pi-mono)
 
 Pi runs on your laptop. This app lets you:
 - Browse and resume coding sessions from anywhere
-- Chat with the agent, send prompts, abort, steer
+- Chat with the agent, send prompts, abort, steer, and follow up
+- Discover slash commands from an in-app command palette
+- View streaming thinking/tool blocks with collapse/expand controls
+- Open a built-in bash dialog (run/abort/history/copy output)
+- Inspect session stats and pick models from an advanced model picker
+- Attach images to prompts
+- Navigate session tree branches and fork from selected entries
 - Switch between projects (different working directories)
-- Manage models and thinking levels
 - Handle extension dialogs (confirmations, inputs, selections)
 
 The connection goes over Tailscale, so it works anywhere without port forwarding.
@@ -88,6 +93,17 @@ Bridge forwards events → App
     ↓
 App renders streaming text/tools
 ```
+
+## Chat UX Highlights
+
+- **Thinking blocks**: streaming reasoning appears separately and can be collapsed/expanded.
+- **Tool cards**: tool args/output are grouped with icons and expandable output.
+- **Edit diff viewer**: `edit` tool calls show before/after content.
+- **Command palette**: insert slash commands quickly from the prompt field menu.
+- **Bash dialog**: execute shell commands with timeout/truncation handling and history.
+- **Session stats sheet**: token/cost/message counters and session path.
+- **Model picker**: provider-aware searchable model selection.
+- **Tree navigator**: inspect branch points and fork from chosen entries.
 
 ## Troubleshooting
 
@@ -186,9 +202,9 @@ Debug builds include logging and assertions. Release builds (if you make them) s
 ## Limitations
 
 - No offline mode - requires live connection to laptop
-- Large tool outputs are truncated (400+ chars collapsed by default)
-- Session history loads once on resume, not incrementally
-- Image attachments not supported (text only)
+- Session history currently loads in full on resume (no incremental pagination)
+- Tree navigation is MVP-level (functional, minimal rendering)
+- Mobile keyboard shortcuts vary by device/IME
 
 ## Testing
 
