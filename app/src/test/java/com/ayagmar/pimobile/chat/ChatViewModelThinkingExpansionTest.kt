@@ -6,7 +6,6 @@ import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.corerpc.AssistantMessageEvent
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.BashResult
-import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
 import com.ayagmar.pimobile.corerpc.ImagePayload
 import com.ayagmar.pimobile.corerpc.MessageEndEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
@@ -343,48 +342,6 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
-    fun loadingCommandsHidesInternalBridgeWorkflowCommands() =
-        runTest(dispatcher) {
-            val controller = FakeSessionController()
-            controller.availableCommands =
-                listOf(
-                    SlashCommandInfo(
-                        name = "pi-mobile-tree",
-                        description = "Internal",
-                        source = "extension",
-                        location = null,
-                        path = null,
-                    ),
-                    SlashCommandInfo(
-                        name = "pi-mobile-open-stats",
-                        description = "Internal",
-                        source = "extension",
-                        location = null,
-                        path = null,
-                    ),
-                    SlashCommandInfo(
-                        name = "fix-tests",
-                        description = "Fix failing tests",
-                        source = "prompt",
-                        location = "project",
-                        path = "/tmp/fix-tests.md",
-                    ),
-                )
-
-            val viewModel = ChatViewModel(sessionController = controller)
-            dispatcher.scheduler.advanceUntilIdle()
-            awaitInitialLoad(viewModel)
-
-            viewModel.showCommandPalette()
-            dispatcher.scheduler.advanceUntilIdle()
-
-            val commandNames = viewModel.uiState.value.commands.map { it.name }
-            assertTrue(commandNames.contains("fix-tests"))
-            assertFalse(commandNames.contains("pi-mobile-tree"))
-            assertFalse(commandNames.contains("pi-mobile-open-stats"))
-        }
-
-    @Test
     fun sendingInteractiveBuiltinShowsExplicitMessageWithoutRpcSend() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
@@ -420,52 +377,6 @@ class ChatViewModelThinkingExpansionTest {
             dispatcher.scheduler.advanceUntilIdle()
 
             assertTrue(viewModel.uiState.value.isTreeSheetVisible)
-        }
-
-    @Test
-    fun selectingBridgeBackedBuiltinStatsInvokesInternalWorkflowCommand() =
-        runTest(dispatcher) {
-            val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
-            dispatcher.scheduler.advanceUntilIdle()
-            awaitInitialLoad(viewModel)
-
-            viewModel.onCommandSelected(
-                SlashCommandInfo(
-                    name = "stats",
-                    description = "Open stats",
-                    source = ChatViewModel.COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
-                    location = null,
-                    path = null,
-                ),
-            )
-            dispatcher.scheduler.advanceUntilIdle()
-
-            assertEquals(1, controller.sendPromptCallCount)
-            assertEquals("/pi-mobile-open-stats", controller.lastPromptMessage)
-            assertFalse(viewModel.uiState.value.isStatsSheetVisible)
-        }
-
-    @Test
-    fun internalWorkflowStatusActionCanOpenStatsSheet() =
-        runTest(dispatcher) {
-            val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
-            dispatcher.scheduler.advanceUntilIdle()
-            awaitInitialLoad(viewModel)
-
-            controller.emitEvent(
-                ExtensionUiRequestEvent(
-                    type = "extension_ui_request",
-                    id = "req-1",
-                    method = "setStatus",
-                    statusKey = "pi-mobile-workflow-action",
-                    statusText = "{\"action\":\"open_stats\"}",
-                ),
-            )
-            dispatcher.scheduler.advanceUntilIdle()
-
-            assertTrue(viewModel.uiState.value.isStatsSheetVisible)
         }
 
     @Test
@@ -738,7 +649,7 @@ class ChatViewModelThinkingExpansionTest {
     }
 }
 
-private class FakeSessionController : SessionController {
+internal class FakeSessionController : SessionController {
     private val events = MutableSharedFlow<RpcIncomingMessage>(extraBufferCapacity = 16)
 
     var availableCommands: List<SlashCommandInfo> = emptyList()

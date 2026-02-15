@@ -368,14 +368,38 @@ class ChatViewModel(
         onFailure: (() -> Unit)? = null,
     ) {
         viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+
+            val commandsResult = sessionController.getCommands()
+            val isCommandAvailable =
+                commandsResult.getOrNull()
+                    ?.any { command -> command.name.equals(commandName, ignoreCase = true) } == true
+
+            if (!isCommandAvailable) {
+                val message =
+                    commandsResult.exceptionOrNull()?.message
+                        ?: "Workflow command /$commandName is unavailable in this runtime"
+                handleWorkflowCommandFailure(message, onFailure)
+                return@launch
+            }
+
             val result = sessionController.sendPrompt(message = "/$commandName")
             if (result.isFailure) {
-                onFailure?.invoke()
-                    ?: _uiState.update {
-                        it.copy(errorMessage = result.exceptionOrNull()?.message)
-                    }
+                handleWorkflowCommandFailure(result.exceptionOrNull()?.message, onFailure)
             }
         }
+    }
+
+    private fun handleWorkflowCommandFailure(
+        message: String?,
+        onFailure: (() -> Unit)? = null,
+    ) {
+        if (onFailure != null) {
+            onFailure()
+            return
+        }
+
+        _uiState.update { it.copy(errorMessage = message ?: "Failed to run workflow command") }
     }
 
     private fun loadCommands() {
@@ -402,7 +426,8 @@ class ChatViewModel(
     }
 
     private fun mergeRpcCommandsWithBuiltins(rpcCommands: List<SlashCommandInfo>): List<SlashCommandInfo> {
-        val visibleRpcCommands = rpcCommands.filterNot { it.name in INTERNAL_HIDDEN_COMMAND_NAMES }
+        val visibleRpcCommands =
+            rpcCommands.filterNot { command -> command.name.lowercase() in INTERNAL_HIDDEN_COMMAND_NAMES }
         if (visibleRpcCommands.isEmpty()) {
             return BUILTIN_COMMANDS
         }

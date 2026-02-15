@@ -402,8 +402,11 @@ function resolveVisibleLeafId(
     parentIdsByEntryId: Map<string, string | null>,
 ): string | undefined {
     let current = leafId;
+    const visitedIds = new Set<string>();
 
-    while (current) {
+    while (current && !visitedIds.has(current)) {
+        visitedIds.add(current);
+
         if (visibleEntryIds.has(current)) {
             return current;
         }

@@ -8,6 +8,15 @@ interface WorkflowCommandContext {
     };
 }
 
+function resolveWorkflowAction(args: string): string | undefined {
+    const action = args.trim();
+    if (!action) {
+        return OPEN_STATS_ACTION;
+    }
+
+    return action === OPEN_STATS_ACTION ? action : undefined;
+}
+
 export default function registerPiMobileWorkflowExtension(pi: {
     registerCommand: (name: string, options: {
         description?: string;
@@ -16,8 +25,13 @@ export default function registerPiMobileWorkflowExtension(pi: {
 }): void {
     pi.registerCommand(STATS_COMMAND_NAME, {
         description: "Internal Pi Mobile workflow command",
-        handler: async (_args, ctx) => {
-            const payload = JSON.stringify({ action: OPEN_STATS_ACTION });
+        handler: async (args, ctx) => {
+            const action = resolveWorkflowAction(args);
+            if (!action) {
+                return;
+            }
+
+            const payload = JSON.stringify({ action });
             ctx.ui.setStatus(WORKFLOW_STATUS_KEY, payload);
             ctx.ui.setStatus(WORKFLOW_STATUS_KEY, undefined);
         },

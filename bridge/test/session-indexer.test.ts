@@ -213,6 +213,56 @@ describe("createSessionIndexer", () => {
         }
     });
 
+    it("does not loop indefinitely when resolving filtered active leaf cycles", async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-tree-cycle-"));
+
+        try {
+            const projectDir = path.join(tempRoot, "--tmp-project-tree-cycle--");
+            await fs.mkdir(projectDir, { recursive: true });
+
+            const sessionPath = path.join(projectDir, "2026-02-03T00-00-00-000Z_c2222222.jsonl");
+            await fs.writeFile(
+                sessionPath,
+                [
+                    JSON.stringify({
+                        type: "session",
+                        version: 3,
+                        id: "c2222222",
+                        timestamp: "2026-02-03T00:00:00.000Z",
+                        cwd: "/tmp/project-tree-cycle",
+                    }),
+                    JSON.stringify({
+                        type: "message",
+                        id: "m1",
+                        parentId: null,
+                        timestamp: "2026-02-03T00:00:01.000Z",
+                        message: { role: "user", content: "hello" },
+                    }),
+                    JSON.stringify({
+                        type: "label",
+                        id: "l1",
+                        parentId: "l1",
+                        timestamp: "2026-02-03T00:00:02.000Z",
+                        targetId: "m1",
+                        label: "self-cycle",
+                    }),
+                ].join("\n"),
+                "utf-8",
+            );
+
+            const sessionIndexer = createSessionIndexer({
+                sessionsDirectory: tempRoot,
+                logger: createLogger("silent"),
+            });
+
+            const defaultTree = await sessionIndexer.getSessionTree(sessionPath, "default");
+            expect(defaultTree.currentLeafId).toBeUndefined();
+            expect(defaultTree.entries.map((entry) => entry.entryId)).toEqual(["m1"]);
+        } finally {
+            await fs.rm(tempRoot, { recursive: true, force: true });
+        }
+    });
+
     it("normalizes legacy entries without ids and preserves linear ancestry", async () => {
         const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-tree-legacy-format-"));
 
