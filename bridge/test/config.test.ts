@@ -17,6 +17,7 @@ describe("parseBridgeConfig", () => {
             processIdleTtlMs: 300_000,
             reconnectGraceMs: 30_000,
             sessionDirectory: path.join(os.homedir(), ".pi", "agent", "sessions"),
+            enableHealthEndpoint: true,
         });
     });
 
@@ -29,6 +30,7 @@ describe("parseBridgeConfig", () => {
             BRIDGE_PROCESS_IDLE_TTL_MS: "90000",
             BRIDGE_RECONNECT_GRACE_MS: "12000",
             BRIDGE_SESSION_DIR: "./tmp/custom-sessions",
+            BRIDGE_ENABLE_HEALTH_ENDPOINT: "false",
         });
 
         expect(config.host).toBe("100.64.0.10");
@@ -38,6 +40,7 @@ describe("parseBridgeConfig", () => {
         expect(config.processIdleTtlMs).toBe(90_000);
         expect(config.reconnectGraceMs).toBe(12_000);
         expect(config.sessionDirectory).toBe(path.resolve("./tmp/custom-sessions"));
+        expect(config.enableHealthEndpoint).toBe(false);
     });
 
     it("fails on invalid port", () => {
@@ -60,5 +63,11 @@ describe("parseBridgeConfig", () => {
         expect(() =>
             parseBridgeConfig({ BRIDGE_AUTH_TOKEN: "test-token", BRIDGE_RECONNECT_GRACE_MS: "-1" }),
         ).toThrow("Invalid BRIDGE_RECONNECT_GRACE_MS: -1");
+    });
+
+    it("fails when health endpoint flag is invalid", () => {
+        expect(() =>
+            parseBridgeConfig({ BRIDGE_AUTH_TOKEN: "test-token", BRIDGE_ENABLE_HEALTH_ENDPOINT: "maybe" }),
+        ).toThrow("Invalid BRIDGE_ENABLE_HEALTH_ENDPOINT: maybe");
     });
 });

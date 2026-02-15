@@ -62,7 +62,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 |---|---|---|---|---|---|---|
 | 12 | F1 Bridge event isolation + lock correctness | DONE | fix(bridge): isolate rpc events to control owner per cwd |  | ktlint✅ detekt✅ test✅ bridge✅ | RPC forwarder events now require active control ownership before fan-out; added tests for shared-cwd isolation and post-release send rejection |
 | 13 | F2 Reconnect/resync race hardening | DONE | fix(core-net): harden reconnect resync epochs and pending requests |  | ktlint✅ detekt✅ test✅ bridge✅ | Added reconnect epoch gating, cancelled pending request responses on reconnect/disconnect, and synced streaming flag from resync snapshots |
-| 14 | F3 Bridge auth + exposure hardening | TODO |  |  |  |  |
+| 14 | F3 Bridge auth + exposure hardening | DONE | fix(bridge): harden token auth and exposure defaults |  | ktlint✅ detekt✅ test✅ bridge✅ | Added constant-time token hash compare, health endpoint exposure toggle, non-loopback bind warnings, and README security guidance |
 | 15 | F4 Android network security tightening | TODO |  |  |  |  |
 | 16 | F5 Bridge session index scalability | TODO |  |  |  |  |
 
@@ -320,15 +320,33 @@ Notes/blockers:
 - RpcSessionController now consumes resync snapshots and refreshes streaming flag from authoritative state.
 ```
 
+### 2026-02-15
+
+```text
+Task: F3
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Replaced direct token string equality with constant-time hash digest comparison.
+- Added explicit `BRIDGE_ENABLE_HEALTH_ENDPOINT` policy with tests for disabled `/health` behavior.
+- Added non-loopback host exposure warnings and documented hardened bridge configuration in README.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 13
+- Backlog done: 14
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 13
+- Backlog remaining (not done): 12
 - Reference completed items (not counted in backlog): 6
 
 ---

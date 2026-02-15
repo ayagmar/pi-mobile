@@ -701,6 +701,32 @@ describe("bridge websocket server", () => {
         wsReconnected.close();
     });
 
+    it("returns 404 when health endpoint is disabled", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        const logger = createLogger("silent");
+        const server = createBridgeServer(
+            {
+                host: "127.0.0.1",
+                port: 0,
+                logLevel: "silent",
+                authToken: "bridge-token",
+                processIdleTtlMs: 300_000,
+                reconnectGraceMs: 100,
+                sessionDirectory: "/tmp/pi-sessions",
+                enableHealthEndpoint: false,
+            },
+            logger,
+            { processManager: fakeProcessManager },
+        );
+        bridgeServer = server;
+
+        const serverInfo = await server.start();
+        const healthUrl = `http://127.0.0.1:${serverInfo.port}/health`;
+
+        const response = await fetch(healthUrl);
+        expect(response.status).toBe(404);
+    });
+
     it("exposes bridge health status with process and client stats", async () => {
         const fakeProcessManager = new FakeProcessManager();
         const { baseUrl, server, healthUrl } = await startBridgeServer({ processManager: fakeProcessManager });
@@ -745,6 +771,7 @@ async function startBridgeServer(
             processIdleTtlMs: 300_000,
             reconnectGraceMs: 100,
             sessionDirectory: "/tmp/pi-sessions",
+            enableHealthEndpoint: true,
         },
         logger,
         deps,

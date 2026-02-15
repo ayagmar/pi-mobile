@@ -43,7 +43,7 @@ pnpm install
 pnpm start
 ```
 
-The bridge binds to `127.0.0.1:8787` by default. Set `BRIDGE_HOST` to your laptop Tailscale IP (or `0.0.0.0`) to allow phone access. It spawns pi processes on demand per working directory.
+The bridge binds to `127.0.0.1:8787` by default. Set `BRIDGE_HOST` to your laptop Tailscale IP to allow phone access (avoid `0.0.0.0` unless you enforce firewall restrictions). It spawns pi processes on demand per working directory.
 
 ### 2. Phone Setup
 
@@ -110,7 +110,7 @@ App renders streaming text/tools
 ### Can't connect
 
 1. Check Tailscale is running on both devices
-2. Verify the bridge is running: `curl http://100.x.x.x:8787/health`
+2. Verify the bridge is running: `curl http://100.x.x.x:8787/health` (only if `BRIDGE_ENABLE_HEALTH_ENDPOINT=true`)
 3. Check the token matches exactly (BRIDGE_AUTH_TOKEN)
 4. Try the laptop's Tailscale IP, not hostname
 
@@ -186,6 +186,7 @@ BRIDGE_PORT=8787                 # Port to listen on
 BRIDGE_AUTH_TOKEN=your-secret    # Required authentication token
 BRIDGE_PROCESS_IDLE_TTL_MS=300000  # 5 minutes idle timeout
 BRIDGE_LOG_LEVEL=info            # debug, info, warn, error, silent
+BRIDGE_ENABLE_HEALTH_ENDPOINT=true  # set false to disable /health exposure
 ```
 
 ### App Build Variants
@@ -195,7 +196,10 @@ Debug builds include logging and assertions. Release builds (if you make them) s
 ## Security Notes
 
 - Token auth is required - don't expose the bridge without it
+- Token comparison is hardened in the bridge (constant-time hash compare)
 - The bridge binds to localhost by default; explicitly set `BRIDGE_HOST` to your Tailscale IP for remote access
+- Avoid `0.0.0.0` unless you intentionally expose the service behind strict firewall/Tailscale policy
+- `/health` exposure is explicit via `BRIDGE_ENABLE_HEALTH_ENDPOINT` (disable it for least exposure)
 - All traffic goes over Tailscale's encrypted mesh
 - Session data stays on the laptop; the app only displays it
 

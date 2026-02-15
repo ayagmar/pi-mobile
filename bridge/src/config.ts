@@ -18,6 +18,7 @@ export interface BridgeConfig {
     processIdleTtlMs: number;
     reconnectGraceMs: number;
     sessionDirectory: string;
+    enableHealthEndpoint: boolean;
 }
 
 export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
@@ -28,6 +29,7 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
     const processIdleTtlMs = parseProcessIdleTtlMs(env.BRIDGE_PROCESS_IDLE_TTL_MS);
     const reconnectGraceMs = parseReconnectGraceMs(env.BRIDGE_RECONNECT_GRACE_MS);
     const sessionDirectory = parseSessionDirectory(env.BRIDGE_SESSION_DIR);
+    const enableHealthEndpoint = parseEnableHealthEndpoint(env.BRIDGE_ENABLE_HEALTH_ENDPOINT);
 
     return {
         host,
@@ -37,6 +39,7 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
         processIdleTtlMs,
         reconnectGraceMs,
         sessionDirectory,
+        enableHealthEndpoint,
     };
 }
 
@@ -102,6 +105,16 @@ function parseReconnectGraceMs(graceRaw: string | undefined): number {
     }
 
     return graceMs;
+}
+
+function parseEnableHealthEndpoint(enableHealthEndpointRaw: string | undefined): boolean {
+    const value = enableHealthEndpointRaw?.trim();
+    if (!value) return true;
+
+    if (value === "true") return true;
+    if (value === "false") return false;
+
+    throw new Error(`Invalid BRIDGE_ENABLE_HEALTH_ENDPOINT: ${enableHealthEndpointRaw}`);
 }
 
 function parseSessionDirectory(sessionDirectoryRaw: string | undefined): string {

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 
 import type { Logger } from "pino";
@@ -75,7 +75,7 @@ export function createBridgeServer(
     const disconnectedClients = new Map<string, DisconnectedClientState>();
 
     const server = http.createServer((request, response) => {
-        if (request.url === "/health") {
+        if (request.url === "/health" && config.enableHealthEndpoint) {
             const processStats = processManager.getStats();
             response.writeHead(200, { "content-type": "application/json" });
             response.end(
@@ -95,6 +95,23 @@ export function createBridgeServer(
         response.writeHead(404, { "content-type": "application/json" });
         response.end(JSON.stringify({ error: "Not Found" }));
     });
+
+    if (isUnsafeBindHost(config.host)) {
+        logger.warn(
+            {
+                host: config.host,
+            },
+            "Bridge is listening on a non-loopback interface; restrict exposure with Tailscale/firewall rules",
+        );
+    }
+
+    if (!config.enableHealthEndpoint) {
+        logger.info("Health endpoint is disabled (BRIDGE_ENABLE_HEALTH_ENDPOINT=false)");
+    } else if (!isLoopbackHost(config.host)) {
+        logger.warn(
+            "Health endpoint is enabled on a non-loopback host; disable it unless remote health checks are required",
+        );
+    }
 
     processManager.setMessageHandler((event) => {
         const rpcEnvelope = JSON.stringify(createRpcEnvelope(event.payload));
@@ -116,7 +133,7 @@ export function createBridgeServer(
         }
 
         const providedToken = extractToken(request);
-        if (providedToken !== config.authToken) {
+        if (!secureTokenEquals(providedToken, config.authToken)) {
             socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
             socket.destroy();
             logger.warn(
@@ -679,6 +696,27 @@ function getHeaderToken(request: http.IncomingMessage): string | undefined {
     if (typeof tokenHeader === "string") return tokenHeader;
 
     return tokenHeader[0];
+}
+
+function secureTokenEquals(
+    providedToken: string | undefined,
+    expectedToken: string,
+): boolean {
+    if (!providedToken) {
+        return false;
+    }
+
+    const providedHash = createHash("sha256").update(providedToken).digest();
+    const expectedHash = createHash("sha256").update(expectedToken).digest();
+    return timingSafeEqual(providedHash, expectedHash);
+}
+
+function isLoopbackHost(host: string): boolean {
+    return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
+function isUnsafeBindHost(host: string): boolean {
+    return !isLoopbackHost(host);
 }
 
 function isSessionTreeFilter(value: string): value is SessionTreeFilter {
