@@ -28,21 +28,57 @@ Manual smoke checklist (UI/protocol tasks):
 - prompt/abort/steer/follow_up still work
 - tool cards + reasoning blocks + diffs still render correctly
 - extension dialogs still work (`select`, `confirm`, `input`, `editor`)
+- new session from Sessions tab creates + navigates correctly
+- chat auto-scrolls to latest message during streaming
 
 ---
 
-## 1) Quick wins (first)
+## 1) Critical UX fixes (immediate)
 
-### Q0 — Restore green baseline quality gate
-**Why:** current fresh run shows detekt failure (`PiMobileApp.kt` long method).
+### C1 — Fix "New Session" error message bug
+**Why:** Creating new session shows "No active session. Resume a session first" which is confusing/incorrect UX.
 
 **Primary files:**
-- `app/src/main/java/com/ayagmar/pimobile/ui/PiMobileApp.kt`
+- `app/src/main/java/com/ayagmar/pimobile/sessions/RpcSessionController.kt`
+- `app/src/main/java/com/ayagmar/pimobile/sessions/SessionsViewModel.kt`
+- `app/src/main/java/com/ayagmar/pimobile/chat/ChatViewModel.kt`
 
 **Acceptance:**
-- verification loop fully green
+- New session creation shows success/loading state, not error
+- Auto-navigates to chat with new session active
+- Error message only shows when truly appropriate
 
 ---
+
+### C2 — Compact chat header (stop blocking streaming view)
+**Why:** Top nav takes too much vertical space, blocks view of streaming responses.
+
+**Primary files:**
+- `app/src/main/java/com/ayagmar/pimobile/ui/chat/ChatScreen.kt`
+- `app/src/main/java/com/ayagmar/pimobile/ui/chat/ChatHeader.kt` (extract if needed)
+
+**Acceptance:**
+- Header collapses or uses minimal height during streaming
+- Essential controls (abort, model selector) remain accessible
+- More screen real estate for actual chat content
+
+---
+
+### C3 — Flatten directory explorer (improve CWD browsing UX)
+**Why:** Current tree requires clicking each directory one-by-one to see sessions. User sees long path list with ▶ icons.
+
+**Primary files:**
+- `app/src/main/java/com/ayagmar/pimobile/ui/sessions/SessionsScreen.kt`
+- `app/src/main/java/com/ayagmar/pimobile/sessions/SessionsViewModel.kt`
+
+**Acceptance:**
+- Option to view all sessions flattened with path breadcrumbs
+- Or: searchable directory tree with auto-expand on filter
+- Faster navigation to deeply nested sessions
+
+---
+
+## 2) Quick wins (first)
 
 ### Q1 — Fix image-only prompt mismatch
 **Why:** UI enables send with images + empty text, `ChatViewModel.sendPrompt()` currently blocks empty text.
@@ -192,7 +228,41 @@ Manual smoke checklist (UI/protocol tasks):
 
 ---
 
-## 3) Medium maintainability improvements
+## 3) Theming + Design System
+
+### T1 — Centralized theme architecture (PiMobileTheme)
+**Why:** Colors are scattered and hardcoded; no dark/light mode support.
+
+**Primary files:**
+- `app/src/main/java/com/ayagmar/pimobile/ui/theme/` (create)
+- `app/src/main/java/com/ayagmar/pimobile/ui/PiMobileApp.kt`
+- All screen files for color replacement
+
+**Acceptance:**
+- `PiMobileTheme` with `lightColorScheme()` and `darkColorScheme()`
+- All hardcoded colors replaced with theme references
+- Settings toggle for light/dark/system-default
+- Color roles documented (primary, secondary, tertiary, surface, etc.)
+
+---
+
+### T2 — Component design system
+**Why:** Inconsistent card styles, button sizes, spacing across screens.
+
+**Primary files:**
+- `app/src/main/java/com/ayagmar/pimobile/ui/components/` (create)
+- `app/src/main/java/com/ayagmar/pimobile/ui/chat/ChatScreen.kt`
+- `app/src/main/java/com/ayagmar/pimobile/ui/sessions/SessionsScreen.kt`
+- `app/src/main/java/com/ayagmar/pimobile/ui/settings/SettingsScreen.kt`
+
+**Acceptance:**
+- Reusable `PiCard`, `PiButton`, `PiTextField`, `PiTopBar` components
+- Consistent spacing tokens (4.dp, 8.dp, 16.dp, 24.dp)
+- Typography scale defined and applied
+
+---
+
+## 4) Medium maintainability improvements
 
 ### M1 — Replace service locator with explicit DI
 **Why:** `AppServices` singleton hides dependencies and complicates tests.
@@ -206,14 +276,18 @@ Manual smoke checklist (UI/protocol tasks):
 
 ---
 
-### M2 — Split large classes
+### M2 — Split god classes (architecture hygiene)
 **Targets:**
-- `ChatViewModel`
-- `ChatScreen`
-- `RpcSessionController`
+- `ChatViewModel` (~2000+ lines) → extract: message handling, UI state management, command processing
+- `ChatScreen.kt` (~2600+ lines) → extract: timeline, header, input, dialogs into separate files
+- `RpcSessionController` (~1000+ lines) → extract: connection mgmt, RPC routing, lifecycle
 
 **Acceptance:**
-- smaller focused components, lower suppression pressure, easier tests
+- Each class < 500 lines
+- Single responsibility per component
+- All existing tests still pass
+- No `@file:Suppress("TooManyFunctions")` needed
+- Clear public API boundaries documented
 
 ---
 
@@ -243,7 +317,7 @@ Manual smoke checklist (UI/protocol tasks):
 
 ---
 
-## 4) Heavy hitters (last)
+## 5) Heavy hitters (last)
 
 ### H1 — True `/tree` parity (in-place navigate, not fork fallback)
 **Why:** current Jump+Continue calls fork semantics.
@@ -303,26 +377,30 @@ Manual smoke checklist (UI/protocol tasks):
 
 ## Ordered execution queue (strict)
 
-1. Q0 green quality gate baseline
-2. Q1 image-only send fix
-3. Q2 full tree filters (`all`)
-4. Q3 command palette built-in parity layer
-5. Q4 global collapse/expand controls
-6. Q5 live frame metrics wiring
-7. Q6 transport preference setting parity
-8. F1 bridge event isolation + lock correctness
-9. F2 reconnect/resync hardening
-10. F3 bridge auth/exposure hardening
-11. F4 Android network security tightening
-12. F5 bridge session index scalability
-13. M1 replace service locator with DI
-14. M2 split large classes
-15. M3 unify streaming/backpressure runtime pipeline
-16. M4 tighten static analysis rules
-17. H1 true `/tree` parity
-18. H2 session parsing alignment with Pi internals
-19. H3 incremental history loading strategy
-20. H4 extension-ize selected workflows
+1. C1 Fix "New Session" error message bug
+2. C2 Compact chat header (stop blocking streaming view)
+3. C3 Flatten directory explorer (improve CWD browsing UX)
+4. Q1 image-only send fix
+5. Q2 full tree filters (`all`)
+6. Q3 command palette built-in parity layer
+7. Q4 global collapse/expand controls
+8. Q5 live frame metrics wiring
+9. Q6 transport preference setting parity
+10. F1 bridge event isolation + lock correctness
+11. F2 reconnect/resync hardening
+12. F3 bridge auth/exposure hardening
+13. F4 Android network security tightening
+14. F5 bridge session index scalability
+15. T1 Centralized theme architecture (PiMobileTheme)
+16. T2 Component design system
+17. M1 replace service locator with DI
+18. M2 split god classes (architecture hygiene)
+19. M3 unify streaming/backpressure runtime pipeline
+20. M4 tighten static analysis rules
+21. H1 true `/tree` parity
+22. H2 session parsing alignment with Pi internals
+23. H3 incremental history loading strategy
+24. H4 extension-ize selected workflows
 
 ---
 
