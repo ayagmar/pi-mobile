@@ -683,7 +683,11 @@ class ChatViewModel(
                     state.copy(
                         isLoading = false,
                         errorMessage = null,
-                        timeline = limitTimeline(parseHistoryItems(messagesResult.getOrNull()?.data)),
+                        timeline =
+                            ChatTimelineReducer.limitTimeline(
+                                timeline = parseHistoryItems(messagesResult.getOrNull()?.data),
+                                maxTimelineItems = MAX_TIMELINE_ITEMS,
+                            ),
                         currentModel = modelInfo,
                         thinkingLevel = thinkingLevel,
                         isStreaming = isStreaming,
@@ -1143,105 +1147,12 @@ class ChatViewModel(
 
     private fun upsertTimelineItem(item: ChatTimelineItem) {
         _uiState.update { state ->
-            val targetIndex = findUpsertTargetIndex(state.timeline, item)
-            val updatedTimeline =
-                if (targetIndex >= 0) {
-                    state.timeline.toMutableList().also { timeline ->
-                        val existing = timeline[targetIndex]
-                        timeline[targetIndex] = mergeTimelineItems(existing = existing, incoming = item)
-                    }
-                } else {
-                    state.timeline + item
-                }
-
-            state.copy(timeline = limitTimeline(updatedTimeline))
+            ChatTimelineReducer.upsertTimelineItem(
+                state = state,
+                item = item,
+                maxTimelineItems = MAX_TIMELINE_ITEMS,
+            )
         }
-    }
-
-    private fun limitTimeline(timeline: List<ChatTimelineItem>): List<ChatTimelineItem> {
-        if (timeline.size <= MAX_TIMELINE_ITEMS) {
-            return timeline
-        }
-
-        return timeline.takeLast(MAX_TIMELINE_ITEMS)
-    }
-
-    private fun findUpsertTargetIndex(
-        timeline: List<ChatTimelineItem>,
-        incoming: ChatTimelineItem,
-    ): Int {
-        val directIndex = timeline.indexOfFirst { existing -> existing.id == incoming.id }
-        val contentIndex = assistantStreamContentIndex(incoming.id)
-        return when {
-            directIndex >= 0 -> directIndex
-            incoming !is ChatTimelineItem.Assistant -> -1
-            contentIndex == null -> -1
-            else ->
-                timeline.indexOfFirst { existing ->
-                    existing is ChatTimelineItem.Assistant &&
-                        existing.isStreaming &&
-                        assistantStreamContentIndex(existing.id) == contentIndex
-                }
-        }
-    }
-
-    private fun mergeTimelineItems(
-        existing: ChatTimelineItem,
-        incoming: ChatTimelineItem,
-    ): ChatTimelineItem =
-        when {
-            existing is ChatTimelineItem.Tool && incoming is ChatTimelineItem.Tool -> {
-                // Preserve user toggled expansion state across streaming updates.
-                // Also preserve arguments and editDiff if new item doesn't have them.
-                incoming.copy(
-                    isCollapsed = existing.isCollapsed,
-                    arguments = incoming.arguments.takeIf { it.isNotEmpty() } ?: existing.arguments,
-                    editDiff = incoming.editDiff ?: existing.editDiff,
-                )
-            }
-            existing is ChatTimelineItem.Assistant && incoming is ChatTimelineItem.Assistant -> {
-                // Preserve user expansion choice across all assistant streaming updates.
-                // Also guard against stream key remaps that can temporarily reset assembler buffers.
-                incoming.copy(
-                    text = mergeStreamingContent(existing.text, incoming.text).orEmpty(),
-                    thinking = mergeStreamingContent(existing.thinking, incoming.thinking),
-                    isThinkingExpanded = existing.isThinkingExpanded,
-                )
-            }
-            else -> incoming
-        }
-
-    private fun assistantStreamContentIndex(itemId: String): Int? {
-        if (!itemId.startsWith(ASSISTANT_STREAM_PREFIX)) return null
-        return itemId.substringAfterLast('-').toIntOrNull()
-    }
-
-    private fun mergeStreamingContent(
-        previous: String?,
-        incoming: String?,
-    ): String? {
-        return when {
-            previous.isNullOrEmpty() -> incoming
-            incoming.isNullOrEmpty() -> previous
-            incoming.startsWith(previous) -> incoming
-            previous.startsWith(incoming) -> previous
-            else -> mergeStreamingContentWithOverlap(previous, incoming)
-        }
-    }
-
-    private fun mergeStreamingContentWithOverlap(
-        previous: String,
-        incoming: String,
-    ): String {
-        val maxOverlap = minOf(previous.length, incoming.length)
-        var overlapLength = 0
-        for (overlap in maxOverlap downTo 1) {
-            if (previous.endsWith(incoming.substring(0, overlap))) {
-                overlapLength = overlap
-                break
-            }
-        }
-        return previous + incoming.substring(overlapLength)
     }
 
     fun addImage(pendingImage: PendingImage) {
@@ -1282,7 +1193,6 @@ class ChatViewModel(
 
         private val SLASH_COMMAND_TOKEN_REGEX = Regex("^/([a-zA-Z0-9:_-]*)$")
 
-        private const val ASSISTANT_STREAM_PREFIX = "assistant-stream-"
         private const val ASSISTANT_UPDATE_THROTTLE_MS = 40L
         private const val TOOL_UPDATE_THROTTLE_MS = 50L
         private const val TOOL_COLLAPSE_THRESHOLD = 400
