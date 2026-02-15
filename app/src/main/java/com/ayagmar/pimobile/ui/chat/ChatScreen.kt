@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -60,6 +61,7 @@ import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,6 +97,7 @@ import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionTreeEntry
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
+import kotlinx.coroutines.delay
 
 private data class ChatCallbacks(
     val onToggleToolExpansion: (String) -> Unit,
@@ -625,27 +628,43 @@ private fun NotificationsDisplay(
     notifications: List<ExtensionNotification>,
     onClear: (Int) -> Unit,
 ) {
-    notifications.forEachIndexed { index, notification ->
-        val color =
-            when (notification.type) {
-                "error" -> MaterialTheme.colorScheme.error
-                "warning" -> MaterialTheme.colorScheme.tertiary
-                else -> MaterialTheme.colorScheme.primary
-            }
+    // Only show the most recent notification
+    val latestNotification = notifications.lastOrNull() ?: return
+    val index = notifications.lastIndex
 
-        androidx.compose.material3.Snackbar(
-            action = {
-                TextButton(onClick = { onClear(index) }) {
-                    Text("Dismiss")
-                }
-            },
-            modifier = Modifier.padding(8.dp),
-        ) {
-            Text(
-                text = notification.message,
-                color = color,
-            )
+    // Auto-dismiss after 4 seconds
+    LaunchedEffect(index) {
+        delay(NOTIFICATION_AUTO_DISMISS_MS)
+        onClear(index)
+    }
+
+    val color =
+        when (latestNotification.type) {
+            "error" -> MaterialTheme.colorScheme.error
+            "warning" -> MaterialTheme.colorScheme.tertiary
+            else -> MaterialTheme.colorScheme.primary
         }
+
+    val containerColor =
+        when (latestNotification.type) {
+            "error" -> MaterialTheme.colorScheme.errorContainer
+            "warning" -> MaterialTheme.colorScheme.tertiaryContainer
+            else -> MaterialTheme.colorScheme.primaryContainer
+        }
+
+    Snackbar(
+        action = {
+            TextButton(onClick = { onClear(index) }) {
+                Text("Dismiss")
+            }
+        },
+        containerColor = containerColor,
+        modifier = Modifier.padding(8.dp),
+    ) {
+        Text(
+            text = latestNotification.message,
+            color = color,
+        )
     }
 }
 
@@ -829,7 +848,13 @@ private fun TimelineCard(
     title: String,
     text: String,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+            ),
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -837,10 +862,12 @@ private fun TimelineCard(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
             Text(
                 text = text.ifBlank { "(empty)" },
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
         }
     }
@@ -851,7 +878,13 @@ private fun AssistantCard(
     item: ChatTimelineItem.Assistant,
     onToggleThinkingExpansion: (String) -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            ),
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -860,11 +893,13 @@ private fun AssistantCard(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
 
             Text(
                 text = item.text.ifBlank { "(empty)" },
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
 
             ThinkingBlock(
@@ -899,23 +934,36 @@ private fun ThinkingBlock(
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors =
-            androidx.compose.material3.CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
+            ),
+        border =
+            androidx.compose.foundation.BorderStroke(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
             ),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(
-                text = if (isThinkingComplete) "Thinking" else "Thinking…",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Menu,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Text(
+                    text = if (isThinkingComplete) " Thinking" else " Thinking…",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
             Text(
                 text = displayThinking,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
             )
 
             if (shouldCollapse || isThinkingExpanded) {
@@ -945,7 +993,13 @@ private fun ToolCard(
     val toolInfo = getToolInfo(item.toolName)
     val clipboardManager = LocalClipboardManager.current
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1646,6 +1700,7 @@ private fun ExtensionStatuses(statuses: Map<String, String>) {
 private const val COLLAPSED_OUTPUT_LENGTH = 280
 private const val THINKING_COLLAPSE_THRESHOLD = 280
 private const val MAX_ARG_DISPLAY_LENGTH = 100
+private const val NOTIFICATION_AUTO_DISMISS_MS = 4000L
 private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")
 
 @Suppress("LongParameterList", "LongMethod")
