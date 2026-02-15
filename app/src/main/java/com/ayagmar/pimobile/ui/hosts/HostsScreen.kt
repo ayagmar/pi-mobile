@@ -29,23 +29,35 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ayagmar.pimobile.hosts.ConnectionDiagnostics
 import com.ayagmar.pimobile.hosts.DiagnosticStatus
 import com.ayagmar.pimobile.hosts.DiagnosticsResult
 import com.ayagmar.pimobile.hosts.HostDraft
 import com.ayagmar.pimobile.hosts.HostProfileItem
+import com.ayagmar.pimobile.hosts.HostProfileStore
+import com.ayagmar.pimobile.hosts.HostTokenStore
 import com.ayagmar.pimobile.hosts.HostsUiState
 import com.ayagmar.pimobile.hosts.HostsViewModel
 import com.ayagmar.pimobile.hosts.HostsViewModelFactory
 
 @Composable
-fun HostsRoute() {
-    val context = LocalContext.current
-    val factory = remember(context) { HostsViewModelFactory(context) }
+fun HostsRoute(
+    profileStore: HostProfileStore,
+    tokenStore: HostTokenStore,
+    diagnostics: ConnectionDiagnostics,
+) {
+    val factory =
+        remember(profileStore, tokenStore, diagnostics) {
+            HostsViewModelFactory(
+                profileStore = profileStore,
+                tokenStore = tokenStore,
+                diagnostics = diagnostics,
+            )
+        }
     val hostsViewModel: HostsViewModel = viewModel(factory = factory)
     val uiState by hostsViewModel.uiState.collectAsStateWithLifecycle()
 

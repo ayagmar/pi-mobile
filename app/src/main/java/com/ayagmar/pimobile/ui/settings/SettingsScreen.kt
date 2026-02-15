@@ -27,18 +27,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.ayagmar.pimobile.di.AppServices
+import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.TransportPreference
 import kotlinx.coroutines.delay
 
 @Composable
-fun SettingsRoute() {
+fun SettingsRoute(sessionController: SessionController) {
     val context = LocalContext.current
     val factory =
-        remember(context) {
+        remember(context, sessionController) {
             SettingsViewModelFactory(
                 context = context,
-                sessionController = AppServices.sessionController(),
+                sessionController = sessionController,
             )
         }
     val settingsViewModel: SettingsViewModel = viewModel(factory = factory)

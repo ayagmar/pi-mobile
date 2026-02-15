@@ -28,22 +28,38 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ayagmar.pimobile.coresessions.SessionIndexRepository
 import com.ayagmar.pimobile.coresessions.SessionRecord
+import com.ayagmar.pimobile.hosts.HostProfileStore
+import com.ayagmar.pimobile.hosts.HostTokenStore
 import com.ayagmar.pimobile.sessions.CwdSessionGroupUiState
 import com.ayagmar.pimobile.sessions.SessionAction
+import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionsUiState
 import com.ayagmar.pimobile.sessions.SessionsViewModel
 import com.ayagmar.pimobile.sessions.SessionsViewModelFactory
 import kotlinx.coroutines.delay
 
 @Composable
-fun SessionsRoute(onNavigateToChat: () -> Unit = {}) {
-    val context = LocalContext.current
-    val factory = remember(context) { SessionsViewModelFactory(context) }
+fun SessionsRoute(
+    profileStore: HostProfileStore,
+    tokenStore: HostTokenStore,
+    repository: SessionIndexRepository,
+    sessionController: SessionController,
+    onNavigateToChat: () -> Unit = {},
+) {
+    val factory =
+        remember(profileStore, tokenStore, repository, sessionController) {
+            SessionsViewModelFactory(
+                profileStore = profileStore,
+                tokenStore = tokenStore,
+                repository = repository,
+                sessionController = sessionController,
+            )
+        }
     val sessionsViewModel: SessionsViewModel = viewModel(factory = factory)
     val uiState by sessionsViewModel.uiState.collectAsStateWithLifecycle()
     var transientStatusMessage by remember { mutableStateOf<String?>(null) }

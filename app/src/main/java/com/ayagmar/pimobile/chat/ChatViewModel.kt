@@ -26,7 +26,6 @@ import com.ayagmar.pimobile.corerpc.ToolExecutionUpdateEvent
 import com.ayagmar.pimobile.corerpc.TurnEndEvent
 import com.ayagmar.pimobile.corerpc.TurnStartEvent
 import com.ayagmar.pimobile.corerpc.UiUpdateThrottler
-import com.ayagmar.pimobile.di.AppServices
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionController
@@ -1681,6 +1680,7 @@ data class EditDiffInfo(
 )
 
 class ChatViewModelFactory(
+    private val sessionController: SessionController,
     private val imageEncoder: ImageEncoder? = null,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -1690,7 +1690,7 @@ class ChatViewModelFactory(
 
         @Suppress("UNCHECKED_CAST")
         return ChatViewModel(
-            sessionController = AppServices.sessionController(),
+            sessionController = sessionController,
             imageEncoder = imageEncoder,
         ) as T
     }

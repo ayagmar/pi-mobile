@@ -4,6 +4,8 @@ Goal: ship an **ultimate** Pi mobile client by prioritizing quick wins and high-
 
 Scope focus from fresh audit: RPC compatibility, Kotlin quality, bridge security/stability, UX parity, performance, and Pi alignment.
 
+Execution checkpoint (2026-02-15): tasks C1–C4, Q1–Q7, F1–F5, and M1 completed. Next in strict order: M2.
+
 > No milestones or estimates.
 > Benchmark-specific work is intentionally excluded for now.
 

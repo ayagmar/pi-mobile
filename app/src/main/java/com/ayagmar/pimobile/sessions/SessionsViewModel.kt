@@ -1,19 +1,14 @@
 package com.ayagmar.pimobile.sessions
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.ayagmar.pimobile.coresessions.FileSessionIndexCache
 import com.ayagmar.pimobile.coresessions.SessionGroup
 import com.ayagmar.pimobile.coresessions.SessionIndexRepository
 import com.ayagmar.pimobile.coresessions.SessionRecord
-import com.ayagmar.pimobile.di.AppServices
 import com.ayagmar.pimobile.hosts.HostProfile
 import com.ayagmar.pimobile.hosts.HostProfileStore
 import com.ayagmar.pimobile.hosts.HostTokenStore
-import com.ayagmar.pimobile.hosts.KeystoreHostTokenStore
-import com.ayagmar.pimobile.hosts.SharedPreferencesHostProfileStore
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -712,30 +707,22 @@ data class CwdSessionGroupUiState(
 )
 
 class SessionsViewModelFactory(
-    context: Context,
+    private val profileStore: HostProfileStore,
+    private val tokenStore: HostTokenStore,
+    private val repository: SessionIndexRepository,
+    private val sessionController: SessionController,
 ) : ViewModelProvider.Factory {
-    private val appContext = context.applicationContext
-
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         check(modelClass == SessionsViewModel::class.java) {
             "Unsupported ViewModel class: ${modelClass.name}"
         }
-
-        val profileStore = SharedPreferencesHostProfileStore(appContext)
-        val tokenStore = KeystoreHostTokenStore(appContext)
-
-        val repository =
-            SessionIndexRepository(
-                remoteDataSource = BridgeSessionIndexRemoteDataSource(profileStore, tokenStore),
-                cache = FileSessionIndexCache(appContext.cacheDir.toPath().resolve("session-index-cache")),
-            )
 
         @Suppress("UNCHECKED_CAST")
         return SessionsViewModel(
             profileStore = profileStore,
             tokenStore = tokenStore,
             repository = repository,
-            sessionController = AppServices.sessionController(),
+            sessionController = sessionController,
         ) as T
     }
 }

@@ -72,7 +72,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 17 | M1 Replace service locator with explicit DI | TODO |  |  |  |  |
+| 17 | M1 Replace service locator with explicit DI | DONE | refactor(di): replace app service locator with explicit graph |  | ktlint✅ detekt✅ test✅ bridge✅ | Introduced AppGraph dependency container and removed global `AppServices` singleton usage from routes/viewmodel factories |
 | 18 | M2 Split god classes (complexity-focused, non-rigid) | TODO |  |  |  | Reduce `LargeClass` / `LongMethod` / `TooManyFunctions` signals |
 | 19 | M3 Unify streaming/backpressure runtime pipeline | TODO |  |  |  |  |
 | 20 | M4 Tighten static analysis rules/suppressions | TODO |  |  |  |  |
@@ -374,15 +374,33 @@ Notes/blockers:
 - Added regression test proving cached reads are reused and invalidated when a session file changes.
 ```
 
+### 2026-02-15
+
+```text
+Task: M1
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Added `AppGraph` as explicit dependency container built in MainActivity and passed into the app root.
+- Removed `AppServices` singleton and migrated Chat/Settings/Sessions/Hosts routes + viewmodel factories to explicit dependencies.
+- MainActivity lifecycle teardown now disconnects via graph-owned SessionController instance.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 16
+- Backlog done: 17
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 10
+- Backlog remaining (not done): 9
 - Reference completed items (not counted in backlog): 6
 
 ---

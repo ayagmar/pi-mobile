@@ -12,6 +12,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.ayagmar.pimobile.di.AppGraph
 import com.ayagmar.pimobile.ui.chat.ChatRoute
 import com.ayagmar.pimobile.ui.hosts.HostsRoute
 import com.ayagmar.pimobile.ui.sessions.SessionsRoute
@@ -42,8 +43,9 @@ private val destinations =
         ),
     )
 
+@Suppress("LongMethod")
 @Composable
-fun piMobileApp() {
+fun piMobileApp(appGraph: AppGraph) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -76,10 +78,18 @@ fun piMobileApp() {
             modifier = Modifier.padding(paddingValues),
         ) {
             composable(route = "hosts") {
-                HostsRoute()
+                HostsRoute(
+                    profileStore = appGraph.hostProfileStore,
+                    tokenStore = appGraph.hostTokenStore,
+                    diagnostics = appGraph.connectionDiagnostics,
+                )
             }
             composable(route = "sessions") {
                 SessionsRoute(
+                    profileStore = appGraph.hostProfileStore,
+                    tokenStore = appGraph.hostTokenStore,
+                    repository = appGraph.sessionIndexRepository,
+                    sessionController = appGraph.sessionController,
                     onNavigateToChat = {
                         navController.navigate("chat") {
                             launchSingleTop = true
@@ -92,10 +102,10 @@ fun piMobileApp() {
                 )
             }
             composable(route = "chat") {
-                ChatRoute()
+                ChatRoute(sessionController = appGraph.sessionController)
             }
             composable(route = "settings") {
-                SettingsRoute()
+                SettingsRoute(sessionController = appGraph.sessionController)
             }
         }
     }

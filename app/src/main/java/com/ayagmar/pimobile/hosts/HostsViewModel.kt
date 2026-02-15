@@ -1,6 +1,5 @@
 package com.ayagmar.pimobile.hosts
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -166,10 +165,10 @@ data class HostsUiState(
 )
 
 class HostsViewModelFactory(
-    context: Context,
+    private val profileStore: HostProfileStore,
+    private val tokenStore: HostTokenStore,
+    private val diagnostics: ConnectionDiagnostics = ConnectionDiagnostics(),
 ) : ViewModelProvider.Factory {
-    private val appContext = context.applicationContext
-
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         check(modelClass == HostsViewModel::class.java) {
             "Unsupported ViewModel class: ${modelClass.name}"
@@ -177,8 +176,9 @@ class HostsViewModelFactory(
 
         @Suppress("UNCHECKED_CAST")
         return HostsViewModel(
-            profileStore = SharedPreferencesHostProfileStore(appContext),
-            tokenStore = KeystoreHostTokenStore(appContext),
+            profileStore = profileStore,
+            tokenStore = tokenStore,
+            diagnostics = diagnostics,
         ) as T
     }
 }

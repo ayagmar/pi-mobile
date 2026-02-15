@@ -100,6 +100,7 @@ import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.SessionStats
 import com.ayagmar.pimobile.perf.StreamingFrameMetrics
 import com.ayagmar.pimobile.sessions.ModelInfo
+import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeEntry
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
@@ -160,10 +161,16 @@ private data class ChatCallbacks(
 
 @Suppress("LongMethod")
 @Composable
-fun ChatRoute() {
+fun ChatRoute(sessionController: SessionController) {
     val context = LocalContext.current
     val imageEncoder = remember { ImageEncoder(context) }
-    val factory = remember { ChatViewModelFactory(imageEncoder = imageEncoder) }
+    val factory =
+        remember(sessionController, imageEncoder) {
+            ChatViewModelFactory(
+                sessionController = sessionController,
+                imageEncoder = imageEncoder,
+            )
+        }
     val chatViewModel: ChatViewModel = viewModel(factory = factory)
     val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
 

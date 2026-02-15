@@ -4,20 +4,24 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
-import com.ayagmar.pimobile.di.AppServices
+import com.ayagmar.pimobile.di.AppGraph
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import com.ayagmar.pimobile.perf.PerformanceMetrics.recordAppStart
 import com.ayagmar.pimobile.ui.piMobileApp
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private val appGraph: AppGraph by lazy {
+        AppGraph(applicationContext)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Record app start as early as possible
         recordAppStart()
 
         super.onCreate(savedInstanceState)
         setContent {
-            piMobileApp()
+            piMobileApp(appGraph = appGraph)
         }
     }
 
@@ -38,7 +42,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (isFinishing) {
             lifecycleScope.launch {
-                AppServices.sessionController().disconnect()
+                appGraph.sessionController.disconnect()
             }
         }
         super.onDestroy()
