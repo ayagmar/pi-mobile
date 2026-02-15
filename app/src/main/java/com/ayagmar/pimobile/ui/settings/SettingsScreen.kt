@@ -101,11 +101,6 @@ private fun SettingsScreen(
             onFollowUpModeSelected = viewModel::setFollowUpMode,
         )
 
-        SessionActionsCard(
-            onNewSession = viewModel::createNewSession,
-            isLoading = uiState.isLoading,
-        )
-
         ChatHelpCard()
 
         AppInfoCard(
@@ -357,45 +352,6 @@ private fun ModeOptionButton(
     ) {
         val prefix = if (selected) "✓ " else ""
         Text("$prefix$label")
-    }
-}
-
-@Composable
-private fun SessionActionsCard(
-    onNewSession: () -> Unit,
-    isLoading: Boolean,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "Session",
-                style = MaterialTheme.typography.titleMedium,
-            )
-
-            Text(
-                text = "Create a new session in the current working directory.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            Button(
-                onClick = onNewSession,
-                enabled = !isLoading,
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.padding(end = 8.dp),
-                        strokeWidth = 2.dp,
-                    )
-                }
-                Text("New Session")
-            }
-        }
     }
 }
 

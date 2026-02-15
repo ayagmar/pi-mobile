@@ -125,6 +125,38 @@ class SessionsViewModel(
         }
     }
 
+    fun newSession() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { current ->
+                current.copy(
+                    isResuming = true,
+                    errorMessage = null,
+                )
+            }
+
+            val result = sessionController.newSession()
+
+            if (result.isSuccess) {
+                emitMessage("New session created")
+                _navigateToChat.trySend(Unit)
+            }
+
+            _uiState.update { current ->
+                if (result.isSuccess) {
+                    current.copy(
+                        isResuming = false,
+                        errorMessage = null,
+                    )
+                } else {
+                    current.copy(
+                        isResuming = false,
+                        errorMessage = result.exceptionOrNull()?.message ?: "Failed to create new session",
+                    )
+                }
+            }
+        }
+    }
+
     fun resumeSession(session: SessionRecord) {
         val hostId = _uiState.value.selectedHostId ?: return
         val selectedHost = _uiState.value.hosts.firstOrNull { host -> host.id == hostId } ?: return

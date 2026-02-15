@@ -135,28 +135,6 @@ class SettingsViewModel(
         }
     }
 
-    fun createNewSession() {
-        viewModelScope.launch {
-            uiState = uiState.copy(isLoading = true, errorMessage = null)
-
-            val result = sessionController.newSession()
-
-            uiState =
-                if (result.isSuccess) {
-                    emitMessage("New session created")
-                    uiState.copy(
-                        isLoading = false,
-                        errorMessage = null,
-                    )
-                } else {
-                    uiState.copy(
-                        isLoading = false,
-                        errorMessage = result.exceptionOrNull()?.message ?: "Failed to create new session",
-                    )
-                }
-        }
-    }
-
     fun toggleAutoCompaction() {
         val newValue = !uiState.autoCompactionEnabled
         uiState = uiState.copy(autoCompactionEnabled = newValue)

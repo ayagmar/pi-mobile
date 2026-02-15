@@ -800,7 +800,17 @@ private fun ChatTimeline(
     onToggleToolArgumentsExpansion: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    // Auto-scroll to bottom when new messages arrive or during streaming
+    LaunchedEffect(timeline.size, timeline.lastOrNull()?.id) {
+        if (timeline.isNotEmpty()) {
+            listState.animateScrollToItem(timeline.size - 1)
+        }
+    }
+
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {

@@ -99,22 +99,6 @@ class SettingsViewModelTest {
             collector.cancel()
         }
 
-    @Test
-    fun createNewSessionEmitsTransientSuccessMessage() =
-        runTest(dispatcher) {
-            val controller = FakeSessionController()
-            val viewModel = createViewModel(controller)
-            val messages = mutableListOf<String>()
-            val collector = launch { viewModel.messages.collect { messages += it } }
-
-            dispatcher.scheduler.advanceUntilIdle()
-            viewModel.createNewSession()
-            dispatcher.scheduler.advanceUntilIdle()
-
-            assertEquals(listOf("New session created"), messages)
-            collector.cancel()
-        }
-
     private fun createViewModel(controller: FakeSessionController): SettingsViewModel {
         return SettingsViewModel(
             sessionController = controller,

@@ -80,6 +80,7 @@ fun SessionsRoute(onNavigateToChat: () -> Unit = {}) {
                 onSearchChanged = sessionsViewModel::onSearchQueryChanged,
                 onCwdToggle = sessionsViewModel::onCwdToggle,
                 onRefreshClick = sessionsViewModel::refreshSessions,
+                onNewSession = sessionsViewModel::newSession,
                 onResumeClick = sessionsViewModel::resumeSession,
                 onRename = { name -> sessionsViewModel.runSessionAction(SessionAction.Rename(name)) },
                 onFork = sessionsViewModel::requestForkMessages,
@@ -96,6 +97,7 @@ private data class SessionsScreenCallbacks(
     val onSearchChanged: (String) -> Unit,
     val onCwdToggle: (String) -> Unit,
     val onRefreshClick: () -> Unit,
+    val onNewSession: () -> Unit,
     val onResumeClick: (SessionRecord) -> Unit,
     val onRename: (String) -> Unit,
     val onFork: () -> Unit,
@@ -141,6 +143,7 @@ private fun SessionsScreen(
         SessionsHeader(
             isRefreshing = state.isRefreshing,
             onRefreshClick = callbacks.onRefreshClick,
+            onNewSession = callbacks.onNewSession,
         )
 
         HostSelector(
@@ -223,6 +226,7 @@ private fun SessionsDialogs(
 private fun SessionsHeader(
     isRefreshing: Boolean,
     onRefreshClick: () -> Unit,
+    onNewSession: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -233,8 +237,15 @@ private fun SessionsHeader(
             text = "Sessions",
             style = MaterialTheme.typography.headlineSmall,
         )
-        TextButton(onClick = onRefreshClick, enabled = !isRefreshing) {
-            Text(if (isRefreshing) "Refreshing" else "Refresh")
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TextButton(onClick = onRefreshClick, enabled = !isRefreshing) {
+                Text(if (isRefreshing) "Refreshing" else "Refresh")
+            }
+            Button(onClick = onNewSession) {
+                Text("New")
+            }
         }
     }
 }
