@@ -31,6 +31,25 @@ Manual smoke checklist (UI/protocol tasks):
 - new session from Sessions tab creates + navigates correctly
 - chat auto-scrolls to latest message during streaming
 
+### C4 — Persistent bridge connection (architectural change)
+**Why:** Currently the app connects to bridge on-demand per session. This causes friction when:
+- Creating new session (no active connection)
+- Switching between sessions quickly
+- Background/resume scenarios
+
+**User suggestion:** "Shouldn't we establish connection to bridge when we load the application?"
+
+**Primary files:**
+- `app/src/main/java/com/ayagmar/pimobile/sessions/RpcSessionController.kt`
+- `app/src/main/java/com/ayagmar/pimobile/di/AppServices.kt`
+- `app/src/main/java/com/ayagmar/pimobile/ui/PiMobileApp.kt`
+
+**Acceptance:**
+- Bridge connection established on app start (if host configured)
+- Multiple sessions can share one bridge connection
+- `newSession()`, `resumeSession()` just send commands over existing connection
+- Proper lifecycle management (disconnect on app kill, reconnect on network issues)
+
 ---
 
 ## 1) Critical UX fixes (immediate)
@@ -38,15 +57,20 @@ Manual smoke checklist (UI/protocol tasks):
 ### C1 — Fix "New Session" error message bug
 **Why:** Creating new session shows "No active session. Resume a session first" which is confusing/incorrect UX.
 
+**Root cause:** `newSession()` tries to send RPC command without an active bridge connection. The connection is only established during `resumeSession()`.
+
+**Potential fix approaches:**
+1. **Quick fix:** Have `newSession()` establish connection first (like `resumeSession` does), then send `new_session` command
+2. **Better fix (see C4):** Keep persistent bridge connection alive, so `new_session` just works
+
 **Primary files:**
 - `app/src/main/java/com/ayagmar/pimobile/sessions/RpcSessionController.kt`
 - `app/src/main/java/com/ayagmar/pimobile/sessions/SessionsViewModel.kt`
-- `app/src/main/java/com/ayagmar/pimobile/chat/ChatViewModel.kt`
 
 **Acceptance:**
 - New session creation shows success/loading state, not error
 - Auto-navigates to chat with new session active
-- Error message only shows when truly appropriate
+- Works regardless of whether a session was previously resumed
 
 ---
 

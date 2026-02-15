@@ -35,9 +35,10 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 1 | C1 Fix "New Session" error message bug | TODO |  |  |  | Shows "No active session" incorrectly |
+| 1 | C1 Fix "New Session" error message bug | DONE (partial) | fix(sessions): make New Session work + add flat view toggle | e81d27f | Quick fix implemented; needs C4 for proper architecture |
 | 2 | C2 Compact chat header | TODO |  |  |  | Blocks streaming view, needs collapse/minimal mode |
-| 3 | C3 Flatten directory explorer | TODO |  |  |  | Clicking each CWD is painful, needs flat view |
+| 3 | C3 Flatten directory explorer | DONE | fix(sessions): make New Session work + add flat view toggle | e81d27f | "All" / "Tree" toggle implemented |
+| 4 | C4 Persistent bridge connection | TODO |  |  |  | Architectural change; establish connection on app start |
 
 ---
 
