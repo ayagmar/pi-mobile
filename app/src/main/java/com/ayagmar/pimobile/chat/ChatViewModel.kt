@@ -683,7 +683,7 @@ class ChatViewModel(
                     state.copy(
                         isLoading = false,
                         errorMessage = null,
-                        timeline = parseHistoryItems(messagesResult.getOrNull()?.data),
+                        timeline = limitTimeline(parseHistoryItems(messagesResult.getOrNull()?.data)),
                         currentModel = modelInfo,
                         thinkingLevel = thinkingLevel,
                         isStreaming = isStreaming,
@@ -1154,8 +1154,16 @@ class ChatViewModel(
                     state.timeline + item
                 }
 
-            state.copy(timeline = updatedTimeline)
+            state.copy(timeline = limitTimeline(updatedTimeline))
         }
+    }
+
+    private fun limitTimeline(timeline: List<ChatTimelineItem>): List<ChatTimelineItem> {
+        if (timeline.size <= MAX_TIMELINE_ITEMS) {
+            return timeline
+        }
+
+        return timeline.takeLast(MAX_TIMELINE_ITEMS)
     }
 
     private fun findUpsertTargetIndex(
@@ -1278,6 +1286,7 @@ class ChatViewModel(
         private const val ASSISTANT_UPDATE_THROTTLE_MS = 40L
         private const val TOOL_UPDATE_THROTTLE_MS = 50L
         private const val TOOL_COLLAPSE_THRESHOLD = 400
+        private const val MAX_TIMELINE_ITEMS = 400
         private const val BASH_HISTORY_SIZE = 10
         private const val MAX_NOTIFICATIONS = 6
         private const val LIFECYCLE_NOTIFICATION_WINDOW_MS = 5_000L
