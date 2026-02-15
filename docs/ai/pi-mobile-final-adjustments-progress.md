@@ -74,7 +74,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 |---|---|---|---|---|---|---|
 | 17 | M1 Replace service locator with explicit DI | DONE | refactor(di): replace app service locator with explicit graph |  | ktlint✅ detekt✅ test✅ bridge✅ | Introduced AppGraph dependency container and removed global `AppServices` singleton usage from routes/viewmodel factories |
 | 18 | M2 Split god classes (complexity-focused, non-rigid) | DONE | refactor(chat): extract overlay and command palette components |  | ktlint✅ detekt✅ test✅ bridge✅ | Extracted extension dialogs, notifications, and command palette from `ChatScreen.kt` into dedicated `ChatOverlays.kt` and tightened DI wiring split from M1 |
-| 19 | M3 Unify streaming/backpressure runtime pipeline | TODO |  |  |  |  |
+| 19 | M3 Unify streaming/backpressure runtime pipeline | DONE | refactor(core-rpc): remove unused backpressure pipeline abstractions |  | ktlint✅ detekt✅ test✅ bridge✅ | Removed unused `BackpressureEventProcessor`, `StreamingBufferManager`, `BoundedEventBuffer` and their tests to keep a single runtime path based on `AssistantTextAssembler` + `UiUpdateThrottler` |
 | 20 | M4 Tighten static analysis rules/suppressions | TODO |  |  |  |  |
 
 ---
@@ -410,15 +410,33 @@ Notes/blockers:
 - Continued DI cleanup from M1 by keeping route/factory wiring explicit and test-safe.
 ```
 
+### 2026-02-15
+
+```text
+Task: M3
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Removed `BackpressureEventProcessor`, `StreamingBufferManager`, and `BoundedEventBuffer` from `core-rpc` because they were not used by app runtime.
+- Removed corresponding isolated tests to avoid maintaining dead abstractions.
+- Runtime streaming path now clearly centers on `AssistantTextAssembler` and `UiUpdateThrottler`.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 18
+- Backlog done: 19
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 8
+- Backlog remaining (not done): 7
 - Reference completed items (not counted in backlog): 6
 
 ---
