@@ -204,6 +204,66 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun sessionChangeDropsPendingAssistantDeltaFromPreviousSession() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_start",
+                    messageTimestamp = "old-session",
+                ),
+            )
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = "Old",
+                    messageTimestamp = "old-session",
+                ),
+            )
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = " stale",
+                    messageTimestamp = "old-session",
+                ),
+            )
+
+            controller.emitSessionChanged("/tmp/new-session.jsonl")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_start",
+                    messageTimestamp = "new-session",
+                ),
+            )
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = "New",
+                    messageTimestamp = "new-session",
+                ),
+            )
+            controller.emitEvent(
+                MessageEndEvent(
+                    type = "message_end",
+                    message =
+                        buildJsonObject {
+                            put("role", "assistant")
+                        },
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val item = viewModel.singleAssistantItem()
+            assertEquals("New", item.text)
+        }
+
+    @Test
     fun slashInputAutoOpensCommandPaletteAndUpdatesQuery() =
         runTest(dispatcher) {
             val controller = FakeSessionController()

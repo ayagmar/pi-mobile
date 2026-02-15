@@ -60,6 +60,10 @@ class FakeSessionController : SessionController {
         events.emit(event)
     }
 
+    suspend fun emitSessionChanged(sessionPath: String? = null) {
+        _sessionChanged.emit(sessionPath)
+    }
+
     fun setStreaming(isStreaming: Boolean) {
         streamingState.value = isStreaming
     }

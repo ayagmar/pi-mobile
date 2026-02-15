@@ -127,6 +127,7 @@ private fun mergeTimelineItems(
         existing is ChatTimelineItem.Tool && incoming is ChatTimelineItem.Tool -> {
             incoming.copy(
                 isCollapsed = existing.isCollapsed,
+                isDiffExpanded = existing.isDiffExpanded,
                 arguments = incoming.arguments.takeIf { it.isNotEmpty() } ?: existing.arguments,
                 editDiff = incoming.editDiff ?: existing.editDiff,
             )

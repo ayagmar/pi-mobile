@@ -46,6 +46,11 @@ class UiUpdateThrottler<T>(
 
     fun hasPending(): Boolean = pending != null
 
+    fun reset() {
+        pending = null
+        lastEmissionAtMs = null
+    }
+
     private fun canEmitNow(): Boolean {
         val lastEmission = lastEmissionAtMs ?: return true
         return nowMs() - lastEmission >= minIntervalMs

@@ -520,6 +520,7 @@ class ChatViewModel(
             sessionController.sessionChanged.collect {
                 // Reset state for new session
                 hasRecordedFirstToken = false
+                resetStreamingUpdateState()
                 fullTimeline = emptyList()
                 visibleTimelineSize = 0
                 resetHistoryWindow()
@@ -709,7 +710,7 @@ class ChatViewModel(
         // Add user messages to timeline
         if (role == "user" && message != null) {
             val text = extractUserText(message["content"])
-            val entryId = message.stringField("entryId") ?: System.currentTimeMillis().toString()
+            val entryId = message.stringField("entryId") ?: UUID.randomUUID().toString()
             val userItem =
                 ChatTimelineItem.User(
                     id = "user-$entryId",
@@ -1492,6 +1493,17 @@ class ChatViewModel(
         }
     }
 
+    private fun resetStreamingUpdateState() {
+        assistantUpdateFlushJob?.cancel()
+        assistantUpdateFlushJob = null
+        assistantUpdateThrottler.reset()
+
+        toolUpdateFlushJobs.values.forEach { it.cancel() }
+        toolUpdateFlushJobs.clear()
+        toolUpdateThrottlers.values.forEach { throttler -> throttler.reset() }
+        toolUpdateThrottlers.clear()
+    }
+
     private fun upsertTimelineItem(item: ChatTimelineItem) {
         val timelineState = ChatUiState(timeline = fullTimeline)
         fullTimeline =
@@ -1533,11 +1545,18 @@ class ChatViewModel(
     }
 
     private fun publishVisibleTimeline() {
+        val visible = visibleTimeline()
+        val activeToolIds =
+            fullTimeline
+                .filterIsInstance<ChatTimelineItem.Tool>()
+                .mapTo(mutableSetOf()) { tool -> tool.id }
+
         _uiState.update { state ->
             state.copy(
-                timeline = visibleTimeline(),
+                timeline = visible,
                 hasOlderMessages = hasOlderMessages(),
                 hiddenHistoryCount = hiddenHistoryCount(),
+                expandedToolArguments = state.expandedToolArguments.intersect(activeToolIds),
             )
         }
     }
@@ -1580,10 +1599,7 @@ class ChatViewModel(
 
     override fun onCleared() {
         initialLoadJob?.cancel()
-        assistantUpdateFlushJob?.cancel()
-        toolUpdateFlushJobs.values.forEach { it.cancel() }
-        toolUpdateFlushJobs.clear()
-        toolUpdateThrottlers.clear()
+        resetStreamingUpdateState()
         super.onCleared()
     }
 

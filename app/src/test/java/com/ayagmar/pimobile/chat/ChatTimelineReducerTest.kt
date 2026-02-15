@@ -43,7 +43,7 @@ class ChatTimelineReducerTest {
     }
 
     @Test
-    fun upsertToolPreservesManualCollapseAndExistingArguments() {
+    fun upsertToolPreservesManualCollapseExistingArgumentsAndDiffExpansion() {
         val initialTool =
             ChatTimelineItem.Tool(
                 id = "tool-call-1",
@@ -53,6 +53,7 @@ class ChatTimelineReducerTest {
                 isStreaming = true,
                 isError = false,
                 arguments = mapOf("command" to "ls"),
+                isDiffExpanded = true,
             )
         val initialState = ChatUiState(timeline = listOf(initialTool))
 
@@ -65,6 +66,7 @@ class ChatTimelineReducerTest {
                 isStreaming = false,
                 isError = false,
                 arguments = emptyMap(),
+                isDiffExpanded = false,
             )
 
         val nextState =
@@ -77,6 +79,7 @@ class ChatTimelineReducerTest {
         val merged = nextState.timeline.single() as ChatTimelineItem.Tool
         assertFalse(merged.isCollapsed)
         assertEquals(mapOf("command" to "ls"), merged.arguments)
+        assertTrue(merged.isDiffExpanded)
         assertEquals("Done", merged.output)
     }
 
