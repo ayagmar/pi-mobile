@@ -38,3 +38,6 @@ local.properties
 
 # Keep Gradle wrapper binary
 !gradle/wrapper/gradle-wrapper.jar
+
+#env files
+.env

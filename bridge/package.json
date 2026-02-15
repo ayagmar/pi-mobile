@@ -12,6 +12,7 @@
     "check": "pnpm run lint && pnpm run typecheck && pnpm run test"
   },
   "dependencies": {
+    "dotenv": "^17.3.1",
     "pino": "^9.9.5",
     "ws": "^8.18.3"
   },

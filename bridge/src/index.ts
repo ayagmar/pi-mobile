@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 import { parseBridgeConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 import { createBridgeServer } from "./server.js";
