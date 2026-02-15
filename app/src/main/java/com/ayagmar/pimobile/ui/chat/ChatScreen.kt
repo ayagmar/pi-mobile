@@ -76,11 +76,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -321,7 +324,12 @@ private fun ChatScreenContent(
         verticalArrangement = Arrangement.spacedBy(if (state.isStreaming) 8.dp else 12.dp),
     ) {
         ChatHeader(
-            state = state,
+            isStreaming = state.isStreaming,
+            extensionTitle = state.extensionTitle,
+            connectionState = state.connectionState,
+            currentModel = state.currentModel,
+            thinkingLevel = state.thinkingLevel,
+            errorMessage = state.errorMessage,
             callbacks = callbacks,
         )
 
@@ -333,7 +341,11 @@ private fun ChatScreenContent(
 
         Box(modifier = Modifier.weight(1f)) {
             ChatBody(
-                state = state,
+                isLoading = state.isLoading,
+                timeline = state.timeline,
+                hasOlderMessages = state.hasOlderMessages,
+                hiddenHistoryCount = state.hiddenHistoryCount,
+                expandedToolArguments = state.expandedToolArguments,
                 callbacks = callbacks,
             )
         }
@@ -345,7 +357,13 @@ private fun ChatScreenContent(
         )
 
         PromptControls(
-            state = state,
+            isStreaming = state.isStreaming,
+            isRetrying = state.isRetrying,
+            pendingQueueItems = state.pendingQueueItems,
+            steeringMode = state.steeringMode,
+            followUpMode = state.followUpMode,
+            inputText = state.inputText,
+            pendingImages = state.pendingImages,
             callbacks = callbacks,
         )
     }
@@ -354,10 +372,15 @@ private fun ChatScreenContent(
 @Suppress("LongMethod")
 @Composable
 private fun ChatHeader(
-    state: ChatUiState,
+    isStreaming: Boolean,
+    extensionTitle: String?,
+    connectionState: com.ayagmar.pimobile.corenet.ConnectionState,
+    currentModel: ModelInfo?,
+    thinkingLevel: String?,
+    errorMessage: String?,
     callbacks: ChatCallbacks,
 ) {
-    val isCompact = state.isStreaming
+    val isCompact = isStreaming
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // Top row: Title and minimal actions
@@ -367,7 +390,7 @@ private fun ChatHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                val title = state.extensionTitle ?: "Chat"
+                val title = extensionTitle ?: "Chat"
                 Text(
                     text = title,
                     style =
@@ -379,9 +402,9 @@ private fun ChatHeader(
                 )
 
                 // Subtle connection status
-                if (!isCompact && state.extensionTitle == null) {
+                if (!isCompact && extensionTitle == null) {
                     val statusText =
-                        when (state.connectionState) {
+                        when (connectionState) {
                             com.ayagmar.pimobile.corenet.ConnectionState.CONNECTED -> "●"
                             com.ayagmar.pimobile.corenet.ConnectionState.CONNECTING -> "○"
                             else -> "○"
@@ -390,7 +413,7 @@ private fun ChatHeader(
                         text = statusText,
                         style = MaterialTheme.typography.bodySmall,
                         color =
-                            when (state.connectionState) {
+                            when (connectionState) {
                                 com.ayagmar.pimobile.corenet.ConnectionState.CONNECTED ->
                                     MaterialTheme.colorScheme.primary
                                 else -> MaterialTheme.colorScheme.outline
@@ -426,16 +449,16 @@ private fun ChatHeader(
 
         // Compact model/thinking controls
         ModelThinkingControls(
-            currentModel = state.currentModel,
-            thinkingLevel = state.thinkingLevel,
+            currentModel = currentModel,
+            thinkingLevel = thinkingLevel,
             onSetThinkingLevel = callbacks.onSetThinkingLevel,
             onShowModelPicker = callbacks.onShowModelPicker,
         )
 
         // Error message if any
-        state.errorMessage?.let { errorMessage ->
+        errorMessage?.let { message ->
             Text(
-                text = errorMessage,
+                text = message,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -445,27 +468,31 @@ private fun ChatHeader(
 
 @Composable
 private fun ChatBody(
-    state: ChatUiState,
+    isLoading: Boolean,
+    timeline: List<ChatTimelineItem>,
+    hasOlderMessages: Boolean,
+    hiddenHistoryCount: Int,
+    expandedToolArguments: Set<String>,
     callbacks: ChatCallbacks,
 ) {
-    if (state.isLoading) {
+    if (isLoading) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
             horizontalArrangement = Arrangement.Center,
         ) {
             CircularProgressIndicator()
         }
-    } else if (state.timeline.isEmpty()) {
+    } else if (timeline.isEmpty()) {
         Text(
             text = "No chat messages yet. Resume a session and send a prompt.",
             style = MaterialTheme.typography.bodyLarge,
         )
     } else {
         ChatTimeline(
-            timeline = state.timeline,
-            hasOlderMessages = state.hasOlderMessages,
-            hiddenHistoryCount = state.hiddenHistoryCount,
-            expandedToolArguments = state.expandedToolArguments,
+            timeline = timeline,
+            hasOlderMessages = hasOlderMessages,
+            hiddenHistoryCount = hiddenHistoryCount,
+            expandedToolArguments = expandedToolArguments,
             onLoadOlderMessages = callbacks.onLoadOlderMessages,
             onToggleToolExpansion = callbacks.onToggleToolExpansion,
             onToggleThinkingExpansion = callbacks.onToggleThinkingExpansion,
@@ -493,9 +520,10 @@ private fun ChatTimeline(
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     // Auto-scroll only when a new tail item appears (avoid jumping to bottom when loading older history).
+    // Use immediate scroll instead of animation to reduce per-update jank while streaming.
     LaunchedEffect(timeline.lastOrNull()?.id) {
         if (timeline.isNotEmpty()) {
-            listState.animateScrollToItem(timeline.size - 1)
+            listState.scrollToItem(timeline.size - 1)
         }
     }
 
@@ -522,7 +550,11 @@ private fun ChatTimeline(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
                     ) {
-                        UserCard(text = item.text)
+                        UserCard(
+                            text = item.text,
+                            imageCount = item.imageCount,
+                            imageUris = item.imageUris,
+                        )
                     }
                 }
                 is ChatTimelineItem.Assistant -> {
@@ -549,6 +581,8 @@ private fun ChatTimeline(
 @Composable
 private fun UserCard(
     text: String,
+    imageCount: Int,
+    imageUris: List<String>,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -572,6 +606,53 @@ private fun UserCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
+
+            if (imageUris.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    itemsIndexed(
+                        items = imageUris.take(MAX_INLINE_USER_IMAGE_PREVIEWS),
+                        key = { index, uri -> "$uri-$index" },
+                    ) { _, uriString ->
+                        val uri = remember(uriString) { Uri.parse(uriString) }
+                        AsyncImage(
+                            model = uri,
+                            contentDescription = "Sent image preview",
+                            modifier =
+                                Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+
+                    val remaining = imageUris.size - MAX_INLINE_USER_IMAGE_PREVIEWS
+                    if (remaining > 0) {
+                        item(key = "more-images") {
+                            Box(
+                                modifier =
+                                    Modifier
+                                        .size(56.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(text = "+$remaining", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (imageCount > 0) {
+                Text(
+                    text = if (imageCount == 1) "📎 1 image attached" else "📎 $imageCount images attached",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
         }
     }
 }
@@ -620,21 +701,33 @@ private fun AssistantMessageContent(
     text: String,
     modifier: Modifier = Modifier,
 ) {
+    if (text.isBlank()) {
+        Text(
+            text = "(empty)",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = modifier,
+        )
+        return
+    }
+
+    // Fast path for common plain-text streaming updates (avoid regex parsing/jank on each delta).
+    if (!text.contains("```")) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = modifier,
+        )
+        return
+    }
+
     val blocks = remember(text) { parseAssistantMessageBlocks(text) }
 
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (blocks.isEmpty()) {
-            Text(
-                text = "(empty)",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-            return@Column
-        }
-
         blocks.forEach { block ->
             when (block) {
                 is AssistantMessageBlock.Paragraph -> {
@@ -943,20 +1036,30 @@ private fun ToolCard(
                         item.output
                     }
 
-                val inferredLanguage = inferLanguageFromToolContext(item)
-                val highlightedOutput =
-                    highlightCodeBlock(
-                        code = displayOutput.ifBlank { "(no output yet)" },
-                        language = inferredLanguage,
-                        colors = MaterialTheme.colorScheme,
-                    )
+                val rawOutput = displayOutput.ifBlank { "(no output yet)" }
+                val shouldHighlight = !item.isStreaming && rawOutput.length <= TOOL_HIGHLIGHT_MAX_LENGTH
 
                 SelectionContainer {
-                    Text(
-                        text = highlightedOutput,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Monospace,
-                    )
+                    if (shouldHighlight) {
+                        val inferredLanguage = inferLanguageFromToolContext(item)
+                        val highlightedOutput =
+                            highlightCodeBlock(
+                                code = rawOutput,
+                                language = inferredLanguage,
+                                colors = MaterialTheme.colorScheme,
+                            )
+                        Text(
+                            text = highlightedOutput,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    } else {
+                        Text(
+                            text = rawOutput,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
                 }
 
                 if (item.output.length > COLLAPSED_OUTPUT_LENGTH) {
@@ -1099,7 +1202,13 @@ private fun inferLanguageFromToolContext(item: ChatTimelineItem.Tool): String? {
 
 @Composable
 private fun PromptControls(
-    state: ChatUiState,
+    isStreaming: Boolean,
+    isRetrying: Boolean,
+    pendingQueueItems: List<PendingQueueItem>,
+    steeringMode: String,
+    followUpMode: String,
+    inputText: String,
+    pendingImages: List<PendingImage>,
     callbacks: ChatCallbacks,
 ) {
     var showSteerDialog by remember { mutableStateOf(false) }
@@ -1109,9 +1218,9 @@ private fun PromptControls(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (state.isStreaming || state.isRetrying) {
+        if (isStreaming || isRetrying) {
             StreamingControls(
-                isRetrying = state.isRetrying,
+                isRetrying = isRetrying,
                 onAbort = callbacks.onAbort,
                 onAbortRetry = callbacks.onAbortRetry,
                 onSteerClick = { showSteerDialog = true },
@@ -1119,20 +1228,20 @@ private fun PromptControls(
             )
         }
 
-        if (state.isStreaming && state.pendingQueueItems.isNotEmpty()) {
+        if (isStreaming && pendingQueueItems.isNotEmpty()) {
             PendingQueueInspector(
-                pendingItems = state.pendingQueueItems,
-                steeringMode = state.steeringMode,
-                followUpMode = state.followUpMode,
+                pendingItems = pendingQueueItems,
+                steeringMode = steeringMode,
+                followUpMode = followUpMode,
                 onRemoveItem = callbacks.onRemovePendingQueueItem,
                 onClear = callbacks.onClearPendingQueueItems,
             )
         }
 
         PromptInputRow(
-            inputText = state.inputText,
-            isStreaming = state.isStreaming,
-            pendingImages = state.pendingImages,
+            inputText = inputText,
+            isStreaming = isStreaming,
+            pendingImages = pendingImages,
             onInputTextChanged = callbacks.onInputTextChanged,
             onSendPrompt = callbacks.onSendPrompt,
             onShowCommandPalette = callbacks.onShowCommandPalette,
@@ -1184,13 +1293,19 @@ private fun StreamingControls(
                 androidx.compose.material3.ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.error,
                 ),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 8.dp),
         ) {
             Icon(
                 imageVector = Icons.Default.Close,
                 contentDescription = "Abort",
                 modifier = Modifier.padding(end = 4.dp),
             )
-            Text("Abort")
+            Text(
+                text = "Abort",
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
 
         if (isRetrying) {
@@ -1202,21 +1317,21 @@ private fun StreamingControls(
                         containerColor = MaterialTheme.colorScheme.error,
                     ),
             ) {
-                Text("Abort Retry")
+                Text(text = "Abort Retry", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
         } else {
             Button(
                 onClick = onSteerClick,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Steer")
+                Text(text = "Steer", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
 
             Button(
                 onClick = onFollowUpClick,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Follow Up")
+                Text(text = "Follow Up", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -1328,6 +1443,14 @@ private fun PromptInputRow(
 ) {
     val context = LocalContext.current
     val imageEncoder = remember { ImageEncoder(context) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+
+    val submitPrompt = {
+        keyboardController?.hide()
+        focusManager.clearFocus(force = true)
+        onSendPrompt()
+    }
 
     val photoPickerLauncher =
         rememberLauncherForActivityResult(
@@ -1375,7 +1498,7 @@ private fun PromptInputRow(
                 singleLine = false,
                 maxLines = 4,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { onSendPrompt() }),
+                keyboardActions = KeyboardActions(onSend = { submitPrompt() }),
                 enabled = !isStreaming,
                 trailingIcon = {
                     if (inputText.isEmpty() && !isStreaming) {
@@ -1390,7 +1513,7 @@ private fun PromptInputRow(
             )
 
             IconButton(
-                onClick = onSendPrompt,
+                onClick = submitPrompt,
                 enabled = (inputText.isNotBlank() || pendingImages.isNotEmpty()) && !isStreaming,
             ) {
                 Icon(
@@ -1670,6 +1793,8 @@ private fun ExtensionWidgets(
 private const val COLLAPSED_OUTPUT_LENGTH = 280
 private const val THINKING_COLLAPSE_THRESHOLD = 280
 private const val MAX_ARG_DISPLAY_LENGTH = 100
+private const val MAX_INLINE_USER_IMAGE_PREVIEWS = 4
+private const val TOOL_HIGHLIGHT_MAX_LENGTH = 1_000
 private const val STREAMING_FRAME_LOG_TAG = "StreamingFrameMetrics"
 private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")
 private val CODE_FENCE_REGEX = Regex("```([\\w+-]*)\\r?\\n([\\s\\S]*?)```")

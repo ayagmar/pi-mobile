@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -126,13 +127,26 @@ class ChatViewModel(
         PerformanceMetrics.recordPromptSend()
         hasRecordedFirstToken = false
 
+        val optimisticUserId = "$LOCAL_USER_ITEM_PREFIX${UUID.randomUUID()}"
+        upsertTimelineItem(
+            ChatTimelineItem.User(
+                id = optimisticUserId,
+                text = message,
+                imageCount = pendingImages.size,
+                imageUris = pendingImages.map { it.uri },
+            ),
+        )
+
         viewModelScope.launch {
             val imagePayloads =
-                pendingImages.mapNotNull { pending ->
-                    imageEncoder?.encodeToPayload(pending)
+                withContext(Dispatchers.Default) {
+                    pendingImages.mapNotNull { pending ->
+                        imageEncoder?.encodeToPayload(pending)
+                    }
                 }
 
             if (message.isEmpty() && imagePayloads.isEmpty()) {
+                removeTimelineItemById(optimisticUserId)
                 _uiState.update {
                     it.copy(errorMessage = "Unable to attach image. Please try again.")
                 }
@@ -142,6 +156,7 @@ class ChatViewModel(
             _uiState.update { it.copy(inputText = "", pendingImages = emptyList(), errorMessage = null) }
             val result = sessionController.sendPrompt(message, imagePayloads)
             if (result.isFailure) {
+                removeTimelineItemById(optimisticUserId)
                 _uiState.update {
                     it.copy(
                         inputText = currentState.inputText,
@@ -709,14 +724,17 @@ class ChatViewModel(
 
         // Add user messages to timeline
         if (role == "user" && message != null) {
-            val text = extractUserText(message["content"])
+            val content = message["content"]
+            val text = extractUserText(content)
+            val imageCount = extractUserImageCount(content)
             val entryId = message.stringField("entryId") ?: UUID.randomUUID().toString()
             val userItem =
                 ChatTimelineItem.User(
                     id = "user-$entryId",
                     text = text,
+                    imageCount = imageCount,
                 )
-            upsertTimelineItem(userItem)
+            replacePendingUserItemOrUpsert(userItem)
         }
     }
 
@@ -1520,6 +1538,51 @@ class ChatViewModel(
         publishVisibleTimeline()
     }
 
+    private fun replacePendingUserItemOrUpsert(userItem: ChatTimelineItem.User) {
+        val pendingIndex =
+            fullTimeline.indexOfFirst { item ->
+                item is ChatTimelineItem.User &&
+                    item.id.startsWith(LOCAL_USER_ITEM_PREFIX) &&
+                    item.text == userItem.text &&
+                    item.imageCount >= userItem.imageCount
+            }
+
+        if (pendingIndex < 0) {
+            upsertTimelineItem(userItem)
+            return
+        }
+
+        val pendingItem = fullTimeline[pendingIndex] as ChatTimelineItem.User
+        val mergedUserItem =
+            userItem.copy(
+                imageCount = maxOf(userItem.imageCount, pendingItem.imageCount),
+                imageUris = userItem.imageUris.ifEmpty { pendingItem.imageUris },
+            )
+
+        fullTimeline =
+            fullTimeline.toMutableList().also { timeline ->
+                timeline[pendingIndex] = mergedUserItem
+            }
+
+        publishVisibleTimeline()
+    }
+
+    private fun removeTimelineItemById(itemId: String) {
+        val existingIndex = fullTimeline.indexOfFirst { it.id == itemId }
+        if (existingIndex < 0) return
+
+        fullTimeline =
+            fullTimeline.toMutableList().also { timeline ->
+                timeline.removeAt(existingIndex)
+            }
+
+        if (visibleTimelineSize > fullTimeline.size) {
+            visibleTimelineSize = fullTimeline.size
+        }
+
+        publishVisibleTimeline()
+    }
+
     private fun setInitialTimeline(history: List<ChatTimelineItem>) {
         fullTimeline =
             ChatTimelineReducer.limitTimeline(
@@ -1668,8 +1731,9 @@ class ChatViewModel(
         private val SLASH_COMMAND_TOKEN_REGEX = Regex("^/([a-zA-Z0-9:_-]*)$")
 
         private const val HISTORY_ITEM_PREFIX = "history-"
-        private const val ASSISTANT_UPDATE_THROTTLE_MS = 40L
-        private const val TOOL_UPDATE_THROTTLE_MS = 50L
+        private const val LOCAL_USER_ITEM_PREFIX = "local-user-"
+        private const val ASSISTANT_UPDATE_THROTTLE_MS = 80L
+        private const val TOOL_UPDATE_THROTTLE_MS = 100L
         private const val TOOL_COLLAPSE_THRESHOLD = 400
         private const val MAX_TIMELINE_ITEMS = HISTORY_WINDOW_MAX_ITEMS
         private const val INITIAL_TIMELINE_SIZE = 120
@@ -1797,6 +1861,8 @@ sealed interface ChatTimelineItem {
     data class User(
         override val id: String,
         val text: String,
+        val imageCount: Int = 0,
+        val imageUris: List<String> = emptyList(),
     ) : ChatTimelineItem
 
     data class Assistant(
@@ -1896,8 +1962,14 @@ private fun parseHistoryItems(
 
         when (message.stringField("role")) {
             "user" -> {
-                val text = extractUserText(message["content"])
-                ChatTimelineItem.User(id = "history-user-$absoluteIndex", text = text)
+                val content = message["content"]
+                val text = extractUserText(content)
+                val imageCount = extractUserImageCount(content)
+                ChatTimelineItem.User(
+                    id = "history-user-$absoluteIndex",
+                    text = text,
+                    imageCount = imageCount,
+                )
             }
 
             "assistant" -> {
@@ -1949,6 +2021,29 @@ private fun extractUserText(content: JsonElement?): String {
             }.getOrDefault("")
         }
     }
+}
+
+private fun extractUserImageCount(content: JsonElement?): Int {
+    return runCatching {
+        when (content) {
+            null -> 0
+            is kotlinx.serialization.json.JsonPrimitive -> 0
+            is JsonObject -> {
+                val type = content.stringField("type")?.lowercase().orEmpty()
+                if ("image" in type) 1 else 0
+            }
+            else -> {
+                content.jsonArray.count { block ->
+                    val blockObject = runCatching { block.jsonObject }.getOrNull() ?: return@count false
+                    val type = blockObject.stringField("type")?.lowercase().orEmpty()
+                    type.contains("image") ||
+                        blockObject["image"] != null ||
+                        blockObject["imageUrl"] != null ||
+                        blockObject["image_url"] != null
+                }
+            }
+        }
+    }.getOrDefault(0)
 }
 
 private fun extractAssistantText(content: JsonElement?): String {
