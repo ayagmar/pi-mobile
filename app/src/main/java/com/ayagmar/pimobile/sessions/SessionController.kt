@@ -1,9 +1,11 @@
 package com.ayagmar.pimobile.sessions
 
 import com.ayagmar.pimobile.corenet.ConnectionState
+import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.BashResult
 import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
 import com.ayagmar.pimobile.corerpc.RpcResponse
+import com.ayagmar.pimobile.corerpc.SessionStats
 import com.ayagmar.pimobile.coresessions.SessionRecord
 import com.ayagmar.pimobile.hosts.HostProfile
 import kotlinx.coroutines.flow.SharedFlow
@@ -67,6 +69,15 @@ interface SessionController {
     ): Result<BashResult>
 
     suspend fun abortBash(): Result<Unit>
+
+    suspend fun getSessionStats(): Result<SessionStats>
+
+    suspend fun getAvailableModels(): Result<List<AvailableModel>>
+
+    suspend fun setModel(
+        provider: String,
+        modelId: String,
+    ): Result<ModelInfo?>
 }
 
 /**

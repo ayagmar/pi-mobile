@@ -40,13 +40,13 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 
 | Task | Status | Commit | Verification | Notes |
 |------|--------|--------|--------------|-------|
-| **3.1** Session Stats Display | `TODO` | - | - | Show tokens, cost, message counts |
-| **3.2** Model Picker (Beyond Cycling) | `TODO` | - | - | Full model list with search/details |
+| **3.1** Session Stats Display | `DONE` | 5afd90e | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Token counts, cost, message counts in sheet |
+| **3.2** Model Picker (Beyond Cycling) | `DONE` | 5afd90e | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Full model list with search, long-press to open |
 | **3.3** Tree Navigation (/tree equivalent) | `TODO` | - | - | Visual conversation tree navigation |
 
 ### Phase 3 Completion Criteria
-- [ ] Stats visible in bottom sheet
-- [ ] Model picker with all capabilities
+- [x] Stats visible in bottom sheet
+- [x] Model picker with all capabilities
 - [ ] Tree view for history navigation
 
 ---
@@ -98,12 +98,12 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 | `cycle_thinking_level` | ✅ DONE | - |
 | `new_session` | ✅ DONE | - |
 | `extension_ui_response` | ✅ DONE | - |
-| `get_commands` | ⬜ TODO | Need for slash commands |
-| `get_available_models` | ⬜ TODO | Need for model picker |
-| `set_model` | ⬜ TODO | Need for model picker |
-| `get_session_stats` | ⬜ TODO | Need for stats display |
-| `bash` | ⬜ TODO | Need for bash execution |
-| `abort_bash` | ⬜ TODO | Need for bash cancellation |
+| `get_commands` | ✅ DONE | For slash commands palette |
+| `get_available_models` | ✅ DONE | For model picker |
+| `set_model` | ✅ DONE | For model picker |
+| `get_session_stats` | ✅ DONE | For stats display |
+| `bash` | ✅ DONE | For bash execution |
+| `abort_bash` | ✅ DONE | For bash cancellation |
 | `set_auto_compaction` | ⬜ TODO | Need for settings toggle |
 | `set_auto_retry` | ⬜ TODO | Need for settings toggle |
 | `set_steering_mode` | ⬜ TODO | Low priority |

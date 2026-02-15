@@ -9,8 +9,10 @@ import com.ayagmar.pimobile.corerpc.AutoCompactionEndEvent
 import com.ayagmar.pimobile.corerpc.AutoCompactionStartEvent
 import com.ayagmar.pimobile.corerpc.AutoRetryEndEvent
 import com.ayagmar.pimobile.corerpc.AutoRetryStartEvent
+import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
+import com.ayagmar.pimobile.corerpc.SessionStats
 import com.ayagmar.pimobile.corerpc.ToolExecutionEndEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionStartEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionUpdateEvent
@@ -642,6 +644,88 @@ class ChatViewModel(
         _uiState.update { it.copy(bashCommand = command) }
     }
 
+    // Session stats functions
+    fun showStatsSheet() {
+        _uiState.update { it.copy(isStatsSheetVisible = true) }
+        loadSessionStats()
+    }
+
+    fun hideStatsSheet() {
+        _uiState.update { it.copy(isStatsSheetVisible = false) }
+    }
+
+    fun refreshSessionStats() {
+        loadSessionStats()
+    }
+
+    private fun loadSessionStats() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingStats = true) }
+            val result = sessionController.getSessionStats()
+            _uiState.update { state ->
+                if (result.isSuccess) {
+                    state.copy(
+                        sessionStats = result.getOrNull(),
+                        isLoadingStats = false,
+                    )
+                } else {
+                    state.copy(
+                        isLoadingStats = false,
+                        errorMessage = result.exceptionOrNull()?.message,
+                    )
+                }
+            }
+        }
+    }
+
+    // Model picker functions
+    fun showModelPicker() {
+        _uiState.update { it.copy(isModelPickerVisible = true, modelsQuery = "") }
+        loadAvailableModels()
+    }
+
+    fun hideModelPicker() {
+        _uiState.update { it.copy(isModelPickerVisible = false) }
+    }
+
+    fun onModelsQueryChanged(query: String) {
+        _uiState.update { it.copy(modelsQuery = query) }
+    }
+
+    fun selectModel(model: AvailableModel) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isModelPickerVisible = false) }
+            val result = sessionController.setModel(model.provider, model.id)
+            if (result.isSuccess) {
+                result.getOrNull()?.let { modelInfo ->
+                    _uiState.update { it.copy(currentModel = modelInfo) }
+                }
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    private fun loadAvailableModels() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingModels = true) }
+            val result = sessionController.getAvailableModels()
+            _uiState.update { state ->
+                if (result.isSuccess) {
+                    state.copy(
+                        availableModels = result.getOrNull() ?: emptyList(),
+                        isLoadingModels = false,
+                    )
+                } else {
+                    state.copy(
+                        isLoadingModels = false,
+                        errorMessage = result.exceptionOrNull()?.message,
+                    )
+                }
+            }
+        }
+    }
+
     private fun handleToolStart(event: ToolExecutionStartEvent) {
         val arguments = extractToolArguments(event.args)
         val editDiff = if (event.toolName == "edit") extractEditDiff(event.args) else null
@@ -783,6 +867,15 @@ data class ChatUiState(
     val bashHistory: List<String> = emptyList(),
     // Tool argument expansion state (per tool ID)
     val expandedToolArguments: Set<String> = emptySet(),
+    // Session stats state
+    val isStatsSheetVisible: Boolean = false,
+    val sessionStats: SessionStats? = null,
+    val isLoadingStats: Boolean = false,
+    // Model picker state
+    val isModelPickerVisible: Boolean = false,
+    val availableModels: List<AvailableModel> = emptyList(),
+    val modelsQuery: String = "",
+    val isLoadingModels: Boolean = false,
 )
 
 data class ExtensionNotification(

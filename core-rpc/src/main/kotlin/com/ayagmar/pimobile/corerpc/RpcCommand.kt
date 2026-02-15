@@ -143,6 +143,26 @@ data class AbortBashCommand(
 ) : RpcCommand
 
 @Serializable
+data class GetSessionStatsCommand(
+    override val id: String? = null,
+    override val type: String = "get_session_stats",
+) : RpcCommand
+
+@Serializable
+data class GetAvailableModelsCommand(
+    override val id: String? = null,
+    override val type: String = "get_available_models",
+) : RpcCommand
+
+@Serializable
+data class SetModelCommand(
+    override val id: String? = null,
+    override val type: String = "set_model",
+    val provider: String,
+    val modelId: String,
+) : RpcCommand
+
+@Serializable
 data class ImagePayload(
     val type: String = "image",
     val data: String,
@@ -166,4 +186,34 @@ data class BashResult(
     val exitCode: Int,
     val wasTruncated: Boolean,
     val fullLogPath: String? = null,
+)
+
+/**
+ * Session statistics from get_session_stats response.
+ */
+data class SessionStats(
+    val inputTokens: Long,
+    val outputTokens: Long,
+    val cacheReadTokens: Long,
+    val cacheWriteTokens: Long,
+    val totalCost: Double,
+    val messageCount: Int,
+    val userMessageCount: Int,
+    val assistantMessageCount: Int,
+    val toolResultCount: Int,
+    val sessionPath: String?,
+)
+
+/**
+ * Available model information from get_available_models response.
+ */
+data class AvailableModel(
+    val id: String,
+    val name: String,
+    val provider: String,
+    val contextWindow: Int?,
+    val maxOutputTokens: Int?,
+    val supportsThinking: Boolean,
+    val inputCostPer1k: Double?,
+    val outputCostPer1k: Double?,
 )

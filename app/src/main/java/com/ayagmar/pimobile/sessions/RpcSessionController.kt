@@ -1,3 +1,5 @@
+@file:Suppress("TooManyFunctions")
+
 package com.ayagmar.pimobile.sessions
 
 import com.ayagmar.pimobile.corenet.ConnectionState
@@ -8,6 +10,7 @@ import com.ayagmar.pimobile.corerpc.AbortBashCommand
 import com.ayagmar.pimobile.corerpc.AbortCommand
 import com.ayagmar.pimobile.corerpc.AgentEndEvent
 import com.ayagmar.pimobile.corerpc.AgentStartEvent
+import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.BashCommand
 import com.ayagmar.pimobile.corerpc.BashResult
 import com.ayagmar.pimobile.corerpc.CompactCommand
@@ -17,13 +20,17 @@ import com.ayagmar.pimobile.corerpc.ExportHtmlCommand
 import com.ayagmar.pimobile.corerpc.ExtensionUiResponseCommand
 import com.ayagmar.pimobile.corerpc.FollowUpCommand
 import com.ayagmar.pimobile.corerpc.ForkCommand
+import com.ayagmar.pimobile.corerpc.GetAvailableModelsCommand
 import com.ayagmar.pimobile.corerpc.GetCommandsCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
+import com.ayagmar.pimobile.corerpc.GetSessionStatsCommand
 import com.ayagmar.pimobile.corerpc.NewSessionCommand
 import com.ayagmar.pimobile.corerpc.PromptCommand
 import com.ayagmar.pimobile.corerpc.RpcCommand
 import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
 import com.ayagmar.pimobile.corerpc.RpcResponse
+import com.ayagmar.pimobile.corerpc.SessionStats
+import com.ayagmar.pimobile.corerpc.SetModelCommand
 import com.ayagmar.pimobile.corerpc.SetSessionNameCommand
 import com.ayagmar.pimobile.corerpc.SteerCommand
 import com.ayagmar.pimobile.corerpc.SwitchSessionCommand
@@ -425,6 +432,65 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun getSessionStats(): Result<SessionStats> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val response =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = GetSessionStatsCommand(id = UUID.randomUUID().toString()),
+                        expectedCommand = GET_SESSION_STATS_COMMAND,
+                    ).requireSuccess("Failed to get session stats")
+
+                parseSessionStats(response.data)
+            }
+        }
+    }
+
+    override suspend fun getAvailableModels(): Result<List<AvailableModel>> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val response =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = GetAvailableModelsCommand(id = UUID.randomUUID().toString()),
+                        expectedCommand = GET_AVAILABLE_MODELS_COMMAND,
+                    ).requireSuccess("Failed to get available models")
+
+                parseAvailableModels(response.data)
+            }
+        }
+    }
+
+    override suspend fun setModel(
+        provider: String,
+        modelId: String,
+    ): Result<ModelInfo?> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val response =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command =
+                            SetModelCommand(
+                                id = UUID.randomUUID().toString(),
+                                provider = provider,
+                                modelId = modelId,
+                            ),
+                        expectedCommand = SET_MODEL_COMMAND,
+                    ).requireSuccess("Failed to set model")
+
+                parseModelInfo(response.data)
+            }
+        }
+    }
+
     private suspend fun clearActiveConnection() {
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
@@ -495,6 +561,9 @@ class RpcSessionController(
         private const val GET_COMMANDS_COMMAND = "get_commands"
         private const val BASH_COMMAND = "bash"
         private const val ABORT_BASH_COMMAND = "abort_bash"
+        private const val GET_SESSION_STATS_COMMAND = "get_session_stats"
+        private const val GET_AVAILABLE_MODELS_COMMAND = "get_available_models"
+        private const val SET_MODEL_COMMAND = "set_model"
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
         private const val BASH_TIMEOUT_MS = 60_000L
@@ -598,4 +667,54 @@ private fun parseBashResult(data: JsonObject?): BashResult {
         wasTruncated = data?.booleanField("wasTruncated") ?: false,
         fullLogPath = data?.stringField("fullLogPath"),
     )
+}
+
+@Suppress("MagicNumber")
+private fun parseSessionStats(data: JsonObject?): SessionStats {
+    return SessionStats(
+        inputTokens = data?.longField("inputTokens") ?: 0L,
+        outputTokens = data?.longField("outputTokens") ?: 0L,
+        cacheReadTokens = data?.longField("cacheReadTokens") ?: 0L,
+        cacheWriteTokens = data?.longField("cacheWriteTokens") ?: 0L,
+        totalCost = data?.doubleField("totalCost") ?: 0.0,
+        messageCount = data?.intField("messageCount") ?: 0,
+        userMessageCount = data?.intField("userMessageCount") ?: 0,
+        assistantMessageCount = data?.intField("assistantMessageCount") ?: 0,
+        toolResultCount = data?.intField("toolResultCount") ?: 0,
+        sessionPath = data?.stringField("sessionPath"),
+    )
+}
+
+private fun parseAvailableModels(data: JsonObject?): List<AvailableModel> {
+    val models = runCatching { data?.get("models")?.jsonArray }.getOrNull() ?: JsonArray(emptyList())
+
+    return models.mapNotNull { modelElement ->
+        val modelObject = modelElement.jsonObject
+        val id = modelObject.stringField("id") ?: return@mapNotNull null
+        AvailableModel(
+            id = id,
+            name = modelObject.stringField("name") ?: id,
+            provider = modelObject.stringField("provider") ?: "unknown",
+            contextWindow = modelObject.intField("contextWindow"),
+            maxOutputTokens = modelObject.intField("maxOutputTokens"),
+            supportsThinking = modelObject.booleanField("supportsThinking") ?: false,
+            inputCostPer1k = modelObject.doubleField("inputCostPer1k"),
+            outputCostPer1k = modelObject.doubleField("outputCostPer1k"),
+        )
+    }
+}
+
+private fun JsonObject?.longField(fieldName: String): Long? {
+    val value = this?.get(fieldName)?.jsonPrimitive?.contentOrNull ?: return null
+    return value.toLongOrNull()
+}
+
+private fun JsonObject?.intField(fieldName: String): Int? {
+    val value = this?.get(fieldName)?.jsonPrimitive?.contentOrNull ?: return null
+    return value.toIntOrNull()
+}
+
+private fun JsonObject?.doubleField(fieldName: String): Double? {
+    val value = this?.get(fieldName)?.jsonPrimitive?.contentOrNull ?: return null
+    return value.toDoubleOrNull()
 }

@@ -2,8 +2,10 @@
 
 package com.ayagmar.pimobile.ui.chat
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +25,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
@@ -32,6 +35,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
@@ -73,6 +77,8 @@ import com.ayagmar.pimobile.chat.ChatViewModelFactory
 import com.ayagmar.pimobile.chat.ExtensionNotification
 import com.ayagmar.pimobile.chat.ExtensionUiRequest
 import com.ayagmar.pimobile.chat.ExtensionWidget
+import com.ayagmar.pimobile.corerpc.AvailableModel
+import com.ayagmar.pimobile.corerpc.SessionStats
 import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 
@@ -102,6 +108,15 @@ private data class ChatCallbacks(
     val onExecuteBash: () -> Unit,
     val onAbortBash: () -> Unit,
     val onSelectBashHistory: (String) -> Unit,
+    // Session stats callbacks
+    val onShowStatsSheet: () -> Unit,
+    val onHideStatsSheet: () -> Unit,
+    val onRefreshStats: () -> Unit,
+    // Model picker callbacks
+    val onShowModelPicker: () -> Unit,
+    val onHideModelPicker: () -> Unit,
+    val onModelsQueryChanged: (String) -> Unit,
+    val onSelectModel: (AvailableModel) -> Unit,
 )
 
 @Composable
@@ -137,6 +152,13 @@ fun ChatRoute() {
                 onExecuteBash = chatViewModel::executeBash,
                 onAbortBash = chatViewModel::abortBash,
                 onSelectBashHistory = chatViewModel::selectBashHistoryItem,
+                onShowStatsSheet = chatViewModel::showStatsSheet,
+                onHideStatsSheet = chatViewModel::hideStatsSheet,
+                onRefreshStats = chatViewModel::refreshSessionStats,
+                onShowModelPicker = chatViewModel::showModelPicker,
+                onHideModelPicker = chatViewModel::hideModelPicker,
+                onModelsQueryChanged = chatViewModel::onModelsQueryChanged,
+                onSelectModel = chatViewModel::selectModel,
             )
         }
 
@@ -191,6 +213,25 @@ private fun ChatScreen(
         onAbort = callbacks.onAbortBash,
         onSelectHistory = callbacks.onSelectBashHistory,
         onDismiss = callbacks.onHideBashDialog,
+    )
+
+    SessionStatsSheet(
+        isVisible = state.isStatsSheetVisible,
+        stats = state.sessionStats,
+        isLoading = state.isLoadingStats,
+        onRefresh = callbacks.onRefreshStats,
+        onDismiss = callbacks.onHideStatsSheet,
+    )
+
+    ModelPickerSheet(
+        isVisible = state.isModelPickerVisible,
+        models = state.availableModels,
+        currentModel = state.currentModel,
+        query = state.modelsQuery,
+        isLoading = state.isLoadingModels,
+        onQueryChange = callbacks.onModelsQueryChanged,
+        onSelectModel = callbacks.onSelectModel,
+        onDismiss = callbacks.onHideModelPicker,
     )
 }
 
@@ -247,7 +288,7 @@ private fun ChatHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             // Show extension title if set, otherwise "Chat"
             val title = state.extensionTitle ?: "Chat"
             Text(
@@ -264,12 +305,22 @@ private fun ChatHeader(
             }
         }
 
-        // Bash button
-        IconButton(onClick = callbacks.onShowBashDialog) {
-            Icon(
-                imageVector = Icons.Default.Terminal,
-                contentDescription = "Run Bash",
-            )
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Stats button
+            IconButton(onClick = callbacks.onShowStatsSheet) {
+                Icon(
+                    imageVector = Icons.Default.BarChart,
+                    contentDescription = "Session Stats",
+                )
+            }
+
+            // Bash button
+            IconButton(onClick = callbacks.onShowBashDialog) {
+                Icon(
+                    imageVector = Icons.Default.Terminal,
+                    contentDescription = "Run Bash",
+                )
+            }
         }
     }
 
@@ -278,6 +329,7 @@ private fun ChatHeader(
         thinkingLevel = state.thinkingLevel,
         onCycleModel = callbacks.onCycleModel,
         onCycleThinking = callbacks.onCycleThinking,
+        onShowModelPicker = callbacks.onShowModelPicker,
     )
 
     state.errorMessage?.let { errorMessage ->
@@ -1193,12 +1245,14 @@ private fun SteerFollowUpDialog(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ModelThinkingControls(
     currentModel: ModelInfo?,
     thinkingLevel: String?,
     onCycleModel: () -> Unit,
     onCycleThinking: () -> Unit,
+    onShowModelPicker: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1208,14 +1262,23 @@ private fun ModelThinkingControls(
         val modelText = currentModel?.let { "${it.name} (${it.provider})" } ?: "No model"
         val thinkingText = thinkingLevel?.let { "Thinking: $it" } ?: "Thinking: off"
 
-        TextButton(
-            onClick = onCycleModel,
-            modifier = Modifier.weight(1f),
+        // Model button - tap to cycle, long press for picker
+        Box(
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .combinedClickable(
+                        onClick = onCycleModel,
+                        onLongClick = onShowModelPicker,
+                    )
+                    .padding(8.dp),
         ) {
             Text(
                 text = modelText,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
 
@@ -1501,3 +1564,353 @@ private fun BashDialog(
         },
     )
 }
+
+@Suppress("LongParameterList", "LongMethod")
+@Composable
+private fun SessionStatsSheet(
+    isVisible: Boolean,
+    stats: SessionStats?,
+    isLoading: Boolean,
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (!isVisible) return
+
+    val clipboardManager = LocalClipboardManager.current
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Session Statistics")
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                    )
+                }
+            }
+        },
+        text = {
+            if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else if (stats == null) {
+                Text(
+                    text = "No statistics available",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    // Token stats
+                    StatsSection(title = "Tokens") {
+                        StatRow("Input Tokens", formatNumber(stats.inputTokens))
+                        StatRow("Output Tokens", formatNumber(stats.outputTokens))
+                        StatRow("Cache Read", formatNumber(stats.cacheReadTokens))
+                        StatRow("Cache Write", formatNumber(stats.cacheWriteTokens))
+                    }
+
+                    // Cost
+                    StatsSection(title = "Cost") {
+                        StatRow("Total Cost", formatCost(stats.totalCost))
+                    }
+
+                    // Messages
+                    StatsSection(title = "Messages") {
+                        StatRow("Total", stats.messageCount.toString())
+                        StatRow("User", stats.userMessageCount.toString())
+                        StatRow("Assistant", stats.assistantMessageCount.toString())
+                        StatRow("Tool Results", stats.toolResultCount.toString())
+                    }
+
+                    // Session path
+                    stats.sessionPath?.let { path ->
+                        StatsSection(title = "Session File") {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = path.takeLast(SESSION_PATH_DISPLAY_LENGTH),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(
+                                    onClick = { clipboardManager.setText(AnnotatedString(path)) },
+                                    modifier = Modifier.size(24.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy path",
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+@Composable
+private fun StatsSection(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .padding(12.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        content()
+    }
+}
+
+@Composable
+private fun StatRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
+}
+
+@Suppress("MagicNumber")
+private fun formatNumber(value: Long): String {
+    return when {
+        value >= 1_000_000 -> String.format(java.util.Locale.US, "%.2fM", value / 1_000_000.0)
+        value >= 1_000 -> String.format(java.util.Locale.US, "%.1fK", value / 1_000.0)
+        else -> value.toString()
+    }
+}
+
+@Suppress("MagicNumber")
+private fun formatCost(value: Double): String {
+    return String.format(java.util.Locale.US, "$%.4f", value)
+}
+
+@Suppress("LongParameterList", "LongMethod")
+@Composable
+private fun ModelPickerSheet(
+    isVisible: Boolean,
+    models: List<AvailableModel>,
+    currentModel: ModelInfo?,
+    query: String,
+    isLoading: Boolean,
+    onQueryChange: (String) -> Unit,
+    onSelectModel: (AvailableModel) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (!isVisible) return
+
+    val filteredModels =
+        remember(models, query) {
+            if (query.isBlank()) {
+                models
+            } else {
+                models.filter { model ->
+                    model.name.contains(query, ignoreCase = true) ||
+                        model.provider.contains(query, ignoreCase = true) ||
+                        model.id.contains(query, ignoreCase = true)
+                }
+            }
+        }
+
+    val groupedModels =
+        remember(filteredModels) {
+            filteredModels.groupBy { it.provider }
+        }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select Model") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp),
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    placeholder = { Text("Search models...") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                        )
+                    },
+                )
+
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else if (filteredModels.isEmpty()) {
+                    Text(
+                        text = "No models found",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        groupedModels.forEach { (provider, modelsInGroup) ->
+                            item {
+                                Text(
+                                    text = provider.replaceFirstChar { it.uppercase() },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                )
+                            }
+                            items(modelsInGroup) { model ->
+                                ModelItem(
+                                    model = model,
+                                    isSelected =
+                                        currentModel?.id == model.id &&
+                                            currentModel.provider == model.provider,
+                                    onClick = { onSelectModel(model) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Suppress("LongMethod")
+@Composable
+private fun ModelItem(
+    model: AvailableModel,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .clickable { onClick() },
+        colors =
+            if (isSelected) {
+                androidx.compose.material3.CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                )
+            } else {
+                androidx.compose.material3.CardDefaults.cardColors()
+            },
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = model.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (model.supportsThinking) {
+                    AssistChip(
+                        onClick = {},
+                        label = {
+                            Text(
+                                "Thinking",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        },
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                model.contextWindow?.let { ctx ->
+                    Text(
+                        text = "Context: ${formatNumber(ctx.toLong())}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                model.inputCostPer1k?.let { cost ->
+                    Text(
+                        text = "In: \$${String.format(java.util.Locale.US, "%.4f", cost)}/1k",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                model.outputCostPer1k?.let { cost ->
+                    Text(
+                        text = "Out: \$${String.format(java.util.Locale.US, "%.4f", cost)}/1k",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private const val SESSION_PATH_DISPLAY_LENGTH = 40
