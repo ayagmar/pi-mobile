@@ -1,3 +1,5 @@
+@file:Suppress("TooManyFunctions")
+
 package com.ayagmar.pimobile.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
@@ -65,8 +67,14 @@ private fun SettingsScreen(viewModel: SettingsViewModel) {
         AgentBehaviorCard(
             autoCompactionEnabled = uiState.autoCompactionEnabled,
             autoRetryEnabled = uiState.autoRetryEnabled,
+            steeringMode = uiState.steeringMode,
+            followUpMode = uiState.followUpMode,
+            isUpdatingSteeringMode = uiState.isUpdatingSteeringMode,
+            isUpdatingFollowUpMode = uiState.isUpdatingFollowUpMode,
             onToggleAutoCompaction = viewModel::toggleAutoCompaction,
             onToggleAutoRetry = viewModel::toggleAutoRetry,
+            onSteeringModeSelected = viewModel::setSteeringMode,
+            onFollowUpModeSelected = viewModel::setFollowUpMode,
         )
 
         SessionActionsCard(
@@ -172,12 +180,19 @@ private fun ConnectionMessages(state: SettingsUiState) {
     }
 }
 
+@Suppress("LongParameterList")
 @Composable
 private fun AgentBehaviorCard(
     autoCompactionEnabled: Boolean,
     autoRetryEnabled: Boolean,
+    steeringMode: String,
+    followUpMode: String,
+    isUpdatingSteeringMode: Boolean,
+    isUpdatingFollowUpMode: Boolean,
     onToggleAutoCompaction: () -> Unit,
     onToggleAutoRetry: () -> Unit,
+    onSteeringModeSelected: (String) -> Unit,
+    onFollowUpModeSelected: (String) -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -203,6 +218,22 @@ private fun AgentBehaviorCard(
                 description = "Automatically retry failed requests with exponential backoff",
                 checked = autoRetryEnabled,
                 onToggle = onToggleAutoRetry,
+            )
+
+            ModeSelectorRow(
+                title = "Steering mode",
+                description = "How steer messages are delivered while streaming",
+                selectedMode = steeringMode,
+                isUpdating = isUpdatingSteeringMode,
+                onModeSelected = onSteeringModeSelected,
+            )
+
+            ModeSelectorRow(
+                title = "Follow-up mode",
+                description = "How follow-up messages are queued while streaming",
+                selectedMode = followUpMode,
+                isUpdating = isUpdatingFollowUpMode,
+                onModeSelected = onFollowUpModeSelected,
             )
         }
     }
@@ -235,6 +266,64 @@ private fun SettingsToggleRow(
             checked = checked,
             onCheckedChange = { onToggle() },
         )
+    }
+}
+
+@Composable
+private fun ModeSelectorRow(
+    title: String,
+    description: String,
+    selectedMode: String,
+    isUpdating: Boolean,
+    onModeSelected: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ModeOptionButton(
+                label = "All",
+                selected = selectedMode == SettingsViewModel.MODE_ALL,
+                enabled = !isUpdating,
+                onClick = { onModeSelected(SettingsViewModel.MODE_ALL) },
+            )
+            ModeOptionButton(
+                label = "One at a time",
+                selected = selectedMode == SettingsViewModel.MODE_ONE_AT_A_TIME,
+                enabled = !isUpdating,
+                onClick = { onModeSelected(SettingsViewModel.MODE_ONE_AT_A_TIME) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModeOptionButton(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+    ) {
+        val prefix = if (selected) "✓ " else ""
+        Text("$prefix$label")
     }
 }
 

@@ -85,6 +85,10 @@ interface SessionController {
     suspend fun setAutoCompaction(enabled: Boolean): Result<Unit>
 
     suspend fun setAutoRetry(enabled: Boolean): Result<Unit>
+
+    suspend fun setSteeringMode(mode: String): Result<Unit>
+
+    suspend fun setFollowUpMode(mode: String): Result<Unit>
 }
 
 /**

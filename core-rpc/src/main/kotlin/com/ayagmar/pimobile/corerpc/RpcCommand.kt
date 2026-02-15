@@ -169,6 +169,20 @@ data class SetAutoRetryCommand(
 ) : RpcCommand
 
 @Serializable
+data class SetSteeringModeCommand(
+    override val id: String? = null,
+    override val type: String = "set_steering_mode",
+    val mode: String,
+) : RpcCommand
+
+@Serializable
+data class SetFollowUpModeCommand(
+    override val id: String? = null,
+    override val type: String = "set_follow_up_mode",
+    val mode: String,
+) : RpcCommand
+
+@Serializable
 data class SetModelCommand(
     override val id: String? = null,
     override val type: String = "set_model",

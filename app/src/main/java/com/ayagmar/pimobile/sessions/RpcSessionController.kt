@@ -33,8 +33,10 @@ import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.corerpc.SessionStats
 import com.ayagmar.pimobile.corerpc.SetAutoCompactionCommand
 import com.ayagmar.pimobile.corerpc.SetAutoRetryCommand
+import com.ayagmar.pimobile.corerpc.SetFollowUpModeCommand
 import com.ayagmar.pimobile.corerpc.SetModelCommand
 import com.ayagmar.pimobile.corerpc.SetSessionNameCommand
+import com.ayagmar.pimobile.corerpc.SetSteeringModeCommand
 import com.ayagmar.pimobile.corerpc.SteerCommand
 import com.ayagmar.pimobile.corerpc.SwitchSessionCommand
 import com.ayagmar.pimobile.coresessions.SessionRecord
@@ -539,6 +541,44 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun setSteeringMode(mode: String): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                sendAndAwaitResponse(
+                    connection = connection,
+                    requestTimeoutMs = requestTimeoutMs,
+                    command =
+                        SetSteeringModeCommand(
+                            id = UUID.randomUUID().toString(),
+                            mode = mode,
+                        ),
+                    expectedCommand = SET_STEERING_MODE_COMMAND,
+                ).requireSuccess("Failed to set steering mode")
+                Unit
+            }
+        }
+    }
+
+    override suspend fun setFollowUpMode(mode: String): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                sendAndAwaitResponse(
+                    connection = connection,
+                    requestTimeoutMs = requestTimeoutMs,
+                    command =
+                        SetFollowUpModeCommand(
+                            id = UUID.randomUUID().toString(),
+                            mode = mode,
+                        ),
+                    expectedCommand = SET_FOLLOW_UP_MODE_COMMAND,
+                ).requireSuccess("Failed to set follow-up mode")
+                Unit
+            }
+        }
+    }
+
     private suspend fun clearActiveConnection() {
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
@@ -614,6 +654,8 @@ class RpcSessionController(
         private const val SET_MODEL_COMMAND = "set_model"
         private const val SET_AUTO_COMPACTION_COMMAND = "set_auto_compaction"
         private const val SET_AUTO_RETRY_COMMAND = "set_auto_retry"
+        private const val SET_STEERING_MODE_COMMAND = "set_steering_mode"
+        private const val SET_FOLLOW_UP_MODE_COMMAND = "set_follow_up_mode"
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
         private const val BASH_TIMEOUT_MS = 60_000L

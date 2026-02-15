@@ -13,6 +13,9 @@ import com.ayagmar.pimobile.sessions.SessionController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 @Suppress("TooManyFunctions")
 class SettingsViewModel(
@@ -54,6 +57,8 @@ class SettingsViewModel(
                 uiState = uiState.copy(connectionStatus = status)
             }
         }
+
+        refreshDeliveryModesFromState()
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -83,6 +88,9 @@ class SettingsViewModel(
                             }
                         }
 
+                    val steeringMode = data.stateModeField("steeringMode", "steering_mode") ?: uiState.steeringMode
+                    val followUpMode = data.stateModeField("followUpMode", "follow_up_mode") ?: uiState.followUpMode
+
                     uiState =
                         uiState.copy(
                             isChecking = false,
@@ -90,6 +98,8 @@ class SettingsViewModel(
                             piVersion = modelDescription,
                             statusMessage = "Bridge reachable",
                             errorMessage = null,
+                            steeringMode = steeringMode,
+                            followUpMode = followUpMode,
                         )
                 } else {
                     uiState =
@@ -177,7 +187,66 @@ class SettingsViewModel(
         }
     }
 
+    fun setSteeringMode(mode: String) {
+        if (mode == uiState.steeringMode) return
+
+        val previousMode = uiState.steeringMode
+        uiState = uiState.copy(steeringMode = mode, isUpdatingSteeringMode = true, errorMessage = null)
+
+        viewModelScope.launch {
+            val result = sessionController.setSteeringMode(mode)
+            uiState =
+                if (result.isSuccess) {
+                    uiState.copy(isUpdatingSteeringMode = false)
+                } else {
+                    uiState.copy(
+                        steeringMode = previousMode,
+                        isUpdatingSteeringMode = false,
+                        errorMessage = result.exceptionOrNull()?.message ?: "Failed to update steering mode",
+                    )
+                }
+        }
+    }
+
+    fun setFollowUpMode(mode: String) {
+        if (mode == uiState.followUpMode) return
+
+        val previousMode = uiState.followUpMode
+        uiState = uiState.copy(followUpMode = mode, isUpdatingFollowUpMode = true, errorMessage = null)
+
+        viewModelScope.launch {
+            val result = sessionController.setFollowUpMode(mode)
+            uiState =
+                if (result.isSuccess) {
+                    uiState.copy(isUpdatingFollowUpMode = false)
+                } else {
+                    uiState.copy(
+                        followUpMode = previousMode,
+                        isUpdatingFollowUpMode = false,
+                        errorMessage = result.exceptionOrNull()?.message ?: "Failed to update follow-up mode",
+                    )
+                }
+        }
+    }
+
+    private fun refreshDeliveryModesFromState() {
+        viewModelScope.launch {
+            val result = sessionController.getState()
+            val data = result.getOrNull()?.data ?: return@launch
+            val steeringMode = data.stateModeField("steeringMode", "steering_mode") ?: uiState.steeringMode
+            val followUpMode = data.stateModeField("followUpMode", "follow_up_mode") ?: uiState.followUpMode
+            uiState =
+                uiState.copy(
+                    steeringMode = steeringMode,
+                    followUpMode = followUpMode,
+                )
+        }
+    }
+
     companion object {
+        const val MODE_ALL = "all"
+        const val MODE_ONE_AT_A_TIME = "one-at-a-time"
+
         private const val PREFS_NAME = "pi_mobile_settings"
         private const val KEY_AUTO_COMPACTION = "auto_compaction_enabled"
         private const val KEY_AUTO_RETRY = "auto_retry_enabled"
@@ -211,10 +280,27 @@ data class SettingsUiState(
     val errorMessage: String? = null,
     val autoCompactionEnabled: Boolean = true,
     val autoRetryEnabled: Boolean = true,
+    val steeringMode: String = SettingsViewModel.MODE_ALL,
+    val followUpMode: String = SettingsViewModel.MODE_ALL,
+    val isUpdatingSteeringMode: Boolean = false,
+    val isUpdatingFollowUpMode: Boolean = false,
 )
 
 enum class ConnectionStatus {
     CONNECTED,
     DISCONNECTED,
     CHECKING,
+}
+
+private fun JsonObject?.stateModeField(
+    camelCaseKey: String,
+    snakeCaseKey: String,
+): String? {
+    val value =
+        this?.get(camelCaseKey)?.jsonPrimitive?.contentOrNull
+            ?: this?.get(snakeCaseKey)?.jsonPrimitive?.contentOrNull
+
+    return value?.takeIf {
+        it == SettingsViewModel.MODE_ALL || it == SettingsViewModel.MODE_ONE_AT_A_TIME
+    }
 }
