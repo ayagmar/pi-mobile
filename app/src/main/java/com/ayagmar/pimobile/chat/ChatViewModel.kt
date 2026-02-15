@@ -558,10 +558,29 @@ class ChatViewModel(
                     is AutoCompactionEndEvent -> handleCompactionEnd(event)
                     is AutoRetryStartEvent -> handleRetryStart(event)
                     is AutoRetryEndEvent -> handleRetryEnd(event)
+                    is RpcResponse -> handleRpcResponse(event)
                     is AgentEndEvent -> flushAllPendingStreamUpdates(force = true)
                     else -> Unit
                 }
             }
+        }
+    }
+
+    private fun handleRpcResponse(response: RpcResponse) {
+        if (!response.success) {
+            return
+        }
+
+        val cancelled = response.data?.booleanField("cancelled") ?: false
+        if (cancelled) {
+            return
+        }
+
+        when (response.command) {
+            RPC_COMMAND_SWITCH_SESSION,
+            RPC_COMMAND_NEW_SESSION,
+            RPC_COMMAND_FORK,
+            -> loadInitialMessages()
         }
     }
 
@@ -923,36 +942,42 @@ class ChatViewModel(
     }
 
     private fun loadInitialMessages() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val messagesResult = sessionController.getMessages()
-            val stateResult = sessionController.getState()
+        initialLoadJob?.cancel()
+        initialLoadJob =
+            viewModelScope.launch(Dispatchers.IO) {
+                val messagesResult = sessionController.getMessages()
+                val stateResult = sessionController.getState()
 
-            val stateData = stateResult.getOrNull()?.data
-            val metadata =
-                InitialLoadMetadata(
-                    modelInfo = stateData?.let { parseModelInfo(it) },
-                    thinkingLevel = stateData?.stringField("thinkingLevel"),
-                    isStreaming = stateData?.booleanField("isStreaming") ?: false,
-                    steeringMode = stateData.deliveryModeField("steeringMode", "steering_mode"),
-                    followUpMode = stateData.deliveryModeField("followUpMode", "follow_up_mode"),
-                )
+                if (messagesResult.isSuccess) {
+                    PerformanceMetrics.recordFirstMessagesRendered()
+                }
 
-            _uiState.update { state ->
-                if (messagesResult.isFailure) {
-                    buildInitialLoadFailureState(
-                        state = state,
-                        messagesResult = messagesResult,
-                        metadata = metadata,
+                val stateData = stateResult.getOrNull()?.data
+                val metadata =
+                    InitialLoadMetadata(
+                        modelInfo = stateData?.let { parseModelInfo(it) },
+                        thinkingLevel = stateData?.stringField("thinkingLevel"),
+                        isStreaming = stateData?.booleanField("isStreaming") ?: false,
+                        steeringMode = stateData.deliveryModeField("steeringMode", "steering_mode"),
+                        followUpMode = stateData.deliveryModeField("followUpMode", "follow_up_mode"),
                     )
-                } else {
-                    buildInitialLoadSuccessState(
-                        state = state,
-                        messagesData = messagesResult.getOrNull()?.data,
-                        metadata = metadata,
-                    )
+
+                _uiState.update { state ->
+                    if (messagesResult.isFailure) {
+                        buildInitialLoadFailureState(
+                            state = state,
+                            messagesResult = messagesResult,
+                            metadata = metadata,
+                        )
+                    } else {
+                        buildInitialLoadSuccessState(
+                            state = state,
+                            messagesData = messagesResult.getOrNull()?.data,
+                            metadata = metadata,
+                        )
+                    }
                 }
             }
-        }
     }
 
     private fun buildInitialLoadFailureState(
@@ -987,8 +1012,6 @@ class ChatViewModel(
         historyWindowMessages = historyWindow.messages
         historyWindowAbsoluteOffset = historyWindow.absoluteOffset
         historyParsedStartIndex = (historyWindowMessages.size - INITIAL_TIMELINE_SIZE).coerceAtLeast(0)
-
-        PerformanceMetrics.recordFirstMessagesRendered()
 
         val historyTimeline =
             parseHistoryItems(
@@ -1027,6 +1050,7 @@ class ChatViewModel(
     }
 
     private var hasRecordedFirstToken = false
+    private var initialLoadJob: Job? = null
 
     private fun handleMessageUpdate(event: MessageUpdateEvent) {
         // Record first token received for TTFT tracking
@@ -1624,6 +1648,7 @@ class ChatViewModel(
     }
 
     override fun onCleared() {
+        initialLoadJob?.cancel()
         assistantUpdateFlushJob?.cancel()
         toolUpdateFlushJobs.values.forEach { it.cancel() }
         toolUpdateFlushJobs.clear()
@@ -1648,6 +1673,10 @@ class ChatViewModel(
         private const val BUILTIN_TREE_COMMAND = "tree"
         private const val BUILTIN_STATS_COMMAND = "stats"
         private const val BUILTIN_HOTKEYS_COMMAND = "hotkeys"
+
+        private const val RPC_COMMAND_SWITCH_SESSION = "switch_session"
+        private const val RPC_COMMAND_NEW_SESSION = "new_session"
+        private const val RPC_COMMAND_FORK = "fork"
         private const val INTERNAL_TREE_NAVIGATION_COMMAND = "pi-mobile-tree"
         private const val INTERNAL_STATS_WORKFLOW_COMMAND = "pi-mobile-open-stats"
         private const val INTERNAL_WORKFLOW_STATUS_KEY = "pi-mobile-workflow-action"
