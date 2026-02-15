@@ -89,21 +89,16 @@ class PiRpcConnection(
             connectionState.first { state -> state == ConnectionState.CONNECTED }
         }
 
-        val hello =
-            withTimeout(resolvedConfig.requestTimeoutMs) {
-                helloChannel.receive()
-            }
-        val resumed = hello.payload.booleanField("resumed") ?: false
-        val helloCwd = hello.payload.stringField("cwd")
-
-        if (!resumed || helloCwd != resolvedConfig.cwd) {
-            ensureBridgeControl(
-                transport = transport,
-                json = json,
-                channels = bridgeChannels,
-                config = resolvedConfig,
-            )
+        withTimeout(resolvedConfig.requestTimeoutMs) {
+            helloChannel.receive()
         }
+
+        ensureBridgeControl(
+            transport = transport,
+            json = json,
+            channels = bridgeChannels,
+            config = resolvedConfig,
+        )
 
         resyncIfActive(connectionEpoch)
     }
@@ -262,22 +257,17 @@ class PiRpcConnection(
 
             if (config != null) {
                 val helloChannel = bridgeChannel(bridgeChannels, BRIDGE_HELLO_TYPE)
-                val hello =
-                    withTimeout(config.requestTimeoutMs) {
-                        helloChannel.receive()
-                    }
-                val resumed = hello.payload.booleanField("resumed") ?: false
-                val helloCwd = hello.payload.stringField("cwd")
+                withTimeout(config.requestTimeoutMs) {
+                    helloChannel.receive()
+                }
 
                 if (isEpochActive(expectedEpoch)) {
-                    if (!resumed || helloCwd != config.cwd) {
-                        ensureBridgeControl(
-                            transport = transport,
-                            json = json,
-                            channels = bridgeChannels,
-                            config = config,
-                        )
-                    }
+                    ensureBridgeControl(
+                        transport = transport,
+                        json = json,
+                        channels = bridgeChannels,
+                        config = config,
+                    )
 
                     resyncIfActive(expectedEpoch)
                 }

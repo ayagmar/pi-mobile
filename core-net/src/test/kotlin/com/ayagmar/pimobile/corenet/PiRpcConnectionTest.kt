@@ -134,7 +134,10 @@ class PiRpcConnectionTest {
             val reconnectSnapshot = withTimeout(2_000) { reconnectSnapshotDeferred.await() }
             assertEquals("get_state", reconnectSnapshot.stateResponse.command)
             assertEquals("get_messages", reconnectSnapshot.messagesResponse.command)
-            assertEquals(listOf("get_state", "get_messages"), transport.sentPayloadTypes())
+            assertEquals(
+                listOf("bridge_set_cwd", "bridge_acquire_control", "get_state", "get_messages"),
+                transport.sentPayloadTypes(),
+            )
 
             connection.disconnect()
         }

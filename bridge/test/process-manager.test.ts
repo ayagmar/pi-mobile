@@ -75,6 +75,32 @@ describe("createPiProcessManager", () => {
         expect(thirdResult.success).toBe(true);
     });
 
+    it("releasing cwd control also releases session locks for that cwd", () => {
+        const manager = createPiProcessManager({
+            idleTtlMs: 60_000,
+            logger: createLogger("silent"),
+            enableEvictionTimer: false,
+            forwarderFactory: () => new FakeRpcForwarder(),
+        });
+
+        const firstResult = manager.acquireControl({
+            clientId: "client-a",
+            cwd: "/tmp/project-a",
+            sessionPath: "/tmp/session-a.jsonl",
+        });
+        expect(firstResult.success).toBe(true);
+
+        manager.releaseControl("client-a", "/tmp/project-a");
+
+        const secondResult = manager.acquireControl({
+            clientId: "client-b",
+            cwd: "/tmp/project-b",
+            sessionPath: "/tmp/session-a.jsonl",
+        });
+
+        expect(secondResult.success).toBe(true);
+    });
+
     it("evicts idle RPC forwarders based on ttl", async () => {
         let nowMs = 0;
         const fakeForwarder = new FakeRpcForwarder();

@@ -51,11 +51,16 @@ interface ForwarderEntry {
     lastUsedAt: number;
 }
 
+interface SessionLock {
+    clientId: string;
+    cwd: string;
+}
+
 export function createPiProcessManager(options: ProcessManagerOptions): PiProcessManager {
     const now = options.now ?? (() => Date.now());
     const entries = new Map<string, ForwarderEntry>();
     const lockByCwd = new Map<string, string>();
-    const lockBySession = new Map<string, string>();
+    const lockBySession = new Map<string, SessionLock>();
     let messageHandler: (event: ProcessManagerEvent) => void = () => {};
 
     const evictionIntervalMs = Math.max(1_000, Math.floor(options.idleTtlMs / 2));
@@ -134,8 +139,8 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
             }
 
             if (request.sessionPath) {
-                const currentSessionOwner = lockBySession.get(request.sessionPath);
-                if (currentSessionOwner && currentSessionOwner !== request.clientId) {
+                const currentSessionLock = lockBySession.get(request.sessionPath);
+                if (currentSessionLock && currentSessionLock.clientId !== request.clientId) {
                     return {
                         success: false,
                         reason: `session is controlled by another client: ${request.sessionPath}`,
@@ -145,7 +150,10 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
 
             lockByCwd.set(request.cwd, request.clientId);
             if (request.sessionPath) {
-                lockBySession.set(request.sessionPath, request.clientId);
+                lockBySession.set(request.sessionPath, {
+                    clientId: request.clientId,
+                    cwd: request.cwd,
+                });
             }
 
             return { success: true };
@@ -155,8 +163,11 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
                 return false;
             }
 
-            if (sessionPath && lockBySession.get(sessionPath) !== clientId) {
-                return false;
+            if (sessionPath) {
+                const sessionLock = lockBySession.get(sessionPath);
+                if (!sessionLock || sessionLock.clientId !== clientId || sessionLock.cwd !== cwd) {
+                    return false;
+                }
             }
 
             return true;
@@ -166,8 +177,18 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
                 lockByCwd.delete(cwd);
             }
 
-            if (sessionPath && lockBySession.get(sessionPath) === clientId) {
-                lockBySession.delete(sessionPath);
+            if (sessionPath) {
+                const sessionLock = lockBySession.get(sessionPath);
+                if (sessionLock && sessionLock.clientId === clientId) {
+                    lockBySession.delete(sessionPath);
+                }
+                return;
+            }
+
+            for (const [lockedSessionPath, sessionLock] of lockBySession.entries()) {
+                if (sessionLock.clientId === clientId && sessionLock.cwd === cwd) {
+                    lockBySession.delete(lockedSessionPath);
+                }
             }
         },
         releaseClient(clientId: string): void {
@@ -177,8 +198,8 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
                 }
             }
 
-            for (const [sessionPath, ownerClientId] of lockBySession.entries()) {
-                if (ownerClientId === clientId) {
+            for (const [sessionPath, sessionLock] of lockBySession.entries()) {
+                if (sessionLock.clientId === clientId) {
                     lockBySession.delete(sessionPath);
                 }
             }
