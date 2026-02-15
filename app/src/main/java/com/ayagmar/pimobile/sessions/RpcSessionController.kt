@@ -148,16 +148,19 @@ class RpcSessionController(
                     )
 
                 if (session.sessionPath.isNotBlank()) {
-                    sendAndAwaitResponse(
-                        connection = connection,
-                        requestTimeoutMs = requestTimeoutMs,
-                        command =
-                            SwitchSessionCommand(
-                                id = UUID.randomUUID().toString(),
-                                sessionPath = session.sessionPath,
-                            ),
-                        expectedCommand = SWITCH_SESSION_COMMAND,
-                    ).requireSuccess("Failed to resume selected session")
+                    val switchResponse =
+                        sendAndAwaitResponse(
+                            connection = connection,
+                            requestTimeoutMs = requestTimeoutMs,
+                            command =
+                                SwitchSessionCommand(
+                                    id = UUID.randomUUID().toString(),
+                                    sessionPath = session.sessionPath,
+                                ),
+                            expectedCommand = SWITCH_SESSION_COMMAND,
+                        ).requireSuccess("Failed to resume selected session")
+
+                    switchResponse.requireNotCancelled("Session switch was cancelled")
                 }
 
                 val newPath = refreshCurrentSessionPath(connection)
@@ -513,12 +516,15 @@ class RpcSessionController(
         return mutex.withLock {
             runCatching {
                 val connection = ensureActiveConnection()
-                sendAndAwaitResponse(
-                    connection = connection,
-                    requestTimeoutMs = requestTimeoutMs,
-                    command = NewSessionCommand(id = UUID.randomUUID().toString()),
-                    expectedCommand = NEW_SESSION_COMMAND,
-                ).requireSuccess("Failed to create new session")
+                val newSessionResponse =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = NewSessionCommand(id = UUID.randomUUID().toString()),
+                        expectedCommand = NEW_SESSION_COMMAND,
+                    ).requireSuccess("Failed to create new session")
+
+                newSessionResponse.requireNotCancelled("New session was cancelled")
 
                 val newPath = refreshCurrentSessionPath(connection)
                 _sessionChanged.emit(newPath)
@@ -956,6 +962,14 @@ private suspend fun sendAndAwaitResponse(
 private fun RpcResponse.requireSuccess(defaultError: String): RpcResponse {
     check(success) {
         error ?: defaultError
+    }
+
+    return this
+}
+
+private fun RpcResponse.requireNotCancelled(defaultError: String): RpcResponse {
+    check(data.booleanField("cancelled") != true) {
+        defaultError
     }
 
     return this

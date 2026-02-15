@@ -2,6 +2,7 @@ package com.ayagmar.pimobile.sessions
 
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.BashResult
+import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.corerpc.SessionStats
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -9,7 +10,9 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
+import java.lang.reflect.InvocationTargetException
 
 class RpcSessionControllerTest {
     @Test
@@ -263,6 +266,51 @@ class RpcSessionControllerTest {
         assertEquals(1730000001L, messages[1].timestamp)
     }
 
+    @Test
+    fun requireNotCancelledPassesWhenCancelledFlagIsFalseOrMissing() {
+        val missingCancelled =
+            RpcResponse(
+                type = "response",
+                command = "new_session",
+                success = true,
+                data = buildJsonObject {},
+            )
+        val explicitFalse =
+            RpcResponse(
+                type = "response",
+                command = "switch_session",
+                success = true,
+                data =
+                    buildJsonObject {
+                        put("cancelled", false)
+                    },
+            )
+
+        invokeRequireNotCancelled(missingCancelled, "cancelled")
+        invokeRequireNotCancelled(explicitFalse, "cancelled")
+    }
+
+    @Test
+    fun requireNotCancelledThrowsWhenCancelledFlagIsTrue() {
+        val cancelledResponse =
+            RpcResponse(
+                type = "response",
+                command = "new_session",
+                success = true,
+                data =
+                    buildJsonObject {
+                        put("cancelled", true)
+                    },
+            )
+
+        val error =
+            assertThrows(IllegalStateException::class.java) {
+                invokeRequireNotCancelled(cancelledResponse, "New session was cancelled")
+            }
+
+        assertEquals("New session was cancelled", error.message)
+    }
+
     private fun assertCurrentStats(current: SessionStats) {
         assertEquals(101L, current.inputTokens)
         assertEquals(202L, current.outputTokens)
@@ -297,6 +345,30 @@ class RpcSessionControllerTest {
         val method = sessionControllerKtClass.getDeclaredMethod(functionName, JsonObject::class.java)
         method.isAccessible = true
         return method.invoke(null, data) as T
+    }
+
+    private fun invokeRequireNotCancelled(
+        response: RpcResponse,
+        defaultError: String,
+    ): RpcResponse {
+        val method =
+            sessionControllerKtClass.getDeclaredMethod(
+                "requireNotCancelled",
+                RpcResponse::class.java,
+                String::class.java,
+            )
+        method.isAccessible = true
+
+        return try {
+            @Suppress("UNCHECKED_CAST")
+            method.invoke(null, response, defaultError) as RpcResponse
+        } catch (exception: InvocationTargetException) {
+            val cause = exception.targetException
+            if (cause is RuntimeException) {
+                throw cause
+            }
+            throw exception
+        }
     }
 
     private companion object {

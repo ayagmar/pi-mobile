@@ -50,6 +50,37 @@ class PiRpcConnectionTest {
         }
 
     @Test
+    fun `disconnect emits bridge release control before transport shutdown`() =
+        runBlocking {
+            val transport = FakeSocketTransport()
+            transport.onSend = { outgoing -> transport.respondToOutgoing(outgoing) }
+            val connection = PiRpcConnection(transport = transport)
+
+            connection.connect(
+                PiRpcConnectionConfig(
+                    target = WebSocketTarget(url = "ws://127.0.0.1:3000/ws"),
+                    cwd = "/tmp/project-release",
+                    sessionPath = "/tmp/session-release.jsonl",
+                    clientId = "client-release",
+                ),
+            )
+
+            transport.clearSentMessages()
+            connection.disconnect()
+
+            val sentTypes = transport.sentPayloadTypes()
+            assertEquals(listOf("bridge_release_control"), sentTypes)
+
+            val releasePayload = transport.sentPayloads().single()
+            assertEquals("/tmp/project-release", releasePayload["cwd"]?.toString()?.trim('"'))
+            assertEquals(
+                "/tmp/session-release.jsonl",
+                releasePayload["sessionPath"]?.toString()?.trim('"'),
+            )
+            assertEquals(ConnectionState.DISCONNECTED, transport.connectionState.value)
+        }
+
+    @Test
     fun `malformed rpc envelope does not stop subsequent requests`() =
         runBlocking {
             val transport = FakeSocketTransport()
@@ -212,6 +243,10 @@ class PiRpcConnectionTest {
                     type.toString().trim('"')
                 }
             }
+        }
+
+        fun sentPayloads(): List<JsonObject> {
+            return sentMessages.map(::parsePayload)
         }
 
         suspend fun emitRawEnvelope(raw: String) {

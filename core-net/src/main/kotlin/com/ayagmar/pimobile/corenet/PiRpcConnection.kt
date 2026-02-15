@@ -109,15 +109,19 @@ class PiRpcConnection(
     }
 
     suspend fun disconnect() {
-        lifecycleMutex.withLock {
-            activeConfig = null
-            lifecycleEpoch += 1
-            inboundJob?.cancel()
-            connectionMonitorJob?.cancel()
-            inboundJob = null
-            connectionMonitorJob = null
-        }
+        val configToRelease =
+            lifecycleMutex.withLock {
+                val currentConfig = activeConfig
+                activeConfig = null
+                lifecycleEpoch += 1
+                inboundJob?.cancel()
+                connectionMonitorJob?.cancel()
+                inboundJob = null
+                connectionMonitorJob = null
+                currentConfig
+            }
 
+        sendBridgeReleaseControlBestEffort(configToRelease)
         cancelPendingResponses()
 
         bridgeChannels.values.forEach { channel ->
@@ -327,6 +331,31 @@ class PiRpcConnection(
             }
         } finally {
             pendingResponses.remove(commandId)
+        }
+    }
+
+    private suspend fun sendBridgeReleaseControlBestEffort(config: PiRpcConnectionConfig?) {
+        val activeConfig = config ?: return
+
+        if (connectionState.value == ConnectionState.DISCONNECTED) {
+            return
+        }
+
+        runCatching {
+            transport.send(
+                encodeEnvelope(
+                    json = json,
+                    channel = BRIDGE_CHANNEL,
+                    payload =
+                        buildJsonObject {
+                            put("type", "bridge_release_control")
+                            put("cwd", activeConfig.cwd)
+                            activeConfig.sessionPath?.let { path ->
+                                put("sessionPath", path)
+                            }
+                        },
+                ),
+            )
         }
     }
 
