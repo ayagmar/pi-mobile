@@ -12,6 +12,9 @@ import androidx.lifecycle.viewModelScope
 import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.sessions.SessionController
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
@@ -27,6 +30,9 @@ class SettingsViewModel(
 ) : ViewModel() {
     var uiState by mutableStateOf(SettingsUiState())
         private set
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
 
     private val prefs: SharedPreferences =
         sharedPreferences
@@ -65,6 +71,10 @@ class SettingsViewModel(
         refreshDeliveryModesFromState()
     }
 
+    private fun emitMessage(message: String) {
+        _messages.tryEmit(message)
+    }
+
     @Suppress("TooGenericExceptionCaught")
     fun pingBridge() {
         viewModelScope.launch {
@@ -72,7 +82,6 @@ class SettingsViewModel(
                 uiState.copy(
                     isChecking = true,
                     errorMessage = null,
-                    statusMessage = null,
                     piVersion = null,
                     connectionStatus = ConnectionStatus.CHECKING,
                 )
@@ -95,12 +104,12 @@ class SettingsViewModel(
                     val steeringMode = data.stateModeField("steeringMode", "steering_mode") ?: uiState.steeringMode
                     val followUpMode = data.stateModeField("followUpMode", "follow_up_mode") ?: uiState.followUpMode
 
+                    emitMessage("Bridge reachable")
                     uiState =
                         uiState.copy(
                             isChecking = false,
                             connectionStatus = ConnectionStatus.CONNECTED,
                             piVersion = modelDescription,
-                            statusMessage = "Bridge reachable",
                             errorMessage = null,
                             steeringMode = steeringMode,
                             followUpMode = followUpMode,
@@ -110,7 +119,6 @@ class SettingsViewModel(
                         uiState.copy(
                             isChecking = false,
                             connectionStatus = ConnectionStatus.DISCONNECTED,
-                            statusMessage = null,
                             errorMessage = result.exceptionOrNull()?.message ?: "Connection failed",
                         )
                 }
@@ -121,7 +129,6 @@ class SettingsViewModel(
                     uiState.copy(
                         isChecking = false,
                         connectionStatus = ConnectionStatus.DISCONNECTED,
-                        statusMessage = null,
                         errorMessage = "${e.javaClass.simpleName}: ${e.message}",
                     )
             }
@@ -130,21 +137,20 @@ class SettingsViewModel(
 
     fun createNewSession() {
         viewModelScope.launch {
-            uiState = uiState.copy(isLoading = true, errorMessage = null, statusMessage = null)
+            uiState = uiState.copy(isLoading = true, errorMessage = null)
 
             val result = sessionController.newSession()
 
             uiState =
                 if (result.isSuccess) {
+                    emitMessage("New session created")
                     uiState.copy(
                         isLoading = false,
-                        statusMessage = "New session created",
                         errorMessage = null,
                     )
                 } else {
                     uiState.copy(
                         isLoading = false,
-                        statusMessage = null,
                         errorMessage = result.exceptionOrNull()?.message ?: "Failed to create new session",
                     )
                 }
@@ -289,7 +295,6 @@ data class SettingsUiState(
     val isLoading: Boolean = false,
     val piVersion: String? = null,
     val appVersion: String = "unknown",
-    val statusMessage: String? = null,
     val errorMessage: String? = null,
     val autoCompactionEnabled: Boolean = true,
     val autoRetryEnabled: Boolean = true,

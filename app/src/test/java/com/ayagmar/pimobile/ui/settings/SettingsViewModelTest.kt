@@ -18,10 +18,12 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -33,6 +35,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
     private val dispatcher = StandardTestDispatcher()
 
@@ -80,6 +83,38 @@ class SettingsViewModelTest {
             assertEquals(SettingsViewModel.MODE_ONE_AT_A_TIME, controller.lastFollowUpMode)
         }
 
+    @Test
+    fun pingBridgeEmitsTransientSuccessMessage() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = createViewModel(controller)
+            val messages = mutableListOf<String>()
+            val collector = launch { viewModel.messages.collect { messages += it } }
+
+            dispatcher.scheduler.advanceUntilIdle()
+            viewModel.pingBridge()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(listOf("Bridge reachable"), messages)
+            collector.cancel()
+        }
+
+    @Test
+    fun createNewSessionEmitsTransientSuccessMessage() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = createViewModel(controller)
+            val messages = mutableListOf<String>()
+            val collector = launch { viewModel.messages.collect { messages += it } }
+
+            dispatcher.scheduler.advanceUntilIdle()
+            viewModel.createNewSession()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(listOf("New session created"), messages)
+            collector.cancel()
+        }
+
     private fun createViewModel(controller: FakeSessionController): SettingsViewModel {
         return SettingsViewModel(
             sessionController = controller,
@@ -96,6 +131,7 @@ private class FakeSessionController : SessionController {
 
     var steeringModeResult: Result<Unit> = Result.success(Unit)
     var followUpModeResult: Result<Unit> = Result.success(Unit)
+    var newSessionResult: Result<Unit> = Result.success(Unit)
     var lastSteeringMode: String? = null
     var lastFollowUpMode: String? = null
 
@@ -154,7 +190,7 @@ private class FakeSessionController : SessionController {
         cancelled: Boolean?,
     ): Result<Unit> = Result.success(Unit)
 
-    override suspend fun newSession(): Result<Unit> = Result.success(Unit)
+    override suspend fun newSession(): Result<Unit> = newSessionResult
 
     override suspend fun getCommands(): Result<List<SlashCommandInfo>> = Result.success(emptyList())
 

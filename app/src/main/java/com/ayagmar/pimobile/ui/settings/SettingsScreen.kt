@@ -17,13 +17,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ayagmar.pimobile.di.AppServices
+import kotlinx.coroutines.delay
 
 @Composable
 fun SettingsRoute() {
@@ -36,14 +41,32 @@ fun SettingsRoute() {
             )
         }
     val settingsViewModel: SettingsViewModel = viewModel(factory = factory)
+    var transientStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(settingsViewModel) {
+        settingsViewModel.messages.collect { message ->
+            transientStatusMessage = message
+        }
+    }
+
+    LaunchedEffect(transientStatusMessage) {
+        if (transientStatusMessage != null) {
+            delay(STATUS_MESSAGE_DURATION_MS)
+            transientStatusMessage = null
+        }
+    }
 
     SettingsScreen(
         viewModel = settingsViewModel,
+        transientStatusMessage = transientStatusMessage,
     )
 }
 
 @Composable
-private fun SettingsScreen(viewModel: SettingsViewModel) {
+private fun SettingsScreen(
+    viewModel: SettingsViewModel,
+    transientStatusMessage: String?,
+) {
     val uiState = viewModel.uiState
 
     Column(
@@ -61,6 +84,7 @@ private fun SettingsScreen(viewModel: SettingsViewModel) {
 
         ConnectionStatusCard(
             state = uiState,
+            transientStatusMessage = transientStatusMessage,
             onPing = viewModel::pingBridge,
         )
 
@@ -93,6 +117,7 @@ private fun SettingsScreen(viewModel: SettingsViewModel) {
 @Composable
 private fun ConnectionStatusCard(
     state: SettingsUiState,
+    transientStatusMessage: String?,
     onPing: () -> Unit,
 ) {
     Card(
@@ -112,7 +137,10 @@ private fun ConnectionStatusCard(
                 isChecking = state.isChecking,
             )
 
-            ConnectionMessages(state = state)
+            ConnectionMessages(
+                state = state,
+                transientStatusMessage = transientStatusMessage,
+            )
 
             Button(
                 onClick = onPing,
@@ -157,7 +185,10 @@ private fun ConnectionStatusRow(
 }
 
 @Composable
-private fun ConnectionMessages(state: SettingsUiState) {
+private fun ConnectionMessages(
+    state: SettingsUiState,
+    transientStatusMessage: String?,
+) {
     state.piVersion?.let { version ->
         Text(
             text = "Pi version: $version",
@@ -165,7 +196,7 @@ private fun ConnectionMessages(state: SettingsUiState) {
         )
     }
 
-    state.statusMessage?.let { status ->
+    transientStatusMessage?.let { status ->
         Text(
             text = status,
             color = MaterialTheme.colorScheme.primary,
@@ -446,3 +477,5 @@ private fun AppInfoCard(version: String) {
         }
     }
 }
+
+private const val STATUS_MESSAGE_DURATION_MS = 3_000L
