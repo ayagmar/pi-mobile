@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -99,6 +100,8 @@ fun SessionsRoute(
                 onCwdToggle = sessionsViewModel::onCwdToggle,
                 onToggleFlatView = sessionsViewModel::toggleFlatView,
                 onRefreshClick = sessionsViewModel::refreshSessions,
+                onExpandAllCwds = sessionsViewModel::expandAllCwds,
+                onCollapseAllCwds = sessionsViewModel::collapseAllCwds,
                 onNewSession = sessionsViewModel::newSession,
                 onResumeClick = sessionsViewModel::resumeSession,
                 onRename = { name -> sessionsViewModel.runSessionAction(SessionAction.Rename(name)) },
@@ -116,6 +119,8 @@ private data class SessionsScreenCallbacks(
     val onSearchChanged: (String) -> Unit,
     val onCwdToggle: (String) -> Unit,
     val onToggleFlatView: () -> Unit,
+    val onExpandAllCwds: () -> Unit,
+    val onCollapseAllCwds: () -> Unit,
     val onRefreshClick: () -> Unit,
     val onNewSession: () -> Unit,
     val onResumeClick: (SessionRecord) -> Unit,
@@ -161,11 +166,8 @@ private fun SessionsScreen(
         verticalArrangement = Arrangement.spacedBy(PiSpacing.sm),
     ) {
         SessionsHeader(
-            isRefreshing = state.isRefreshing,
-            isFlatView = state.isFlatView,
-            onRefreshClick = callbacks.onRefreshClick,
-            onToggleFlatView = callbacks.onToggleFlatView,
-            onNewSession = callbacks.onNewSession,
+            state = state,
+            callbacks = callbacks,
         )
 
         HostSelector(
@@ -244,11 +246,8 @@ private fun SessionsDialogs(
 
 @Composable
 private fun SessionsHeader(
-    isRefreshing: Boolean,
-    isFlatView: Boolean,
-    onRefreshClick: () -> Unit,
-    onToggleFlatView: () -> Unit,
-    onNewSession: () -> Unit,
+    state: SessionsUiState,
+    callbacks: SessionsScreenCallbacks,
 ) {
     PiTopBar(
         title = {
@@ -262,15 +261,29 @@ private fun SessionsHeader(
                 horizontalArrangement = Arrangement.spacedBy(PiSpacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onToggleFlatView) {
-                    Text(if (isFlatView) "Tree" else "All")
+                TextButton(onClick = callbacks.onToggleFlatView) {
+                    Text(if (state.isFlatView) "Grouped" else "Flat")
                 }
-                TextButton(onClick = onRefreshClick, enabled = !isRefreshing) {
-                    Text(if (isRefreshing) "Refreshing" else "Refresh")
+                if (!state.isFlatView) {
+                    val hasCollapsedGroups = state.groups.any { group -> !group.isExpanded }
+                    TextButton(
+                        onClick = {
+                            if (hasCollapsedGroups) {
+                                callbacks.onExpandAllCwds()
+                            } else {
+                                callbacks.onCollapseAllCwds()
+                            }
+                        },
+                    ) {
+                        Text(if (hasCollapsedGroups) "Expand all" else "Collapse all")
+                    }
+                }
+                TextButton(onClick = callbacks.onRefreshClick, enabled = !state.isRefreshing) {
+                    Text(if (state.isRefreshing) "Refreshing" else "Refresh")
                 }
                 PiButton(
                     label = "New",
-                    onClick = onNewSession,
+                    onClick = callbacks.onNewSession,
                 )
             }
         },
@@ -451,8 +464,11 @@ private fun CwdHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = group.cwd,
+            text = "${group.cwd} (${group.sessions.size})",
             style = MaterialTheme.typography.titleSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
         Text(
             text = if (group.isExpanded) "▼" else "▶",
@@ -472,61 +488,118 @@ private fun SessionCard(
     showCwd: Boolean = false,
 ) {
     PiCard(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = session.displayTitle,
-            style = MaterialTheme.typography.titleMedium,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(PiSpacing.xs)) {
+            SessionCardSummary(session = session, showCwd = showCwd)
+            SessionCardFooter(
+                session = session,
+                isActive = isActive,
+                isBusy = isBusy,
+                onResumeClick = onResumeClick,
+            )
 
-        if (showCwd) {
-            val cwd = session.sessionPath.substringBeforeLast("/", "")
-            if (cwd.isNotEmpty()) {
-                Text(
-                    text = cwd,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            if (isActive) {
+                SessionActionsRow(
+                    isBusy = isBusy,
+                    onRenameClick = actions.onRename,
+                    onForkClick = actions.onFork,
+                    onExportClick = actions.onExport,
+                    onCompactClick = actions.onCompact,
                 )
             }
         }
+    }
+}
 
+@Composable
+private fun SessionCardSummary(
+    session: SessionRecord,
+    showCwd: Boolean,
+) {
+    Text(
+        text = session.displayTitle,
+        style = MaterialTheme.typography.titleMedium,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+
+    if (showCwd && session.cwd.isNotBlank()) {
         Text(
-            text = session.sessionPath,
+            text = session.cwd,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+
+    SessionMetadataRow(session)
+
+    Text(
+        text = session.sessionPath,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+
+    session.firstUserMessagePreview?.let { preview ->
+        Text(
+            text = preview,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun SessionCardFooter(
+    session: SessionRecord,
+    isActive: Boolean,
+    isBusy: Boolean,
+    onResumeClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Updated ${session.updatedAt.compactIsoTimestamp()}",
             style = MaterialTheme.typography.bodySmall,
         )
 
-        session.firstUserMessagePreview?.let { preview ->
-            Text(
-                text = preview,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Updated ${session.updatedAt}",
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            PiButton(
-                label = if (isActive) "Active" else "Resume",
-                enabled = !isBusy && !isActive,
-                onClick = onResumeClick,
-            )
-        }
-
-        if (isActive) {
-            SessionActionsRow(
-                isBusy = isBusy,
-                onRenameClick = actions.onRename,
-                onForkClick = actions.onFork,
-                onExportClick = actions.onExport,
-                onCompactClick = actions.onCompact,
-            )
-        }
+        PiButton(
+            label = if (isActive) "Active" else "Resume",
+            enabled = !isBusy && !isActive,
+            onClick = onResumeClick,
+        )
     }
+}
+
+@Composable
+private fun SessionMetadataRow(session: SessionRecord) {
+    val metadata =
+        buildList {
+            session.messageCount?.let { count -> add("$count msgs") }
+            session.lastModel?.takeIf { it.isNotBlank() }?.let { model -> add(model) }
+        }
+
+    if (metadata.isEmpty()) {
+        return
+    }
+
+    Text(
+        text = metadata.joinToString(" • "),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+private fun String.compactIsoTimestamp(): String {
+    return removeSuffix("Z").replace('T', ' ').substringBefore('.')
 }
 
 private const val STATUS_MESSAGE_DURATION_MS = 3_000L

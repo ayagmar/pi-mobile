@@ -124,6 +124,21 @@ class SessionsViewModel(
         }
     }
 
+    fun expandAllCwds() {
+        collapsedCwds.clear()
+        _uiState.update { current ->
+            current.copy(groups = remapGroups(current.groups, collapsedCwds))
+        }
+    }
+
+    fun collapseAllCwds() {
+        collapsedCwds.clear()
+        collapsedCwds.addAll(_uiState.value.groups.map { group -> group.cwd })
+        _uiState.update { current ->
+            current.copy(groups = remapGroups(current.groups, collapsedCwds))
+        }
+    }
+
     fun refreshSessions() {
         val hostId = _uiState.value.selectedHostId ?: return
 
@@ -697,7 +712,7 @@ data class SessionsUiState(
     val forkCandidates: List<ForkableMessage> = emptyList(),
     val activeSessionPath: String? = null,
     val errorMessage: String? = null,
-    val isFlatView: Boolean = false,
+    val isFlatView: Boolean = true,
 )
 
 data class CwdSessionGroupUiState(
