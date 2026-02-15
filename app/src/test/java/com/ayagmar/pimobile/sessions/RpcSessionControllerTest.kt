@@ -3,6 +3,7 @@ package com.ayagmar.pimobile.sessions
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.BashResult
 import com.ayagmar.pimobile.corerpc.SessionStats
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -219,6 +220,31 @@ class RpcSessionControllerTest {
         assertEquals(null, tree.entries[0].parentId)
         assertEquals("m2", tree.entries[1].entryId)
         assertEquals("m1", tree.entries[1].parentId)
+    }
+
+    @Test
+    fun parseLastAssistantTextHandlesTextAndNull() {
+        val withText =
+            invokeParser<String?>(
+                functionName = "parseLastAssistantText",
+                data =
+                    buildJsonObject {
+                        put("text", "Assistant response")
+                    },
+            )
+
+        assertEquals("Assistant response", withText)
+
+        val withNull =
+            invokeParser<String?>(
+                functionName = "parseLastAssistantText",
+                data =
+                    buildJsonObject {
+                        put("text", JsonNull)
+                    },
+            )
+
+        assertEquals(null, withNull)
     }
 
     @Test

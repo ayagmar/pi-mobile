@@ -107,6 +107,25 @@ data class CycleThinkingLevelCommand(
 ) : RpcCommand
 
 @Serializable
+data class SetThinkingLevelCommand(
+    override val id: String? = null,
+    override val type: String = "set_thinking_level",
+    val level: String,
+) : RpcCommand
+
+@Serializable
+data class AbortRetryCommand(
+    override val id: String? = null,
+    override val type: String = "abort_retry",
+) : RpcCommand
+
+@Serializable
+data class GetLastAssistantTextCommand(
+    override val id: String? = null,
+    override val type: String = "get_last_assistant_text",
+) : RpcCommand
+
+@Serializable
 data class ExtensionUiResponseCommand(
     override val id: String? = null,
     override val type: String = "extension_ui_response",

@@ -2,6 +2,7 @@ package com.ayagmar.pimobile.corenet
 
 import com.ayagmar.pimobile.corerpc.AbortBashCommand
 import com.ayagmar.pimobile.corerpc.AbortCommand
+import com.ayagmar.pimobile.corerpc.AbortRetryCommand
 import com.ayagmar.pimobile.corerpc.BashCommand
 import com.ayagmar.pimobile.corerpc.CompactCommand
 import com.ayagmar.pimobile.corerpc.CycleModelCommand
@@ -13,6 +14,7 @@ import com.ayagmar.pimobile.corerpc.ForkCommand
 import com.ayagmar.pimobile.corerpc.GetAvailableModelsCommand
 import com.ayagmar.pimobile.corerpc.GetCommandsCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
+import com.ayagmar.pimobile.corerpc.GetLastAssistantTextCommand
 import com.ayagmar.pimobile.corerpc.GetMessagesCommand
 import com.ayagmar.pimobile.corerpc.GetSessionStatsCommand
 import com.ayagmar.pimobile.corerpc.GetStateCommand
@@ -25,6 +27,7 @@ import com.ayagmar.pimobile.corerpc.SetFollowUpModeCommand
 import com.ayagmar.pimobile.corerpc.SetModelCommand
 import com.ayagmar.pimobile.corerpc.SetSessionNameCommand
 import com.ayagmar.pimobile.corerpc.SetSteeringModeCommand
+import com.ayagmar.pimobile.corerpc.SetThinkingLevelCommand
 import com.ayagmar.pimobile.corerpc.SteerCommand
 import com.ayagmar.pimobile.corerpc.SwitchSessionCommand
 import kotlinx.serialization.KSerializer
@@ -42,16 +45,19 @@ private val rpcCommandEncoders: Map<Class<out RpcCommand>, RpcCommandEncoder> =
         SteerCommand::class.java to typedEncoder(SteerCommand.serializer()),
         FollowUpCommand::class.java to typedEncoder(FollowUpCommand.serializer()),
         AbortCommand::class.java to typedEncoder(AbortCommand.serializer()),
+        AbortRetryCommand::class.java to typedEncoder(AbortRetryCommand.serializer()),
         GetStateCommand::class.java to typedEncoder(GetStateCommand.serializer()),
         GetMessagesCommand::class.java to typedEncoder(GetMessagesCommand.serializer()),
         SwitchSessionCommand::class.java to typedEncoder(SwitchSessionCommand.serializer()),
         SetSessionNameCommand::class.java to typedEncoder(SetSessionNameCommand.serializer()),
         GetForkMessagesCommand::class.java to typedEncoder(GetForkMessagesCommand.serializer()),
+        GetLastAssistantTextCommand::class.java to typedEncoder(GetLastAssistantTextCommand.serializer()),
         ForkCommand::class.java to typedEncoder(ForkCommand.serializer()),
         ExportHtmlCommand::class.java to typedEncoder(ExportHtmlCommand.serializer()),
         CompactCommand::class.java to typedEncoder(CompactCommand.serializer()),
         CycleModelCommand::class.java to typedEncoder(CycleModelCommand.serializer()),
         CycleThinkingLevelCommand::class.java to typedEncoder(CycleThinkingLevelCommand.serializer()),
+        SetThinkingLevelCommand::class.java to typedEncoder(SetThinkingLevelCommand.serializer()),
         ExtensionUiResponseCommand::class.java to typedEncoder(ExtensionUiResponseCommand.serializer()),
         NewSessionCommand::class.java to typedEncoder(NewSessionCommand.serializer()),
         GetCommandsCommand::class.java to typedEncoder(GetCommandsCommand.serializer()),

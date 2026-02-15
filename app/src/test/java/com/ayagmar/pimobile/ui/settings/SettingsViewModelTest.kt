@@ -139,6 +139,12 @@ private class FakeSessionController : SessionController {
 
     override suspend fun cycleThinkingLevel(): Result<String?> = Result.success(null)
 
+    override suspend fun setThinkingLevel(level: String): Result<String?> = Result.success(level)
+
+    override suspend fun getLastAssistantText(): Result<String?> = Result.success(null)
+
+    override suspend fun abortRetry(): Result<Unit> = Result.success(Unit)
+
     override suspend fun sendExtensionUiResponse(
         requestId: String,
         value: String?,

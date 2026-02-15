@@ -8,6 +8,7 @@ import com.ayagmar.pimobile.corenet.PiRpcConnectionConfig
 import com.ayagmar.pimobile.corenet.WebSocketTarget
 import com.ayagmar.pimobile.corerpc.AbortBashCommand
 import com.ayagmar.pimobile.corerpc.AbortCommand
+import com.ayagmar.pimobile.corerpc.AbortRetryCommand
 import com.ayagmar.pimobile.corerpc.AgentEndEvent
 import com.ayagmar.pimobile.corerpc.AgentStartEvent
 import com.ayagmar.pimobile.corerpc.AvailableModel
@@ -23,6 +24,7 @@ import com.ayagmar.pimobile.corerpc.ForkCommand
 import com.ayagmar.pimobile.corerpc.GetAvailableModelsCommand
 import com.ayagmar.pimobile.corerpc.GetCommandsCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
+import com.ayagmar.pimobile.corerpc.GetLastAssistantTextCommand
 import com.ayagmar.pimobile.corerpc.GetSessionStatsCommand
 import com.ayagmar.pimobile.corerpc.ImagePayload
 import com.ayagmar.pimobile.corerpc.NewSessionCommand
@@ -37,6 +39,7 @@ import com.ayagmar.pimobile.corerpc.SetFollowUpModeCommand
 import com.ayagmar.pimobile.corerpc.SetModelCommand
 import com.ayagmar.pimobile.corerpc.SetSessionNameCommand
 import com.ayagmar.pimobile.corerpc.SetSteeringModeCommand
+import com.ayagmar.pimobile.corerpc.SetThinkingLevelCommand
 import com.ayagmar.pimobile.corerpc.SteerCommand
 import com.ayagmar.pimobile.corerpc.SwitchSessionCommand
 import com.ayagmar.pimobile.coresessions.SessionRecord
@@ -367,6 +370,55 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun setThinkingLevel(level: String): Result<String?> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val response =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = SetThinkingLevelCommand(id = UUID.randomUUID().toString(), level = level),
+                        expectedCommand = SET_THINKING_LEVEL_COMMAND,
+                    ).requireSuccess("Failed to set thinking level")
+
+                response.data?.stringField("level") ?: level
+            }
+        }
+    }
+
+    override suspend fun getLastAssistantText(): Result<String?> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val response =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = GetLastAssistantTextCommand(id = UUID.randomUUID().toString()),
+                        expectedCommand = GET_LAST_ASSISTANT_TEXT_COMMAND,
+                    ).requireSuccess("Failed to get last assistant text")
+
+                parseLastAssistantText(response.data)
+            }
+        }
+    }
+
+    override suspend fun abortRetry(): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                sendAndAwaitResponse(
+                    connection = connection,
+                    requestTimeoutMs = requestTimeoutMs,
+                    command = AbortRetryCommand(id = UUID.randomUUID().toString()),
+                    expectedCommand = ABORT_RETRY_COMMAND,
+                ).requireSuccess("Failed to abort retry")
+                Unit
+            }
+        }
+    }
+
     override suspend fun sendExtensionUiResponse(
         requestId: String,
         value: String?,
@@ -665,6 +717,9 @@ class RpcSessionController(
         private const val FORK_COMMAND = "fork"
         private const val CYCLE_MODEL_COMMAND = "cycle_model"
         private const val CYCLE_THINKING_COMMAND = "cycle_thinking_level"
+        private const val SET_THINKING_LEVEL_COMMAND = "set_thinking_level"
+        private const val GET_LAST_ASSISTANT_TEXT_COMMAND = "get_last_assistant_text"
+        private const val ABORT_RETRY_COMMAND = "abort_retry"
         private const val NEW_SESSION_COMMAND = "new_session"
         private const val GET_COMMANDS_COMMAND = "get_commands"
         private const val BASH_COMMAND = "bash"
@@ -789,6 +844,10 @@ private fun parseModelInfo(data: JsonObject?): ModelInfo? {
         provider = model.stringField("provider") ?: "unknown",
         thinkingLevel = data.stringField("thinkingLevel") ?: "off",
     )
+}
+
+private fun parseLastAssistantText(data: JsonObject?): String? {
+    return data?.stringField("text")
 }
 
 private fun parseSlashCommands(data: JsonObject?): List<SlashCommandInfo> {

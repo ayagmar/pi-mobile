@@ -147,6 +147,41 @@ class ChatViewModel(
         }
     }
 
+    fun setThinkingLevel(level: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.setThinkingLevel(level)
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            } else {
+                _uiState.update { it.copy(thinkingLevel = result.getOrNull() ?: level) }
+            }
+        }
+    }
+
+    fun fetchLastAssistantText(onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.getLastAssistantText()
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+                onResult(null)
+            } else {
+                onResult(result.getOrNull())
+            }
+        }
+    }
+
+    fun abortRetry() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.abortRetry()
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
     fun showCommandPalette() {
         _uiState.update { it.copy(isCommandPaletteVisible = true, commandsQuery = "") }
         loadCommands()
@@ -442,11 +477,13 @@ class ChatViewModel(
 
     @Suppress("MagicNumber")
     private fun handleRetryStart(event: AutoRetryStartEvent) {
+        _uiState.update { it.copy(isRetrying = true) }
         val message = "Retrying (${event.attempt}/${event.maxAttempts}) in ${event.delayMs / 1000}s..."
         addSystemNotification(message, "warning")
     }
 
     private fun handleRetryEnd(event: AutoRetryEndEvent) {
+        _uiState.update { it.copy(isRetrying = false) }
         val message =
             if (event.success) {
                 "Retry successful (attempt ${event.attempt})"
@@ -1057,6 +1094,7 @@ data class ChatUiState(
     val isLoading: Boolean = false,
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val isStreaming: Boolean = false,
+    val isRetrying: Boolean = false,
     val timeline: List<ChatTimelineItem> = emptyList(),
     val inputText: String = "",
     val errorMessage: String? = null,

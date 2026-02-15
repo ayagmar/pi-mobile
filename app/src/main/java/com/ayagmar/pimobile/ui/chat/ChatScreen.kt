@@ -108,6 +108,9 @@ private data class ChatCallbacks(
     val onFollowUp: (String) -> Unit,
     val onCycleModel: () -> Unit,
     val onCycleThinking: () -> Unit,
+    val onSetThinkingLevel: (String) -> Unit,
+    val onFetchLastAssistantText: ((String?) -> Unit) -> Unit,
+    val onAbortRetry: () -> Unit,
     val onSendExtensionUiResponse: (String, String?, Boolean?, Boolean) -> Unit,
     val onDismissExtensionRequest: () -> Unit,
     val onClearNotification: (Int) -> Unit,
@@ -163,6 +166,9 @@ fun ChatRoute() {
                 onFollowUp = chatViewModel::followUp,
                 onCycleModel = chatViewModel::cycleModel,
                 onCycleThinking = chatViewModel::cycleThinkingLevel,
+                onSetThinkingLevel = chatViewModel::setThinkingLevel,
+                onFetchLastAssistantText = chatViewModel::fetchLastAssistantText,
+                onAbortRetry = chatViewModel::abortRetry,
                 onSendExtensionUiResponse = chatViewModel::sendExtensionUiResponse,
                 onDismissExtensionRequest = chatViewModel::dismissExtensionRequest,
                 onClearNotification = chatViewModel::clearNotification,
@@ -318,11 +324,14 @@ private fun ChatScreenContent(
     }
 }
 
+@Suppress("LongMethod")
 @Composable
 private fun ChatHeader(
     state: ChatUiState,
     callbacks: ChatCallbacks,
 ) {
+    val clipboardManager = LocalClipboardManager.current
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -358,6 +367,20 @@ private fun ChatHeader(
                 )
             }
 
+            // Copy last assistant text
+            IconButton(
+                onClick = {
+                    callbacks.onFetchLastAssistantText { text ->
+                        text?.let { clipboardManager.setText(AnnotatedString(it)) }
+                    }
+                },
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = "Copy last assistant text",
+                )
+            }
+
             // Bash button
             IconButton(onClick = callbacks.onShowBashDialog) {
                 Icon(
@@ -373,6 +396,7 @@ private fun ChatHeader(
         thinkingLevel = state.thinkingLevel,
         onCycleModel = callbacks.onCycleModel,
         onCycleThinking = callbacks.onCycleThinking,
+        onSetThinkingLevel = callbacks.onSetThinkingLevel,
         onShowModelPicker = callbacks.onShowModelPicker,
     )
 
@@ -1125,9 +1149,11 @@ private fun PromptControls(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (state.isStreaming) {
+        if (state.isStreaming || state.isRetrying) {
             StreamingControls(
+                isRetrying = state.isRetrying,
                 onAbort = callbacks.onAbort,
+                onAbortRetry = callbacks.onAbortRetry,
                 onSteerClick = { showSteerDialog = true },
                 onFollowUpClick = { showFollowUpDialog = true },
             )
@@ -1170,7 +1196,9 @@ private fun PromptControls(
 
 @Composable
 private fun StreamingControls(
+    isRetrying: Boolean,
     onAbort: () -> Unit,
+    onAbortRetry: () -> Unit,
     onSteerClick: () -> Unit,
     onFollowUpClick: () -> Unit,
 ) {
@@ -1195,18 +1223,31 @@ private fun StreamingControls(
             Text("Abort")
         }
 
-        Button(
-            onClick = onSteerClick,
-            modifier = Modifier.weight(1f),
-        ) {
-            Text("Steer")
-        }
+        if (isRetrying) {
+            Button(
+                onClick = onAbortRetry,
+                modifier = Modifier.weight(1f),
+                colors =
+                    androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                    ),
+            ) {
+                Text("Abort Retry")
+            }
+        } else {
+            Button(
+                onClick = onSteerClick,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Steer")
+            }
 
-        Button(
-            onClick = onFollowUpClick,
-            modifier = Modifier.weight(1f),
-        ) {
-            Text("Follow Up")
+            Button(
+                onClick = onFollowUpClick,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Follow Up")
+            }
         }
     }
 }
@@ -1442,6 +1483,7 @@ private fun SteerFollowUpDialog(
     )
 }
 
+@Suppress("LongMethod", "LongParameterList")
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ModelThinkingControls(
@@ -1449,8 +1491,11 @@ private fun ModelThinkingControls(
     thinkingLevel: String?,
     onCycleModel: () -> Unit,
     onCycleThinking: () -> Unit,
+    onSetThinkingLevel: (String) -> Unit,
     onShowModelPicker: () -> Unit,
 ) {
+    var showThinkingMenu by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1479,15 +1524,45 @@ private fun ModelThinkingControls(
             )
         }
 
-        TextButton(
-            onClick = onCycleThinking,
+        Row(
             modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = thinkingText,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-            )
+            TextButton(
+                onClick = onCycleThinking,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    text = thinkingText,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                )
+            }
+
+            Box {
+                IconButton(onClick = { showThinkingMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Default.ExpandMore,
+                        contentDescription = "Set thinking level",
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showThinkingMenu,
+                    onDismissRequest = { showThinkingMenu = false },
+                ) {
+                    THINKING_LEVEL_OPTIONS.forEach { level ->
+                        DropdownMenuItem(
+                            text = { Text(level) },
+                            onClick = {
+                                onSetThinkingLevel(level)
+                                showThinkingMenu = false
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1545,6 +1620,7 @@ private fun ExtensionStatuses(statuses: Map<String, String>) {
 private const val COLLAPSED_OUTPUT_LENGTH = 280
 private const val THINKING_COLLAPSE_THRESHOLD = 280
 private const val MAX_ARG_DISPLAY_LENGTH = 100
+private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")
 
 @Suppress("LongParameterList", "LongMethod")
 @Composable

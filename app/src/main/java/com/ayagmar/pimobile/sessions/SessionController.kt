@@ -58,6 +58,12 @@ interface SessionController {
 
     suspend fun cycleThinkingLevel(): Result<String?>
 
+    suspend fun setThinkingLevel(level: String): Result<String?>
+
+    suspend fun getLastAssistantText(): Result<String?>
+
+    suspend fun abortRetry(): Result<Unit>
+
     suspend fun sendExtensionUiResponse(
         requestId: String,
         value: String? = null,
