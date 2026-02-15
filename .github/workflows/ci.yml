@@ -21,7 +21,7 @@ jobs:
           cache: gradle
 
       - name: Lint & Test
-        run: ./gradlew ktlintCheck detekt test
+        run: ./gradlew :app:check
 
   bridge:
     name: Bridge
