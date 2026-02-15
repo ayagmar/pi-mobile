@@ -551,6 +551,16 @@ private fun String.containsAny(markers: Set<String>): Boolean {
     return markers.any { marker -> contains(marker) }
 }
 
+internal fun detectHighlightKindsForTest(
+    content: String,
+    path: String,
+): Set<String> {
+    val language = detectSyntaxLanguage(path)
+    return computeHighlightSpans(content = content, language = language)
+        .map { span -> span.kind.name }
+        .toSet()
+}
+
 private fun detectSyntaxLanguage(path: String): SyntaxLanguage {
     val lowerPath = path.lowercase()
     if (lowerPath.endsWith("makefile")) {

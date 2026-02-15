@@ -87,4 +87,28 @@ class DiffViewerTest {
 
         assertTrue(diffLines.all { it.type == DiffLineType.CONTEXT })
     }
+
+    @Test
+    fun prismHighlightingDetectsCommentStringAndNumberKinds() {
+        val highlightKinds =
+            detectHighlightKindsForTest(
+                content = "val message = \"hello\" // note 42",
+                path = "src/Main.kt",
+            )
+
+        assertTrue("Expected COMMENT in $highlightKinds", highlightKinds.contains("COMMENT"))
+        assertTrue("Expected STRING in $highlightKinds", highlightKinds.contains("STRING"))
+    }
+
+    @Test
+    fun prismHighlightingDetectsStringAndNumberInJson() {
+        val highlightKinds =
+            detectHighlightKindsForTest(
+                content = "{\"count\": 42}",
+                path = "config/settings.json",
+            )
+
+        assertTrue("Expected NUMBER in $highlightKinds", highlightKinds.contains("NUMBER"))
+        assertTrue("Expected at least one highlighted token in $highlightKinds", highlightKinds.isNotEmpty())
+    }
 }
