@@ -298,7 +298,7 @@ private fun ChatScreenContent(
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(if (state.isStreaming) 8.dp else 12.dp),
     ) {
         ChatHeader(
             state = state,
@@ -341,6 +341,7 @@ private fun ChatHeader(
     callbacks: ChatCallbacks,
 ) {
     val clipboardManager = LocalClipboardManager.current
+    val isCompact = state.isStreaming
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -348,15 +349,13 @@ private fun ChatHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            // Show extension title if set, otherwise "Chat"
             val title = state.extensionTitle ?: "Chat"
             Text(
                 text = title,
-                style = MaterialTheme.typography.headlineSmall,
+                style = if (isCompact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
             )
 
-            // Only show connection status if no custom title
-            if (state.extensionTitle == null) {
+            if (!isCompact && state.extensionTitle == null) {
                 Text(
                     text = "Connection: ${state.connectionState.name.lowercase()}",
                     style = MaterialTheme.typography.bodyMedium,
@@ -369,34 +368,40 @@ private fun ChatHeader(
                 Text("Tree")
             }
 
-            // Stats button
-            IconButton(onClick = callbacks.onShowStatsSheet) {
-                Icon(
-                    imageVector = Icons.Default.BarChart,
-                    contentDescription = "Session Stats",
-                )
-            }
+            if (isCompact) {
+                IconButton(onClick = callbacks.onShowModelPicker) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Select model",
+                    )
+                }
+            } else {
+                IconButton(onClick = callbacks.onShowStatsSheet) {
+                    Icon(
+                        imageVector = Icons.Default.BarChart,
+                        contentDescription = "Session Stats",
+                    )
+                }
 
-            // Copy last assistant text
-            IconButton(
-                onClick = {
-                    callbacks.onFetchLastAssistantText { text ->
-                        text?.let { clipboardManager.setText(AnnotatedString(it)) }
-                    }
-                },
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ContentCopy,
-                    contentDescription = "Copy last assistant text",
-                )
-            }
+                IconButton(
+                    onClick = {
+                        callbacks.onFetchLastAssistantText { text ->
+                            text?.let { clipboardManager.setText(AnnotatedString(it)) }
+                        }
+                    },
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy last assistant text",
+                    )
+                }
 
-            // Bash button
-            IconButton(onClick = callbacks.onShowBashDialog) {
-                Icon(
-                    imageVector = Icons.Default.Terminal,
-                    contentDescription = "Run Bash",
-                )
+                IconButton(onClick = callbacks.onShowBashDialog) {
+                    Icon(
+                        imageVector = Icons.Default.Terminal,
+                        contentDescription = "Run Bash",
+                    )
+                }
             }
         }
     }
@@ -406,6 +411,7 @@ private fun ChatHeader(
         thinkingLevel = state.thinkingLevel,
         onSetThinkingLevel = callbacks.onSetThinkingLevel,
         onShowModelPicker = callbacks.onShowModelPicker,
+        compact = isCompact,
     )
 
     state.errorMessage?.let { errorMessage ->
@@ -1577,23 +1583,28 @@ private fun ModelThinkingControls(
     thinkingLevel: String?,
     onSetThinkingLevel: (String) -> Unit,
     onShowModelPicker: () -> Unit,
+    compact: Boolean = false,
 ) {
     var showThinkingMenu by remember { mutableStateOf(false) }
 
-    val modelText = currentModel?.let { "${it.name}" } ?: "Select model"
+    val modelText = currentModel?.name ?: "Select model"
     val providerText = currentModel?.provider?.uppercase() ?: ""
     val thinkingText = thinkingLevel?.uppercase() ?: "OFF"
+    val buttonPadding = if (compact) 6.dp else 8.dp
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Model selector button
         OutlinedButton(
             onClick = onShowModelPicker,
             modifier = Modifier.weight(1f),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            contentPadding =
+                androidx.compose.foundation.layout.PaddingValues(
+                    horizontal = 12.dp,
+                    vertical = buttonPadding,
+                ),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1610,7 +1621,7 @@ private fun ModelThinkingControls(
                         style = MaterialTheme.typography.labelMedium,
                         maxLines = 1,
                     )
-                    if (providerText.isNotEmpty()) {
+                    if (!compact && providerText.isNotEmpty()) {
                         Text(
                             text = providerText,
                             style = MaterialTheme.typography.labelSmall,
@@ -1626,7 +1637,11 @@ private fun ModelThinkingControls(
         Box(modifier = Modifier.wrapContentWidth()) {
             OutlinedButton(
                 onClick = { showThinkingMenu = true },
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                contentPadding =
+                    androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 12.dp,
+                        vertical = buttonPadding,
+                    ),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
