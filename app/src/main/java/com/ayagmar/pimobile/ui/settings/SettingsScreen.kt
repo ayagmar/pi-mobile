@@ -6,10 +6,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -42,7 +45,11 @@ private fun SettingsScreen(viewModel: SettingsViewModel) {
     val uiState = viewModel.uiState
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
@@ -53,6 +60,13 @@ private fun SettingsScreen(viewModel: SettingsViewModel) {
         ConnectionStatusCard(
             state = uiState,
             onPing = viewModel::pingBridge,
+        )
+
+        AgentBehaviorCard(
+            autoCompactionEnabled = uiState.autoCompactionEnabled,
+            autoRetryEnabled = uiState.autoRetryEnabled,
+            onToggleAutoCompaction = viewModel::toggleAutoCompaction,
+            onToggleAutoRetry = viewModel::toggleAutoRetry,
         )
 
         SessionActionsCard(
@@ -154,6 +168,72 @@ private fun ConnectionMessages(state: SettingsUiState) {
             text = error,
             color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+@Composable
+private fun AgentBehaviorCard(
+    autoCompactionEnabled: Boolean,
+    autoRetryEnabled: Boolean,
+    onToggleAutoCompaction: () -> Unit,
+    onToggleAutoRetry: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Agent Behavior",
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            SettingsToggleRow(
+                title = "Auto-compact context",
+                description = "Automatically compact conversation when nearing token limit",
+                checked = autoCompactionEnabled,
+                onToggle = onToggleAutoCompaction,
+            )
+
+            SettingsToggleRow(
+                title = "Auto-retry on errors",
+                description = "Automatically retry failed requests with exponential backoff",
+                checked = autoRetryEnabled,
+                onToggle = onToggleAutoRetry,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = { onToggle() },
         )
     }
 }

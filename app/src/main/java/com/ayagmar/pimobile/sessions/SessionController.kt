@@ -78,6 +78,10 @@ interface SessionController {
         provider: String,
         modelId: String,
     ): Result<ModelInfo?>
+
+    suspend fun setAutoCompaction(enabled: Boolean): Result<Unit>
+
+    suspend fun setAutoRetry(enabled: Boolean): Result<Unit>
 }
 
 /**

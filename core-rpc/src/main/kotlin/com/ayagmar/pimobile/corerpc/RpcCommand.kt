@@ -155,6 +155,20 @@ data class GetAvailableModelsCommand(
 ) : RpcCommand
 
 @Serializable
+data class SetAutoCompactionCommand(
+    override val id: String? = null,
+    override val type: String = "set_auto_compaction",
+    val enabled: Boolean,
+) : RpcCommand
+
+@Serializable
+data class SetAutoRetryCommand(
+    override val id: String? = null,
+    override val type: String = "set_auto_retry",
+    val enabled: Boolean,
+) : RpcCommand
+
+@Serializable
 data class SetModelCommand(
     override val id: String? = null,
     override val type: String = "set_model",

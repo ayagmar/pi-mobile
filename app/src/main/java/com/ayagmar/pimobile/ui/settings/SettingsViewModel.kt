@@ -14,12 +14,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
+@Suppress("TooManyFunctions")
 class SettingsViewModel(
     private val sessionController: SessionController,
     context: Context,
 ) : ViewModel() {
     var uiState by mutableStateOf(SettingsUiState())
         private set
+
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     init {
         val appVersion =
@@ -29,7 +32,12 @@ class SettingsViewModel(
                 "unknown"
             }
 
-        uiState = uiState.copy(appVersion = appVersion)
+        uiState =
+            uiState.copy(
+                appVersion = appVersion,
+                autoCompactionEnabled = prefs.getBoolean(KEY_AUTO_COMPACTION, true),
+                autoRetryEnabled = prefs.getBoolean(KEY_AUTO_RETRY, true),
+            )
 
         viewModelScope.launch {
             sessionController.connectionState.collect { state ->
@@ -128,6 +136,52 @@ class SettingsViewModel(
                 }
         }
     }
+
+    fun toggleAutoCompaction() {
+        val newValue = !uiState.autoCompactionEnabled
+        uiState = uiState.copy(autoCompactionEnabled = newValue)
+        prefs.edit().putBoolean(KEY_AUTO_COMPACTION, newValue).apply()
+
+        viewModelScope.launch {
+            val result = sessionController.setAutoCompaction(newValue)
+            if (result.isFailure) {
+                // Revert on failure
+                val revertedValue = !newValue
+                uiState =
+                    uiState.copy(
+                        autoCompactionEnabled = revertedValue,
+                        errorMessage = "Failed to update auto-compaction",
+                    )
+                prefs.edit().putBoolean(KEY_AUTO_COMPACTION, revertedValue).apply()
+            }
+        }
+    }
+
+    fun toggleAutoRetry() {
+        val newValue = !uiState.autoRetryEnabled
+        uiState = uiState.copy(autoRetryEnabled = newValue)
+        prefs.edit().putBoolean(KEY_AUTO_RETRY, newValue).apply()
+
+        viewModelScope.launch {
+            val result = sessionController.setAutoRetry(newValue)
+            if (result.isFailure) {
+                // Revert on failure
+                val revertedValue = !newValue
+                uiState =
+                    uiState.copy(
+                        autoRetryEnabled = revertedValue,
+                        errorMessage = "Failed to update auto-retry",
+                    )
+                prefs.edit().putBoolean(KEY_AUTO_RETRY, revertedValue).apply()
+            }
+        }
+    }
+
+    companion object {
+        private const val PREFS_NAME = "pi_mobile_settings"
+        private const val KEY_AUTO_COMPACTION = "auto_compaction_enabled"
+        private const val KEY_AUTO_RETRY = "auto_retry_enabled"
+    }
 }
 
 class SettingsViewModelFactory(
@@ -155,6 +209,8 @@ data class SettingsUiState(
     val appVersion: String = "unknown",
     val statusMessage: String? = null,
     val errorMessage: String? = null,
+    val autoCompactionEnabled: Boolean = true,
+    val autoRetryEnabled: Boolean = true,
 )
 
 enum class ConnectionStatus {

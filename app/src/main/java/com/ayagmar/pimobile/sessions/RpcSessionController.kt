@@ -30,6 +30,8 @@ import com.ayagmar.pimobile.corerpc.RpcCommand
 import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
 import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.corerpc.SessionStats
+import com.ayagmar.pimobile.corerpc.SetAutoCompactionCommand
+import com.ayagmar.pimobile.corerpc.SetAutoRetryCommand
 import com.ayagmar.pimobile.corerpc.SetModelCommand
 import com.ayagmar.pimobile.corerpc.SetSessionNameCommand
 import com.ayagmar.pimobile.corerpc.SteerCommand
@@ -491,6 +493,44 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun setAutoCompaction(enabled: Boolean): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                sendAndAwaitResponse(
+                    connection = connection,
+                    requestTimeoutMs = requestTimeoutMs,
+                    command =
+                        SetAutoCompactionCommand(
+                            id = UUID.randomUUID().toString(),
+                            enabled = enabled,
+                        ),
+                    expectedCommand = SET_AUTO_COMPACTION_COMMAND,
+                ).requireSuccess("Failed to set auto-compaction")
+                Unit
+            }
+        }
+    }
+
+    override suspend fun setAutoRetry(enabled: Boolean): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                sendAndAwaitResponse(
+                    connection = connection,
+                    requestTimeoutMs = requestTimeoutMs,
+                    command =
+                        SetAutoRetryCommand(
+                            id = UUID.randomUUID().toString(),
+                            enabled = enabled,
+                        ),
+                    expectedCommand = SET_AUTO_RETRY_COMMAND,
+                ).requireSuccess("Failed to set auto-retry")
+                Unit
+            }
+        }
+    }
+
     private suspend fun clearActiveConnection() {
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
@@ -564,6 +604,8 @@ class RpcSessionController(
         private const val GET_SESSION_STATS_COMMAND = "get_session_stats"
         private const val GET_AVAILABLE_MODELS_COMMAND = "get_available_models"
         private const val SET_MODEL_COMMAND = "set_model"
+        private const val SET_AUTO_COMPACTION_COMMAND = "set_auto_compaction"
+        private const val SET_AUTO_RETRY_COMMAND = "set_auto_retry"
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
         private const val BASH_TIMEOUT_MS = 60_000L
