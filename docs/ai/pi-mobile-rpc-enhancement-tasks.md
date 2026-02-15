@@ -228,5 +228,7 @@ Scope:
 ## Ordered execution queue (next)
 
 1. Task H1 — Tree contract conformance tests ✅ DONE (`e56db90`)
-2. Task H2 — Lifecycle notification noise controls
-3. Task H3 — Settings mode controls test coverage
+2. Task H2 — Lifecycle notification noise controls ✅ DONE (`09fa47d`)
+3. Task H3 — Settings mode controls test coverage ✅ DONE (`777c56c`)
+
+All post-parity hardening tasks currently defined are complete.

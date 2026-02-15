@@ -2,7 +2,7 @@
 
 Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 
-> Last updated: 2026-02-15 (Post-parity hardening started)
+> Last updated: 2026-02-15 (Post-parity hardening tasks H1-H3 completed)
 
 ---
 
@@ -43,8 +43,8 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 | Order | Task | Status | Commit | Verification | Notes |
 |---|---|---|---|---|---|
 | H1 | Tree contract conformance tests | DONE | `e56db90` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ `(cd bridge && pnpm run check)` ✅ | Added bridge/session-indexer tree endpoint tests and app tree parser mapping test |
-| H2 | Lifecycle notification noise controls | TODO | - | - | Add throttling/dedup for lifecycle notifications |
-| H3 | Settings mode controls test coverage | TODO | - | - | Add view-model tests for set mode success/failure rollback |
+| H2 | Lifecycle notification noise controls | DONE | `09fa47d` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | Added lifecycle notification throttling and duplicate suppression while preserving extension error visibility |
+| H3 | Settings mode controls test coverage | DONE | `777c56c` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | Added `SettingsViewModelTest` coverage for steering/follow-up mode success and rollback paths |
 
 ---
 
