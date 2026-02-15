@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,6 +70,79 @@ describe("createSessionIndexer", () => {
         expect(assistant?.parentId).toBe("m1");
         expect(assistant?.role).toBe("assistant");
         expect(assistant?.preview).toContain("Working on it");
+        expect(assistant?.isBookmarked).toBe(false);
+    });
+
+    it("applies user-only filter for tree snapshots", async () => {
+        const fixturesDirectory = path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            "fixtures/sessions",
+        );
+
+        const sessionIndexer = createSessionIndexer({
+            sessionsDirectory: fixturesDirectory,
+            logger: createLogger("silent"),
+        });
+
+        const tree = await sessionIndexer.getSessionTree(
+            path.join(fixturesDirectory, "--tmp-project-a--", "2026-02-01T00-00-00-000Z_a1111111.jsonl"),
+            "user-only",
+        );
+
+        expect(tree.entries.map((entry) => entry.role)).toEqual(["user"]);
+        expect(tree.entries.map((entry) => entry.entryId)).toEqual(["m1"]);
+        expect(tree.rootIds).toEqual(["m1"]);
+    });
+
+    it("attaches labels to target entries and supports labeled-only filter", async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-tree-labels-"));
+        const projectDir = path.join(tempRoot, "--tmp-project-labeled--");
+        await fs.mkdir(projectDir, { recursive: true });
+
+        const sessionPath = path.join(projectDir, "2026-02-03T00-00-00-000Z_l1111111.jsonl");
+        await fs.writeFile(
+            sessionPath,
+            [
+                JSON.stringify({
+                    type: "session",
+                    version: 3,
+                    id: "l1111111",
+                    timestamp: "2026-02-03T00:00:00.000Z",
+                    cwd: "/tmp/project-labeled",
+                }),
+                JSON.stringify({
+                    type: "message",
+                    id: "m1",
+                    parentId: null,
+                    timestamp: "2026-02-03T00:00:01.000Z",
+                    message: { role: "user", content: "checkpoint this" },
+                }),
+                JSON.stringify({
+                    type: "label",
+                    id: "l1",
+                    parentId: "m1",
+                    timestamp: "2026-02-03T00:00:02.000Z",
+                    targetId: "m1",
+                    label: "checkpoint-1",
+                }),
+            ].join("\n"),
+            "utf-8",
+        );
+
+        const sessionIndexer = createSessionIndexer({
+            sessionsDirectory: tempRoot,
+            logger: createLogger("silent"),
+        });
+
+        const fullTree = await sessionIndexer.getSessionTree(sessionPath);
+        const labeledEntry = fullTree.entries.find((entry) => entry.entryId === "m1");
+        expect(labeledEntry?.label).toBe("checkpoint-1");
+        expect(labeledEntry?.isBookmarked).toBe(true);
+
+        const labeledOnlyTree = await sessionIndexer.getSessionTree(sessionPath, "labeled-only");
+        expect(labeledOnlyTree.entries.map((entry) => entry.entryId)).toEqual(["m1", "l1"]);
+
+        await fs.rm(tempRoot, { recursive: true, force: true });
     });
 
     it("rejects session tree requests outside configured session directory", async () => {

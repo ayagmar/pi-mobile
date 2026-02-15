@@ -138,6 +138,8 @@ private data class ChatCallbacks(
     val onShowTreeSheet: () -> Unit,
     val onHideTreeSheet: () -> Unit,
     val onForkFromTreeEntry: (String) -> Unit,
+    val onJumpAndContinueFromTreeEntry: (String) -> Unit,
+    val onTreeFilterChanged: (String) -> Unit,
     // Image attachment callbacks
     val onAddImage: (PendingImage) -> Unit,
     val onRemoveImage: (Int) -> Unit,
@@ -192,6 +194,8 @@ fun ChatRoute() {
                 onShowTreeSheet = chatViewModel::showTreeSheet,
                 onHideTreeSheet = chatViewModel::hideTreeSheet,
                 onForkFromTreeEntry = chatViewModel::forkFromTreeEntry,
+                onJumpAndContinueFromTreeEntry = chatViewModel::jumpAndContinueFromTreeEntry,
+                onTreeFilterChanged = chatViewModel::setTreeFilter,
                 onAddImage = chatViewModel::addImage,
                 onRemoveImage = chatViewModel::removeImage,
                 onClearImages = chatViewModel::clearImages,
@@ -274,9 +278,12 @@ private fun ChatScreen(
     TreeNavigationSheet(
         isVisible = state.isTreeSheetVisible,
         tree = state.sessionTree,
+        selectedFilter = state.treeFilter,
         isLoading = state.isLoadingTree,
         errorMessage = state.treeErrorMessage,
+        onFilterChange = callbacks.onTreeFilterChanged,
         onForkFromEntry = callbacks.onForkFromTreeEntry,
+        onJumpAndContinue = callbacks.onJumpAndContinueFromTreeEntry,
         onDismiss = callbacks.onHideTreeSheet,
     )
 }
@@ -2194,9 +2201,12 @@ private fun ModelItem(
 private fun TreeNavigationSheet(
     isVisible: Boolean,
     tree: SessionTreeSnapshot?,
+    selectedFilter: String,
     isLoading: Boolean,
     errorMessage: String?,
+    onFilterChange: (String) -> Unit,
     onForkFromEntry: (String) -> Unit,
+    onJumpAndContinue: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     if (!isVisible) return
@@ -2217,6 +2227,19 @@ private fun TreeNavigationSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    TREE_FILTER_OPTIONS.forEach { (filter, label) ->
+                        val chipLabel = if (filter == selectedFilter) "• $label" else label
+                        AssistChip(
+                            onClick = { onFilterChange(filter) },
+                            label = { Text(chipLabel) },
+                        )
+                    }
                 }
 
                 when {
@@ -2259,6 +2282,7 @@ private fun TreeNavigationSheet(
                                     childCount = childCountByEntry[entry.entryId] ?: 0,
                                     isCurrent = tree?.currentLeafId == entry.entryId,
                                     onForkFromEntry = onForkFromEntry,
+                                    onJumpAndContinue = onJumpAndContinue,
                                 )
                             }
                         }
@@ -2275,7 +2299,7 @@ private fun TreeNavigationSheet(
     )
 }
 
-@Suppress("MagicNumber")
+@Suppress("MagicNumber", "LongMethod", "LongParameterList")
 @Composable
 private fun TreeEntryRow(
     entry: SessionTreeEntry,
@@ -2283,6 +2307,7 @@ private fun TreeEntryRow(
     childCount: Int,
     isCurrent: Boolean,
     onForkFromEntry: (String) -> Unit,
+    onJumpAndContinue: (String) -> Unit,
 ) {
     val indent = (depth * 12).dp
 
@@ -2317,6 +2342,14 @@ private fun TreeEntryRow(
                 style = MaterialTheme.typography.bodySmall,
             )
 
+            if (entry.isBookmarked && !entry.label.isNullOrBlank()) {
+                Text(
+                    text = "🔖 ${entry.label}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -2329,8 +2362,13 @@ private fun TreeEntryRow(
                     color = MaterialTheme.colorScheme.tertiary,
                 )
 
-                TextButton(onClick = { onForkFromEntry(entry.entryId) }) {
-                    Text("Fork here")
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { onJumpAndContinue(entry.entryId) }) {
+                        Text("Jump + Continue")
+                    }
+                    TextButton(onClick = { onForkFromEntry(entry.entryId) }) {
+                        Text("Fork")
+                    }
                 }
             }
         }
@@ -2376,6 +2414,14 @@ private fun computeChildCountMap(entries: List<SessionTreeEntry>): Map<String, I
             parentId?.let { it to count }
         }.toMap()
 }
+
+private val TREE_FILTER_OPTIONS =
+    listOf(
+        ChatViewModel.TREE_FILTER_DEFAULT to "default",
+        ChatViewModel.TREE_FILTER_NO_TOOLS to "no-tools",
+        ChatViewModel.TREE_FILTER_USER_ONLY to "user-only",
+        ChatViewModel.TREE_FILTER_LABELED_ONLY to "labeled-only",
+    )
 
 private const val SESSION_PATH_DISPLAY_LENGTH = 40
 

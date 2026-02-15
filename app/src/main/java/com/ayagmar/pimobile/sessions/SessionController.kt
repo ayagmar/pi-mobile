@@ -52,7 +52,10 @@ interface SessionController {
 
     suspend fun getForkMessages(): Result<List<ForkableMessage>>
 
-    suspend fun getSessionTree(sessionPath: String? = null): Result<SessionTreeSnapshot>
+    suspend fun getSessionTree(
+        sessionPath: String? = null,
+        filter: String? = null,
+    ): Result<SessionTreeSnapshot>
 
     suspend fun cycleModel(): Result<ModelInfo?>
 
@@ -123,6 +126,8 @@ data class SessionTreeEntry(
     val role: String?,
     val timestamp: String?,
     val preview: String,
+    val label: String? = null,
+    val isBookmarked: Boolean = false,
 )
 
 /**

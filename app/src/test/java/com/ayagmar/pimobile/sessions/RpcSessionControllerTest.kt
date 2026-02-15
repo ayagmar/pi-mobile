@@ -205,6 +205,8 @@ class RpcSessionControllerTest {
                                         put("role", "assistant")
                                         put("timestamp", "2026-02-01T00:00:02.000Z")
                                         put("preview", "second")
+                                        put("label", "checkpoint")
+                                        put("isBookmarked", true)
                                     },
                                 )
                             },
@@ -220,6 +222,8 @@ class RpcSessionControllerTest {
         assertEquals(null, tree.entries[0].parentId)
         assertEquals("m2", tree.entries[1].entryId)
         assertEquals("m1", tree.entries[1].parentId)
+        assertEquals("checkpoint", tree.entries[1].label)
+        assertEquals(true, tree.entries[1].isBookmarked)
     }
 
     @Test

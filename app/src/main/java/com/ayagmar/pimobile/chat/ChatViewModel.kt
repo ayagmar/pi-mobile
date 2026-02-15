@@ -899,11 +899,36 @@ class ChatViewModel(
         _uiState.update { it.copy(isTreeSheetVisible = false) }
     }
 
+    fun setTreeFilter(filter: String) {
+        _uiState.update { it.copy(treeFilter = filter) }
+        if (_uiState.value.isTreeSheetVisible) {
+            loadSessionTree()
+        }
+    }
+
     fun forkFromTreeEntry(entryId: String) {
         viewModelScope.launch {
             val result = sessionController.forkSessionFromEntryId(entryId)
             if (result.isSuccess) {
                 hideTreeSheet()
+                loadInitialMessages()
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    fun jumpAndContinueFromTreeEntry(entryId: String) {
+        viewModelScope.launch {
+            val result = sessionController.forkSessionFromEntryId(entryId)
+            if (result.isSuccess) {
+                val editorText = result.getOrNull()
+                _uiState.update { state ->
+                    state.copy(
+                        isTreeSheetVisible = false,
+                        inputText = editorText.orEmpty(),
+                    )
+                }
                 loadInitialMessages()
             } else {
                 _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
@@ -928,7 +953,8 @@ class ChatViewModel(
                 return@launch
             }
 
-            val result = sessionController.getSessionTree(sessionPath)
+            val filter = _uiState.value.treeFilter
+            val result = sessionController.getSessionTree(sessionPath = sessionPath, filter = filter)
             _uiState.update { state ->
                 if (result.isSuccess) {
                     state.copy(
@@ -1214,6 +1240,11 @@ class ChatViewModel(
     }
 
     companion object {
+        const val TREE_FILTER_DEFAULT = "default"
+        const val TREE_FILTER_NO_TOOLS = "no-tools"
+        const val TREE_FILTER_USER_ONLY = "user-only"
+        const val TREE_FILTER_LABELED_ONLY = "labeled-only"
+
         private const val ASSISTANT_STREAM_PREFIX = "assistant-stream-"
         private const val ASSISTANT_UPDATE_THROTTLE_MS = 40L
         private const val TOOL_UPDATE_THROTTLE_MS = 50L
@@ -1267,6 +1298,7 @@ data class ChatUiState(
     val isLoadingModels: Boolean = false,
     // Session tree state
     val isTreeSheetVisible: Boolean = false,
+    val treeFilter: String = ChatViewModel.TREE_FILTER_DEFAULT,
     val sessionTree: SessionTreeSnapshot? = null,
     val isLoadingTree: Boolean = false,
     val treeErrorMessage: String? = null,

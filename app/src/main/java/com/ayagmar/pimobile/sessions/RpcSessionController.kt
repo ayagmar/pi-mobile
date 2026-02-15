@@ -236,7 +236,10 @@ class RpcSessionController(
         }
     }
 
-    override suspend fun getSessionTree(sessionPath: String?): Result<SessionTreeSnapshot> {
+    override suspend fun getSessionTree(
+        sessionPath: String?,
+        filter: String?,
+    ): Result<SessionTreeSnapshot> {
         return mutex.withLock {
             runCatching {
                 val connection = ensureActiveConnection()
@@ -245,6 +248,9 @@ class RpcSessionController(
                         put("type", BRIDGE_GET_SESSION_TREE_TYPE)
                         if (!sessionPath.isNullOrBlank()) {
                             put("sessionPath", sessionPath)
+                        }
+                        if (!filter.isNullOrBlank()) {
+                            put("filter", filter)
                         }
                     }
 
@@ -812,6 +818,8 @@ private fun parseSessionTreeSnapshot(payload: JsonObject): SessionTreeSnapshot {
                     role = entryObject.stringField("role"),
                     timestamp = entryObject.stringField("timestamp"),
                     preview = entryObject.stringField("preview") ?: "entry",
+                    label = entryObject.stringField("label"),
+                    isBookmarked = entryObject.booleanField("isBookmarked") ?: false,
                 )
             }
         }.getOrNull() ?: emptyList()

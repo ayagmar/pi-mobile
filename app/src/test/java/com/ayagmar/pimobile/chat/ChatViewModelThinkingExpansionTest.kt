@@ -319,8 +319,10 @@ private class FakeSessionController : SessionController {
 
     override suspend fun getForkMessages(): Result<List<ForkableMessage>> = Result.success(emptyList())
 
-    override suspend fun getSessionTree(sessionPath: String?): Result<SessionTreeSnapshot> =
-        Result.failure(IllegalStateException("Not used"))
+    override suspend fun getSessionTree(
+        sessionPath: String?,
+        filter: String?,
+    ): Result<SessionTreeSnapshot> = Result.failure(IllegalStateException("Not used"))
 
     override suspend fun cycleModel(): Result<ModelInfo?> = Result.success(null)
 

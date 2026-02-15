@@ -27,7 +27,11 @@ export interface SessionTreeEntry {
     role?: string;
     timestamp?: string;
     preview: string;
+    label?: string;
+    isBookmarked: boolean;
 }
+
+export type SessionTreeFilter = "default" | "no-tools" | "user-only" | "labeled-only";
 
 export interface SessionTreeSnapshot {
     sessionPath: string;
@@ -38,7 +42,7 @@ export interface SessionTreeSnapshot {
 
 export interface SessionIndexer {
     listSessions(): Promise<SessionIndexGroup[]>;
-    getSessionTree(sessionPath: string): Promise<SessionTreeSnapshot>;
+    getSessionTree(sessionPath: string, filter?: SessionTreeFilter): Promise<SessionTreeSnapshot>;
 }
 
 export interface SessionIndexerOptions {
@@ -78,9 +82,9 @@ export function createSessionIndexer(options: SessionIndexerOptions): SessionInd
             return groupedSessions;
         },
 
-        async getSessionTree(sessionPath: string): Promise<SessionTreeSnapshot> {
+        async getSessionTree(sessionPath: string, filter?: SessionTreeFilter): Promise<SessionTreeSnapshot> {
             const resolvedSessionPath = resolveSessionPath(sessionPath, sessionsRoot);
-            return parseSessionTreeFile(resolvedSessionPath, options.logger);
+            return parseSessionTreeFile(resolvedSessionPath, options.logger, filter);
         },
     };
 }
@@ -212,7 +216,11 @@ async function parseSessionFile(sessionPath: string, logger: Logger): Promise<Se
     };
 }
 
-async function parseSessionTreeFile(sessionPath: string, logger: Logger): Promise<SessionTreeSnapshot> {
+async function parseSessionTreeFile(
+    sessionPath: string,
+    logger: Logger,
+    filter: SessionTreeFilter = "default",
+): Promise<SessionTreeSnapshot> {
     let fileContent: string;
 
     try {
@@ -236,12 +244,12 @@ async function parseSessionTreeFile(sessionPath: string, logger: Logger): Promis
         throw new Error("Invalid session header");
     }
 
+    const rawEntries = lines.slice(1).map(tryParseJson).filter((entry): entry is Record<string, unknown> => !!entry);
+    const labelsByTargetId = collectLabelsByTargetId(rawEntries);
+
     const entries: SessionTreeEntry[] = [];
 
-    for (const line of lines.slice(1)) {
-        const entry = tryParseJson(line);
-        if (!entry) continue;
-
+    for (const entry of rawEntries) {
         const entryId = typeof entry.id === "string" ? entry.id : undefined;
         if (!entryId) continue;
 
@@ -252,6 +260,7 @@ async function parseSessionTreeFile(sessionPath: string, logger: Logger): Promis
         const messageRecord = isRecord(entry.message) ? entry.message : undefined;
         const role = typeof messageRecord?.role === "string" ? messageRecord.role : undefined;
         const preview = extractEntryPreview(entry, messageRecord);
+        const label = labelsByTargetId.get(entryId);
 
         entries.push({
             entryId,
@@ -260,18 +269,63 @@ async function parseSessionTreeFile(sessionPath: string, logger: Logger): Promis
             role,
             timestamp,
             preview,
+            label,
+            isBookmarked: label !== undefined,
         });
     }
 
-    const rootIds = entries.filter((entry) => entry.parentId === null).map((entry) => entry.entryId);
     const currentLeafId = entries.length > 0 ? entries[entries.length - 1].entryId : undefined;
+    const filteredEntries = applyTreeFilter(entries, filter);
+    const filteredEntryIds = new Set(filteredEntries.map((entry) => entry.entryId));
+    const rootIds = filteredEntries
+        .filter((entry) => entry.parentId === null || !filteredEntryIds.has(entry.parentId))
+        .map((entry) => entry.entryId);
 
     return {
         sessionPath,
         rootIds,
         currentLeafId,
-        entries,
+        entries: filteredEntries,
     };
+}
+
+function collectLabelsByTargetId(entries: Record<string, unknown>[]): Map<string, string> {
+    const labelsByTargetId = new Map<string, string>();
+
+    for (const entry of entries) {
+        if (entry.type !== "label") continue;
+        if (typeof entry.targetId !== "string") continue;
+
+        if (typeof entry.label === "string") {
+            const normalizedLabel = normalizePreview(entry.label);
+            if (normalizedLabel) {
+                labelsByTargetId.set(entry.targetId, normalizedLabel);
+                continue;
+            }
+        }
+
+        labelsByTargetId.delete(entry.targetId);
+    }
+
+    return labelsByTargetId;
+}
+
+function applyTreeFilter(
+    entries: SessionTreeEntry[],
+    filter: SessionTreeFilter,
+): SessionTreeEntry[] {
+    switch (filter) {
+        case "default":
+            return entries.filter((entry) => entry.entryType !== "label" && entry.entryType !== "custom");
+        case "no-tools":
+            return entries.filter((entry) => entry.role !== "toolResult");
+        case "user-only":
+            return entries.filter((entry) => entry.role === "user");
+        case "labeled-only":
+            return entries.filter((entry) => entry.isBookmarked || entry.entryType === "label");
+        default:
+            return entries;
+    }
 }
 
 function extractEntryPreview(
@@ -280,6 +334,14 @@ function extractEntryPreview(
 ): string {
     if (entry.type === "session_info" && typeof entry.name === "string") {
         return normalizePreview(entry.name) ?? "session info";
+    }
+
+    if (entry.type === "label" && typeof entry.label === "string") {
+        return normalizePreview(`[${entry.label}]`) ?? "label";
+    }
+
+    if (entry.type === "branch_summary" && typeof entry.summary === "string") {
+        return normalizePreview(entry.summary) ?? "branch summary";
     }
 
     if (messageRecord) {

@@ -7,7 +7,7 @@ import { WebSocket as WsWebSocket, WebSocketServer, type RawData, type WebSocket
 import type { BridgeConfig } from "./config.js";
 import type { PiProcessManager } from "./process-manager.js";
 import { createPiProcessManager } from "./process-manager.js";
-import type { SessionIndexer } from "./session-indexer.js";
+import type { SessionIndexer, SessionTreeFilter } from "./session-indexer.js";
 import { createSessionIndexer } from "./session-indexer.js";
 import {
     createBridgeEnvelope,
@@ -344,8 +344,24 @@ async function handleBridgeControlMessage(
             return;
         }
 
+        const requestedFilterRaw =
+            typeof payload.filter === "string" ? payload.filter : undefined;
+        if (requestedFilterRaw && !isSessionTreeFilter(requestedFilterRaw)) {
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "invalid_tree_filter",
+                        "filter must be one of: default, no-tools, user-only, labeled-only",
+                    ),
+                ),
+            );
+            return;
+        }
+
+        const requestedFilter = requestedFilterRaw as SessionTreeFilter | undefined;
+
         try {
-            const tree = await sessionIndexer.getSessionTree(sessionPath);
+            const tree = await sessionIndexer.getSessionTree(sessionPath, requestedFilter);
             client.send(
                 JSON.stringify(
                     createBridgeEnvelope({
@@ -651,6 +667,10 @@ function getHeaderToken(request: http.IncomingMessage): string | undefined {
     if (typeof tokenHeader === "string") return tokenHeader;
 
     return tokenHeader[0];
+}
+
+function isSessionTreeFilter(value: string): value is SessionTreeFilter {
+    return value === "default" || value === "no-tools" || value === "user-only" || value === "labeled-only";
 }
 
 function sanitizeClientId(clientIdRaw: string | undefined): string | undefined {

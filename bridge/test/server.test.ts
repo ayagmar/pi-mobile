@@ -185,6 +185,7 @@ describe("bridge websocket server", () => {
                         entryType: "message",
                         role: "user",
                         preview: "start",
+                        isBookmarked: false,
                     },
                     {
                         entryId: "m2",
@@ -192,6 +193,8 @@ describe("bridge websocket server", () => {
                         entryType: "message",
                         role: "assistant",
                         preview: "answer",
+                        label: "checkpoint",
+                        isBookmarked: true,
                     },
                 ],
             },
@@ -224,6 +227,72 @@ describe("bridge websocket server", () => {
         expect(treeEnvelope.payload?.sessionPath).toBe("/tmp/session-tree.jsonl");
         expect(treeEnvelope.payload?.rootIds).toEqual(["m1"]);
         expect(treeEnvelope.payload?.currentLeafId).toBe("m2");
+
+        const entries = Array.isArray(treeEnvelope.payload?.entries)
+            ? treeEnvelope.payload.entries as Array<Record<string, unknown>>
+            : [];
+        expect(entries[1]?.label).toBe("checkpoint");
+        expect(entries[1]?.isBookmarked).toBe(true);
+
+        ws.close();
+    });
+
+    it("forwards tree filter to session indexer", async () => {
+        const fakeSessionIndexer = new FakeSessionIndexer();
+        const { baseUrl, server } = await startBridgeServer({ sessionIndexer: fakeSessionIndexer });
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const waitForTree = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_session_tree");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_get_session_tree",
+                    sessionPath: "/tmp/session-tree.jsonl",
+                    filter: "user-only",
+                },
+            }),
+        );
+
+        await waitForTree;
+        expect(fakeSessionIndexer.requestedFilter).toBe("user-only");
+
+        ws.close();
+    });
+
+    it("returns bridge_error for invalid bridge_get_session_tree filter", async () => {
+        const { baseUrl, server } = await startBridgeServer();
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const waitForError = waitForEnvelope(ws, (envelope) => {
+            return envelope.payload?.type === "bridge_error" && envelope.payload?.code === "invalid_tree_filter";
+        });
+
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_get_session_tree",
+                    sessionPath: "/tmp/session-tree.jsonl",
+                    filter: "invalid",
+                },
+            }),
+        );
+
+        const errorEnvelope = await waitForError;
+        expect(errorEnvelope.payload?.message).toContain("filter must be one of");
 
         ws.close();
     });
@@ -659,9 +728,10 @@ class FakeSessionIndexer implements SessionIndexer {
     listCalls = 0;
     treeCalls = 0;
     requestedSessionPath: string | undefined;
+    requestedFilter: string | undefined;
 
     constructor(
-        private readonly groups: SessionIndexGroup[],
+        private readonly groups: SessionIndexGroup[] = [],
         private readonly tree: SessionTreeSnapshot = {
             sessionPath: "/tmp/test-session.jsonl",
             rootIds: [],
@@ -674,9 +744,11 @@ class FakeSessionIndexer implements SessionIndexer {
         return this.groups;
     }
 
-    async getSessionTree(sessionPath: string): Promise<SessionTreeSnapshot> {
+    async getSessionTree(sessionPath: string, filter?: "default" | "no-tools" | "user-only" | "labeled-only"):
+        Promise<SessionTreeSnapshot> {
         this.treeCalls += 1;
         this.requestedSessionPath = sessionPath;
+        this.requestedFilter = filter;
         return this.tree;
     }
 }
