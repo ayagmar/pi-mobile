@@ -112,6 +112,12 @@ class ChatViewModel(
         val pendingImages = currentState.pendingImages
         if (message.isEmpty() && pendingImages.isEmpty()) return
 
+        val builtinCommand = message.extractBuiltinCommand()
+        if (builtinCommand != null) {
+            handleNonRpcBuiltinCommand(builtinCommand)
+            return
+        }
+
         // Record prompt send for TTFT tracking
         PerformanceMetrics.recordPromptSend()
         hasRecordedFirstToken = false
@@ -255,14 +261,22 @@ class ChatViewModel(
     }
 
     fun onCommandSelected(command: SlashCommandInfo) {
-        val currentText = _uiState.value.inputText
-        val newText = replaceTrailingSlashToken(currentText, command.name)
-        _uiState.update {
-            it.copy(
-                inputText = newText,
-                isCommandPaletteVisible = false,
-                isCommandPaletteAutoOpened = false,
-            )
+        when (command.source) {
+            COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+            COMMAND_SOURCE_BUILTIN_UNSUPPORTED,
+            -> handleNonRpcBuiltinCommand(command.name)
+
+            else -> {
+                val currentText = _uiState.value.inputText
+                val newText = replaceTrailingSlashToken(currentText, command.name)
+                _uiState.update {
+                    it.copy(
+                        inputText = newText,
+                        isCommandPaletteVisible = false,
+                        isCommandPaletteAutoOpened = false,
+                    )
+                }
+            }
         }
     }
 
@@ -293,6 +307,40 @@ class ChatViewModel(
         }
     }
 
+    private fun handleNonRpcBuiltinCommand(commandName: String) {
+        val normalized = commandName.lowercase()
+
+        _uiState.update {
+            it.copy(
+                isCommandPaletteVisible = false,
+                isCommandPaletteAutoOpened = false,
+                commandsQuery = "",
+            )
+        }
+
+        when (normalized) {
+            BUILTIN_TREE_COMMAND -> showTreeSheet()
+            BUILTIN_STATS_COMMAND -> showStatsSheet()
+            BUILTIN_SETTINGS_COMMAND -> {
+                _uiState.update {
+                    it.copy(errorMessage = "Use the Settings tab for /settings on mobile")
+                }
+            }
+
+            BUILTIN_HOTKEYS_COMMAND -> {
+                _uiState.update {
+                    it.copy(errorMessage = "/hotkeys is not supported on mobile yet")
+                }
+            }
+
+            else -> {
+                _uiState.update {
+                    it.copy(errorMessage = "/$normalized is interactive-only and unavailable via RPC prompt")
+                }
+            }
+        }
+    }
+
     private fun loadCommands() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingCommands = true) }
@@ -300,19 +348,42 @@ class ChatViewModel(
             if (result.isSuccess) {
                 _uiState.update {
                     it.copy(
-                        commands = result.getOrNull() ?: emptyList(),
+                        commands = mergeRpcCommandsWithBuiltins(result.getOrNull().orEmpty()),
                         isLoadingCommands = false,
                     )
                 }
             } else {
                 _uiState.update {
                     it.copy(
+                        commands = mergeRpcCommandsWithBuiltins(emptyList()),
                         isLoadingCommands = false,
                         errorMessage = result.exceptionOrNull()?.message,
                     )
                 }
             }
         }
+    }
+
+    private fun mergeRpcCommandsWithBuiltins(rpcCommands: List<SlashCommandInfo>): List<SlashCommandInfo> {
+        if (rpcCommands.isEmpty()) {
+            return BUILTIN_COMMANDS
+        }
+
+        val knownNames = rpcCommands.map { it.name.lowercase() }.toSet()
+        val missingBuiltins = BUILTIN_COMMANDS.filterNot { it.name.lowercase() in knownNames }
+        return rpcCommands + missingBuiltins
+    }
+
+    private fun String.extractBuiltinCommand(): String? {
+        val commandName =
+            trim().substringBefore(' ')
+                .takeIf { token -> token.startsWith('/') }
+                ?.removePrefix("/")
+                ?.trim()
+                ?.lowercase()
+                .orEmpty()
+
+        return commandName.takeIf { name -> name.isNotBlank() && BUILTIN_COMMAND_NAMES.contains(name) }
     }
 
     fun toggleToolExpansion(itemId: String) {
@@ -1284,6 +1355,48 @@ class ChatViewModel(
         const val TREE_FILTER_NO_TOOLS = "no-tools"
         const val TREE_FILTER_USER_ONLY = "user-only"
         const val TREE_FILTER_LABELED_ONLY = "labeled-only"
+
+        const val COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED = "builtin-bridge-backed"
+        const val COMMAND_SOURCE_BUILTIN_UNSUPPORTED = "builtin-unsupported"
+
+        private const val BUILTIN_SETTINGS_COMMAND = "settings"
+        private const val BUILTIN_TREE_COMMAND = "tree"
+        private const val BUILTIN_STATS_COMMAND = "stats"
+        private const val BUILTIN_HOTKEYS_COMMAND = "hotkeys"
+
+        private val BUILTIN_COMMANDS =
+            listOf(
+                SlashCommandInfo(
+                    name = BUILTIN_SETTINGS_COMMAND,
+                    description = "Open mobile settings UI (interactive-only in TUI)",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_TREE_COMMAND,
+                    description = "Open session tree sheet (interactive-only in TUI)",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_STATS_COMMAND,
+                    description = "Open session stats sheet (interactive-only in TUI)",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_HOTKEYS_COMMAND,
+                    description = "Not available on mobile yet",
+                    source = COMMAND_SOURCE_BUILTIN_UNSUPPORTED,
+                    location = null,
+                    path = null,
+                ),
+            )
+
+        private val BUILTIN_COMMAND_NAMES = BUILTIN_COMMANDS.map { it.name }.toSet()
 
         private val SLASH_COMMAND_TOKEN_REGEX = Regex("^/([a-zA-Z0-9:_-]*)$")
 

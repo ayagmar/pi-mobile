@@ -301,6 +301,82 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun loadingCommandsAddsBuiltinCommandEntriesWithExplicitSupport() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.availableCommands =
+                listOf(
+                    SlashCommandInfo(
+                        name = "fix-tests",
+                        description = "Fix failing tests",
+                        source = "prompt",
+                        location = "project",
+                        path = "/tmp/fix-tests.md",
+                    ),
+                )
+
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.showCommandPalette()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val commands = viewModel.uiState.value.commands
+            assertTrue(commands.any { it.name == "fix-tests" && it.source == "prompt" })
+            assertTrue(
+                commands.any {
+                    it.name == "settings" &&
+                        it.source == ChatViewModel.COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED
+                },
+            )
+            assertTrue(
+                commands.any {
+                    it.name == "hotkeys" &&
+                        it.source == ChatViewModel.COMMAND_SOURCE_BUILTIN_UNSUPPORTED
+                },
+            )
+        }
+
+    @Test
+    fun sendingInteractiveBuiltinShowsExplicitMessageWithoutRpcSend() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("/settings")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(0, controller.sendPromptCallCount)
+            assertTrue(viewModel.uiState.value.errorMessage?.contains("Settings tab") == true)
+        }
+
+    @Test
+    fun selectingBridgeBackedBuiltinTreeOpensTreeSheet() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onCommandSelected(
+                SlashCommandInfo(
+                    name = "tree",
+                    description = "Open tree",
+                    source = ChatViewModel.COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value.isTreeSheetVisible)
+        }
+
+    @Test
     fun initialHistoryLoadsWithWindowAndCanPageOlderMessages() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
@@ -423,6 +499,7 @@ private class FakeSessionController : SessionController {
 
     var availableCommands: List<SlashCommandInfo> = emptyList()
     var getCommandsCallCount: Int = 0
+    var sendPromptCallCount: Int = 0
     var messagesPayload: JsonObject? = null
 
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = events
@@ -469,7 +546,10 @@ private class FakeSessionController : SessionController {
     override suspend fun sendPrompt(
         message: String,
         images: List<ImagePayload>,
-    ): Result<Unit> = Result.success(Unit)
+    ): Result<Unit> {
+        sendPromptCallCount += 1
+        return Result.success(Unit)
+    }
 
     override suspend fun abort(): Result<Unit> = Result.success(Unit)
 

@@ -48,7 +48,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 |---|---|---|---|---|---|---|
 | 5 | Q1 Fix image-only prompt mismatch | DONE | fix(chat): allow image-only prompt flow and guard failed image encoding |  | ktlint✅ detekt✅ test✅ bridge✅ | ChatViewModel now allows empty text when image payloads exist |
 | 6 | Q2 Add full tree filters (`all` included) | DONE | feat(tree): add all filter end-to-end (bridge + app) |  | ktlint✅ detekt✅ test✅ bridge✅ | Added `all` in bridge validator/indexer + chat tree filter chips |
-| 7 | Q3 Command palette built-in parity layer | TODO |  |  |  |  |
+| 7 | Q3 Command palette built-in parity layer | DONE | feat(chat): add built-in command support states in palette |  | ktlint✅ detekt✅ test✅ bridge✅ | Built-ins now appear as supported/bridge-backed/unsupported with explicit behavior |
 | 8 | Q4 Global collapse/expand controls | TODO |  |  |  |  |
 | 9 | Q5 Wire frame metrics into live chat | TODO |  |  |  |  |
 | 10 | Q6 Transport preference setting parity | TODO |  |  |  |  |
@@ -195,15 +195,33 @@ Notes/blockers:
 - Added app-side tree filter option chip for `all`.
 ```
 
+### 2026-02-15
+
+```text
+Task: Q3
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Command palette now labels commands as supported / bridge-backed / unsupported.
+- Added explicit built-in entries for interactive TUI commands omitted by RPC get_commands.
+- Selecting or sending interactive-only built-ins now shows explicit mobile UX instead of silent no-op.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 6
+- Backlog done: 7
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 20
+- Backlog remaining (not done): 19
 - Reference completed items (not counted in backlog): 6
 
 ---

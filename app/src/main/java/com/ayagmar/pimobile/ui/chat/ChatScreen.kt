@@ -670,6 +670,57 @@ private fun NotificationsDisplay(
     }
 }
 
+private data class PaletteCommandItem(
+    val command: SlashCommandInfo,
+    val support: CommandSupport,
+)
+
+private enum class CommandSupport {
+    SUPPORTED,
+    BRIDGE_BACKED,
+    UNSUPPORTED,
+}
+
+private val COMMAND_SUPPORT_ORDER =
+    listOf(
+        CommandSupport.SUPPORTED,
+        CommandSupport.BRIDGE_BACKED,
+        CommandSupport.UNSUPPORTED,
+    )
+
+private val CommandSupport.groupLabel: String
+    get() =
+        when (this) {
+            CommandSupport.SUPPORTED -> "Supported"
+            CommandSupport.BRIDGE_BACKED -> "Bridge-backed"
+            CommandSupport.UNSUPPORTED -> "Unsupported"
+        }
+
+private val CommandSupport.badge: String
+    get() =
+        when (this) {
+            CommandSupport.SUPPORTED -> "supported"
+            CommandSupport.BRIDGE_BACKED -> "bridge-backed"
+            CommandSupport.UNSUPPORTED -> "unsupported"
+        }
+
+@Composable
+private fun CommandSupport.color(): Color {
+    return when (this) {
+        CommandSupport.SUPPORTED -> MaterialTheme.colorScheme.primary
+        CommandSupport.BRIDGE_BACKED -> MaterialTheme.colorScheme.tertiary
+        CommandSupport.UNSUPPORTED -> MaterialTheme.colorScheme.error
+    }
+}
+
+private fun commandSupport(command: SlashCommandInfo): CommandSupport {
+    return when (command.source) {
+        ChatViewModel.COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED -> CommandSupport.BRIDGE_BACKED
+        ChatViewModel.COMMAND_SOURCE_BUILTIN_UNSUPPORTED -> CommandSupport.UNSUPPORTED
+        else -> CommandSupport.SUPPORTED
+    }
+}
+
 @Suppress("LongParameterList", "LongMethod")
 @Composable
 private fun CommandPalette(
@@ -695,9 +746,19 @@ private fun CommandPalette(
             }
         }
 
-    val groupedCommands =
+    val filteredPaletteCommands =
         remember(filteredCommands) {
-            filteredCommands.groupBy { it.source }
+            filteredCommands.map { command ->
+                PaletteCommandItem(
+                    command = command,
+                    support = commandSupport(command),
+                )
+            }
+        }
+
+    val groupedCommands =
+        remember(filteredPaletteCommands) {
+            filteredPaletteCommands.groupBy { item -> item.support }
         }
 
     androidx.compose.material3.AlertDialog(
@@ -722,7 +783,7 @@ private fun CommandPalette(
                     ) {
                         CircularProgressIndicator()
                     }
-                } else if (filteredCommands.isEmpty()) {
+                } else if (filteredPaletteCommands.isEmpty()) {
                     Text(
                         text = "No commands found",
                         style = MaterialTheme.typography.bodyMedium,
@@ -732,10 +793,15 @@ private fun CommandPalette(
                     LazyColumn(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        groupedCommands.forEach { (source, commandsInGroup) ->
+                        COMMAND_SUPPORT_ORDER.forEach { support ->
+                            val commandsInGroup = groupedCommands[support].orEmpty()
+                            if (commandsInGroup.isEmpty()) {
+                                return@forEach
+                            }
+
                             item {
                                 Text(
-                                    text = source.replaceFirstChar { it.uppercase() },
+                                    text = support.groupLabel,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(vertical = 4.dp),
@@ -743,11 +809,12 @@ private fun CommandPalette(
                             }
                             items(
                                 items = commandsInGroup,
-                                key = { command -> "${command.source}:${command.name}" },
-                            ) { command ->
+                                key = { item -> "${item.command.source}:${item.command.name}" },
+                            ) { item ->
                                 CommandItem(
-                                    command = command,
-                                    onClick = { onCommandSelected(command) },
+                                    command = item.command,
+                                    support = item.support,
+                                    onClick = { onCommandSelected(item.command) },
                                 )
                             }
                         }
@@ -767,6 +834,7 @@ private fun CommandPalette(
 @Composable
 private fun CommandItem(
     command: SlashCommandInfo,
+    support: CommandSupport,
     onClick: () -> Unit,
 ) {
     TextButton(
@@ -776,16 +844,35 @@ private fun CommandItem(
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text(
-                text = "/${command.name}",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "/${command.name}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = support.badge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = support.color(),
+                )
+            }
             command.description?.let { desc ->
                 Text(
                     text = desc,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (support == CommandSupport.SUPPORTED) {
+                Text(
+                    text = "Source: ${command.source}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
                 )
             }
         }
