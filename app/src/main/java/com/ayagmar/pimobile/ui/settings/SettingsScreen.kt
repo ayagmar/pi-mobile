@@ -82,6 +82,8 @@ private fun SettingsScreen(viewModel: SettingsViewModel) {
             isLoading = uiState.isLoading,
         )
 
+        ChatHelpCard()
+
         AppInfoCard(
             version = uiState.appVersion,
         )
@@ -363,6 +365,64 @@ private fun SessionActionsCard(
                 Text("New Session")
             }
         }
+    }
+}
+
+@Composable
+private fun ChatHelpCard() {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Chat actions & gestures",
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            HelpItem(
+                action = "Send",
+                help = "Tap the send icon or use keyboard Send action",
+            )
+            HelpItem(
+                action = "Commands",
+                help = "Tap the menu icon in the prompt field to open slash commands",
+            )
+            HelpItem(
+                action = "Model",
+                help = "Tap model chip to cycle; long-press to open full picker",
+            )
+            HelpItem(
+                action = "Thinking/Tool output",
+                help = "Tap show more/show less to expand or collapse long sections",
+            )
+            HelpItem(
+                action = "Tree",
+                help = "Open Tree from chat header to inspect branches and fork from entries",
+            )
+            HelpItem(
+                action = "Bash & Stats",
+                help = "Use terminal and chart icons in chat header",
+            )
+        }
+    }
+}
+
+@Composable
+private fun HelpItem(
+    action: String,
+    help: String,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = action,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = help,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
