@@ -135,6 +135,11 @@ private data class DiffPresentationLine(
     val highlightSpans: List<HighlightSpan>,
 )
 
+private data class DiffComputationState(
+    val lines: List<DiffPresentationLine>,
+    val isLoading: Boolean,
+)
+
 @Composable
 fun DiffViewer(
     diffInfo: EditDiffInfo,
@@ -146,9 +151,15 @@ fun DiffViewer(
     val clipboardManager = LocalClipboardManager.current
     val syntaxLanguage = remember(diffInfo.path) { detectSyntaxLanguage(diffInfo.path) }
     val diffColors = rememberDiffViewerColors()
-    val presentationLines by
-        produceState(initialValue = emptyList<DiffPresentationLine>(), diffInfo, style.contextLines, syntaxLanguage) {
-            value =
+    val computationState by
+        produceState(
+            initialValue = DiffComputationState(lines = emptyList(), isLoading = true),
+            diffInfo,
+            style.contextLines,
+            syntaxLanguage,
+        ) {
+            value = value.copy(isLoading = true)
+            val computedLines =
                 withContext(Dispatchers.Default) {
                     computeDiffPresentationLines(
                         diffInfo = diffInfo,
@@ -156,12 +167,14 @@ fun DiffViewer(
                         syntaxLanguage = syntaxLanguage,
                     )
                 }
+            value = DiffComputationState(lines = computedLines, isLoading = false)
         }
+
     val displayLines =
-        if (isCollapsed && presentationLines.size > style.collapsedDiffLines) {
-            presentationLines.take(style.collapsedDiffLines)
+        if (isCollapsed && computationState.lines.size > style.collapsedDiffLines) {
+            computationState.lines.take(style.collapsedDiffLines)
         } else {
-            presentationLines
+            computationState.lines
         }
 
     Card(
@@ -181,8 +194,12 @@ fun DiffViewer(
                 colors = diffColors,
             )
 
+            if (computationState.isLoading) {
+                DiffLoadingRow(style = style)
+            }
+
             DiffCollapseToggle(
-                totalLines = presentationLines.size,
+                totalLines = computationState.lines.size,
                 isCollapsed = isCollapsed,
                 style = style,
                 onToggleCollapse = onToggleCollapse,
@@ -211,6 +228,22 @@ private fun DiffLinesList(
             )
         }
     }
+}
+
+@Composable
+private fun DiffLoadingRow(style: DiffViewerStyle) {
+    Text(
+        text = stringResource(id = R.string.diff_viewer_loading),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = style.skippedLineHorizontalPadding,
+                    vertical = style.skippedLineVerticalPadding,
+                ),
+    )
 }
 
 @Composable
