@@ -44,6 +44,7 @@ import io.noties.prism4j.AbsVisitor
 import io.noties.prism4j.Prism4j
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.LinkedHashMap
 
 private const val DEFAULT_COLLAPSED_DIFF_LINES = 120
 private const val DEFAULT_CONTEXT_LINES = 3
@@ -115,10 +116,22 @@ private enum class SyntaxLanguage(
     PLAIN(null),
 }
 
+private enum class HighlightKind {
+    COMMENT,
+    STRING,
+    NUMBER,
+    KEYWORD,
+}
+
 private data class HighlightSpan(
     val start: Int,
     val end: Int,
-    val style: SpanStyle,
+    val kind: HighlightKind,
+)
+
+private data class DiffPresentationLine(
+    val line: DiffLine,
+    val highlightSpans: List<HighlightSpan>,
 )
 
 @Composable
@@ -132,18 +145,22 @@ fun DiffViewer(
     val clipboardManager = LocalClipboardManager.current
     val syntaxLanguage = remember(diffInfo.path) { detectSyntaxLanguage(diffInfo.path) }
     val diffColors = rememberDiffViewerColors()
-    val diffLines by
-        produceState(initialValue = emptyList(), diffInfo, style.contextLines) {
+    val presentationLines by
+        produceState(initialValue = emptyList<DiffPresentationLine>(), diffInfo, style.contextLines, syntaxLanguage) {
             value =
                 withContext(Dispatchers.Default) {
-                    computeDiffLines(diffInfo, style.contextLines)
+                    computeDiffPresentationLines(
+                        diffInfo = diffInfo,
+                        contextLines = style.contextLines,
+                        syntaxLanguage = syntaxLanguage,
+                    )
                 }
         }
     val displayLines =
-        if (isCollapsed && diffLines.size > style.collapsedDiffLines) {
-            diffLines.take(style.collapsedDiffLines)
+        if (isCollapsed && presentationLines.size > style.collapsedDiffLines) {
+            presentationLines.take(style.collapsedDiffLines)
         } else {
-            diffLines
+            presentationLines
         }
 
     Card(
@@ -159,13 +176,12 @@ fun DiffViewer(
 
             DiffLinesList(
                 lines = displayLines,
-                syntaxLanguage = syntaxLanguage,
                 style = style,
                 colors = diffColors,
             )
 
             DiffCollapseToggle(
-                totalLines = diffLines.size,
+                totalLines = presentationLines.size,
                 isCollapsed = isCollapsed,
                 style = style,
                 onToggleCollapse = onToggleCollapse,
@@ -176,8 +192,7 @@ fun DiffViewer(
 
 @Composable
 private fun DiffLinesList(
-    lines: List<DiffLine>,
-    syntaxLanguage: SyntaxLanguage,
+    lines: List<DiffPresentationLine>,
     style: DiffViewerStyle,
     colors: DiffViewerColors,
 ) {
@@ -187,10 +202,9 @@ private fun DiffLinesList(
                 .fillMaxWidth()
                 .padding(horizontal = style.contentHorizontalPadding),
     ) {
-        items(lines) { line ->
+        items(lines) { presentationLine ->
             DiffLineItem(
-                line = line,
-                syntaxLanguage = syntaxLanguage,
+                presentationLine = presentationLine,
                 style = style,
                 colors = colors,
             )
@@ -262,11 +276,12 @@ private fun DiffHeader(
 
 @Composable
 private fun DiffLineItem(
-    line: DiffLine,
-    syntaxLanguage: SyntaxLanguage,
+    presentationLine: DiffPresentationLine,
     style: DiffViewerStyle,
     colors: DiffViewerColors,
 ) {
+    val line = presentationLine.line
+
     if (line.type == DiffLineType.SKIPPED) {
         SkippedDiffLine(line = line, style = style)
         return
@@ -306,7 +321,13 @@ private fun DiffLineItem(
 
         SelectionContainer {
             Text(
-                text = buildHighlightedDiffLine(line, syntaxLanguage, contentColor, colors),
+                text =
+                    buildHighlightedDiffLine(
+                        line = line,
+                        baseContentColor = contentColor,
+                        colors = colors,
+                        highlightSpans = presentationLine.highlightSpans,
+                    ),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -358,9 +379,9 @@ private fun LineNumberCell(
 
 private fun buildHighlightedDiffLine(
     line: DiffLine,
-    syntaxLanguage: SyntaxLanguage,
     baseContentColor: Color,
     colors: DiffViewerColors,
+    highlightSpans: List<HighlightSpan>,
 ): AnnotatedString {
     val prefix =
         when (line.type) {
@@ -380,50 +401,92 @@ private fun buildHighlightedDiffLine(
         addStyle(baseStyle, start = 0, end = length)
 
         val offset = 2
-        computeHighlightSpans(content, syntaxLanguage, colors).forEach { span ->
-            addStyle(span.style, start = span.start + offset, end = span.end + offset)
+        highlightSpans.forEach { span ->
+            addStyle(
+                style = highlightKindStyle(span.kind, colors),
+                start = span.start + offset,
+                end = span.end + offset,
+            )
         }
+    }
+}
+
+private fun computeDiffPresentationLines(
+    diffInfo: EditDiffInfo,
+    contextLines: Int,
+    syntaxLanguage: SyntaxLanguage,
+): List<DiffPresentationLine> {
+    val diffLines = computeDiffLines(diffInfo = diffInfo, contextLines = contextLines)
+    return diffLines.map { line ->
+        val spans =
+            if (line.type == DiffLineType.SKIPPED || line.content.isEmpty()) {
+                emptyList()
+            } else {
+                computeHighlightSpans(content = line.content, language = syntaxLanguage)
+            }
+        DiffPresentationLine(
+            line = line,
+            highlightSpans = spans,
+        )
     }
 }
 
 private fun computeHighlightSpans(
     content: String,
     language: SyntaxLanguage,
-    colors: DiffViewerColors,
 ): List<HighlightSpan> {
     return PrismDiffHighlighter.highlight(
         content = content,
         language = language,
-        colors = colors,
     )
 }
 
 private object PrismDiffHighlighter {
+    private const val MAX_CACHE_ENTRIES = 256
+
     private val prism4j by lazy {
         Prism4j(DiffPrism4jGrammarLocator())
     }
 
+    private val cache =
+        object : LinkedHashMap<String, List<HighlightSpan>>(MAX_CACHE_ENTRIES, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<HighlightSpan>>?): Boolean {
+                return size > MAX_CACHE_ENTRIES
+            }
+        }
+
     fun highlight(
         content: String,
         language: SyntaxLanguage,
-        colors: DiffViewerColors,
     ): List<HighlightSpan> {
-        return language.prismGrammarName
-            ?.let { grammarName -> prism4j.grammar(grammarName) }
-            ?.let { grammar ->
-                runCatching {
-                    val visitor = PrismHighlightVisitor(colors)
-                    visitor.visit(prism4j.tokenize(content, grammar))
-                    visitor.spans
-                }.getOrDefault(emptyList())
+        val grammarName = language.prismGrammarName ?: return emptyList()
+        val cacheKey = "$grammarName\u0000$content"
+        val cached = synchronized(cache) { cache[cacheKey] }
+
+        val spans =
+            cached ?: computeUncached(content = content, grammarName = grammarName).also { computed ->
+                synchronized(cache) {
+                    cache[cacheKey] = computed
+                }
             }
-            ?: emptyList()
+
+        return spans
+    }
+
+    private fun computeUncached(
+        content: String,
+        grammarName: String,
+    ): List<HighlightSpan> {
+        val grammar = prism4j.grammar(grammarName) ?: return emptyList()
+        return runCatching {
+            val visitor = PrismHighlightVisitor()
+            visitor.visit(prism4j.tokenize(content, grammar))
+            visitor.spans
+        }.getOrDefault(emptyList())
     }
 }
 
-private class PrismHighlightVisitor(
-    private val colors: DiffViewerColors,
-) : AbsVisitor() {
+private class PrismHighlightVisitor : AbsVisitor() {
     private val mutableSpans = mutableListOf<HighlightSpan>()
     private var cursor = 0
 
@@ -443,34 +506,44 @@ private class PrismHighlightVisitor(
             return
         }
 
-        tokenStyle(
+        tokenKind(
             tokenType = syntax.type(),
             alias = syntax.alias(),
-            colors = colors,
-        )?.let { style ->
+        )?.let { kind ->
             mutableSpans +=
                 HighlightSpan(
                     start = start,
                     end = end,
-                    style = style,
+                    kind = kind,
                 )
         }
     }
 }
 
-private fun tokenStyle(
+private fun tokenKind(
     tokenType: String?,
     alias: String?,
-    colors: DiffViewerColors,
-): SpanStyle? {
+): HighlightKind? {
     val tokenDescriptor = listOfNotNull(tokenType, alias).joinToString(separator = " ").lowercase()
 
     return when {
-        tokenDescriptor.containsAny(COMMENT_TOKEN_MARKERS) -> SpanStyle(color = colors.commentText)
-        tokenDescriptor.containsAny(STRING_TOKEN_MARKERS) -> SpanStyle(color = colors.stringText)
-        tokenDescriptor.containsAny(NUMBER_TOKEN_MARKERS) -> SpanStyle(color = colors.numberText)
-        tokenDescriptor.containsAny(KEYWORD_TOKEN_MARKERS) -> SpanStyle(color = colors.keywordText)
+        tokenDescriptor.containsAny(COMMENT_TOKEN_MARKERS) -> HighlightKind.COMMENT
+        tokenDescriptor.containsAny(STRING_TOKEN_MARKERS) -> HighlightKind.STRING
+        tokenDescriptor.containsAny(NUMBER_TOKEN_MARKERS) -> HighlightKind.NUMBER
+        tokenDescriptor.containsAny(KEYWORD_TOKEN_MARKERS) -> HighlightKind.KEYWORD
         else -> null
+    }
+}
+
+private fun highlightKindStyle(
+    kind: HighlightKind,
+    colors: DiffViewerColors,
+): SpanStyle {
+    return when (kind) {
+        HighlightKind.COMMENT -> SpanStyle(color = colors.commentText)
+        HighlightKind.STRING -> SpanStyle(color = colors.stringText)
+        HighlightKind.NUMBER -> SpanStyle(color = colors.numberText)
+        HighlightKind.KEYWORD -> SpanStyle(color = colors.keywordText)
     }
 }
 
