@@ -211,27 +211,33 @@ class PiRpcConnection(
     private suspend fun routeInboundEnvelope(raw: String) {
         val envelope = parseEnvelope(raw = raw, json = json) ?: return
 
-        if (envelope.channel == RPC_CHANNEL) {
-            val rpcMessage = parser.parse(envelope.payload.toString())
-            _rpcEvents.emit(rpcMessage)
+        when (envelope.channel) {
+            RPC_CHANNEL -> {
+                val rpcMessage =
+                    runCatching {
+                        parser.parse(envelope.payload.toString())
+                    }.getOrNull()
+                        ?: return
 
-            if (rpcMessage is RpcResponse) {
-                val responseId = rpcMessage.id
-                if (responseId != null) {
-                    pendingResponses.remove(responseId)?.complete(rpcMessage)
+                _rpcEvents.emit(rpcMessage)
+
+                if (rpcMessage is RpcResponse) {
+                    val responseId = rpcMessage.id
+                    if (responseId != null) {
+                        pendingResponses.remove(responseId)?.complete(rpcMessage)
+                    }
                 }
             }
-            return
-        }
 
-        if (envelope.channel == BRIDGE_CHANNEL) {
-            val bridgeMessage =
-                BridgeMessage(
-                    type = envelope.payload.stringField("type") ?: UNKNOWN_BRIDGE_TYPE,
-                    payload = envelope.payload,
-                )
-            _bridgeEvents.emit(bridgeMessage)
-            bridgeChannels[bridgeMessage.type]?.trySend(bridgeMessage)
+            BRIDGE_CHANNEL -> {
+                val bridgeMessage =
+                    BridgeMessage(
+                        type = envelope.payload.stringField("type") ?: UNKNOWN_BRIDGE_TYPE,
+                        payload = envelope.payload,
+                    )
+                _bridgeEvents.emit(bridgeMessage)
+                bridgeChannels[bridgeMessage.type]?.trySend(bridgeMessage)
+            }
         }
     }
 

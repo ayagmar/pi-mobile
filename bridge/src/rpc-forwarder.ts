@@ -130,7 +130,7 @@ export function createPiRpcForwarder(config: PiRpcForwarderConfig, logger: Logge
             if (!parsedMessage) {
                 logger.warn(
                     {
-                        line,
+                        lineLength: line.length,
                     },
                     "Dropping invalid JSON from pi RPC stdout",
                 );
@@ -145,7 +145,7 @@ export function createPiRpcForwarder(config: PiRpcForwarderConfig, logger: Logge
             crlfDelay: Infinity,
         });
         stderrReader.on("line", (line) => {
-            logger.warn({ line }, "pi RPC stderr");
+            logger.warn({ lineLength: line.length }, "pi RPC stderr");
         });
 
         processRef = child;

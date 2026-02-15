@@ -73,7 +73,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.github.java-diff-utils:java-diff-utils:4.15")
-    implementation("io.noties:prism4j:2.0.0")
+    implementation("io.noties:prism4j:2.0.0") {
+        exclude(group = "org.jetbrains", module = "annotations-java5")
+    }
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

@@ -50,6 +50,31 @@ class PiRpcConnectionTest {
         }
 
     @Test
+    fun `malformed rpc envelope does not stop subsequent requests`() =
+        runBlocking {
+            val transport = FakeSocketTransport()
+            transport.onSend = { outgoing -> transport.respondToOutgoing(outgoing) }
+            val connection = PiRpcConnection(transport = transport)
+
+            connection.connect(
+                PiRpcConnectionConfig(
+                    target = WebSocketTarget(url = "ws://127.0.0.1:3000/ws"),
+                    cwd = "/tmp/project-c",
+                    clientId = "client-c",
+                ),
+            )
+
+            transport.emitRawEnvelope(
+                """{"channel":"rpc","payload":{}}""",
+            )
+
+            val stateResponse = withTimeout(2_000) { connection.requestState() }
+            assertEquals("get_state", stateResponse.command)
+
+            connection.disconnect()
+        }
+
+    @Test
     fun `reconnect transition triggers deterministic resync`() =
         runBlocking {
             val transport = FakeSocketTransport()
@@ -149,6 +174,10 @@ class PiRpcConnectionTest {
                     type.toString().trim('"')
                 }
             }
+        }
+
+        suspend fun emitRawEnvelope(raw: String) {
+            inboundMessages.emit(raw)
         }
 
         suspend fun respondToOutgoing(message: String) {

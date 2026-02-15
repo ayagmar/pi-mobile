@@ -155,7 +155,7 @@ fun ChatRoute() {
     val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
 
     val callbacks =
-        remember {
+        remember(chatViewModel) {
             ChatCallbacks(
                 onToggleToolExpansion = chatViewModel::toggleToolExpansion,
                 onToggleThinkingExpansion = chatViewModel::toggleThinkingExpansion,

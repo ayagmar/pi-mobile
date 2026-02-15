@@ -55,7 +55,7 @@ export function createSessionIndexer(options: SessionIndexerOptions): SessionInd
 
     return {
         async listSessions(): Promise<SessionIndexGroup[]> {
-            const sessionFiles = await findSessionFiles(options.sessionsDirectory, options.logger);
+            const sessionFiles = await findSessionFiles(sessionsRoot, options.logger);
             const sessions: SessionIndexEntry[] = [];
 
             for (const sessionFile of sessionFiles) {
