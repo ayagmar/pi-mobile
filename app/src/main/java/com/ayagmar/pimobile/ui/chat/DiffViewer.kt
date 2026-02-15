@@ -729,8 +729,25 @@ private fun appendRemainingLines(
         cursor.newIndex += 1
     }
 
-    appendRemovedLines(lines, oldLines.drop(cursor.oldIndex), cursor)
-    appendAddedLines(lines, newLines.drop(cursor.newIndex), cursor)
+    while (cursor.oldIndex < oldLines.size) {
+        lines +=
+            DiffLine(
+                type = DiffLineType.REMOVED,
+                content = oldLines[cursor.oldIndex],
+                oldLineNumber = cursor.oldIndex + 1,
+            )
+        cursor.oldIndex += 1
+    }
+
+    while (cursor.newIndex < newLines.size) {
+        lines +=
+            DiffLine(
+                type = DiffLineType.ADDED,
+                content = newLines[cursor.newIndex],
+                newLineNumber = cursor.newIndex + 1,
+            )
+        cursor.newIndex += 1
+    }
 }
 
 private fun collapseToContextHunks(
