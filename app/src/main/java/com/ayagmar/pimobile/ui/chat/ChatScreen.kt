@@ -405,9 +405,21 @@ private fun ChatHeader(
                 }
             }
 
-            // Minimal action buttons - only stats and more menu
+            // Action buttons
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (!isCompact) {
+                    IconButton(onClick = callbacks.onShowTreeSheet) {
+                        Icon(
+                            imageVector = Icons.Default.Folder,
+                            contentDescription = "Tree",
+                        )
+                    }
+                    IconButton(onClick = callbacks.onShowBashDialog) {
+                        Icon(
+                            imageVector = Icons.Default.Terminal,
+                            contentDescription = "Bash",
+                        )
+                    }
                     IconButton(onClick = callbacks.onShowStatsSheet) {
                         Icon(
                             imageVector = Icons.Default.BarChart,
