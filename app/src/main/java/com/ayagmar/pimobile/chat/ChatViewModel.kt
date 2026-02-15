@@ -72,7 +72,36 @@ class ChatViewModel(
     }
 
     fun onInputTextChanged(text: String) {
-        _uiState.update { it.copy(inputText = text) }
+        val slashQuery = extractSlashCommandQuery(text)
+        var shouldLoadCommands = false
+
+        _uiState.update { state ->
+            if (slashQuery != null) {
+                shouldLoadCommands = state.commands.isEmpty() && !state.isLoadingCommands
+                state.copy(
+                    inputText = text,
+                    isCommandPaletteVisible = true,
+                    commandsQuery = slashQuery,
+                    isCommandPaletteAutoOpened = true,
+                )
+            } else {
+                state.copy(
+                    inputText = text,
+                    isCommandPaletteVisible =
+                        if (state.isCommandPaletteAutoOpened) {
+                            false
+                        } else {
+                            state.isCommandPaletteVisible
+                        },
+                    commandsQuery = if (state.isCommandPaletteAutoOpened) "" else state.commandsQuery,
+                    isCommandPaletteAutoOpened = false,
+                )
+            }
+        }
+
+        if (shouldLoadCommands) {
+            loadCommands()
+        }
     }
 
     fun sendPrompt() {
@@ -192,12 +221,23 @@ class ChatViewModel(
     }
 
     fun showCommandPalette() {
-        _uiState.update { it.copy(isCommandPaletteVisible = true, commandsQuery = "") }
+        _uiState.update {
+            it.copy(
+                isCommandPaletteVisible = true,
+                commandsQuery = "",
+                isCommandPaletteAutoOpened = false,
+            )
+        }
         loadCommands()
     }
 
     fun hideCommandPalette() {
-        _uiState.update { it.copy(isCommandPaletteVisible = false) }
+        _uiState.update {
+            it.copy(
+                isCommandPaletteVisible = false,
+                isCommandPaletteAutoOpened = false,
+            )
+        }
     }
 
     fun onCommandsQueryChanged(query: String) {
@@ -206,17 +246,40 @@ class ChatViewModel(
 
     fun onCommandSelected(command: SlashCommandInfo) {
         val currentText = _uiState.value.inputText
-        val newText =
-            if (currentText.isBlank()) {
-                "/${command.name} "
-            } else {
-                "$currentText /${command.name} "
-            }
+        val newText = replaceTrailingSlashToken(currentText, command.name)
         _uiState.update {
             it.copy(
                 inputText = newText,
                 isCommandPaletteVisible = false,
+                isCommandPaletteAutoOpened = false,
             )
+        }
+    }
+
+    private fun extractSlashCommandQuery(input: String): String? {
+        val trimmed = input.trim()
+        return trimmed
+            .takeIf { token -> token.isNotEmpty() && token.none(Char::isWhitespace) }
+            ?.let { token ->
+                SLASH_COMMAND_TOKEN_REGEX.matchEntire(token)?.groupValues?.get(1)
+            }
+    }
+
+    private fun replaceTrailingSlashToken(
+        input: String,
+        commandName: String,
+    ): String {
+        val trimmedInput = input.trimEnd()
+        val trailingTokenStart = trimmedInput.lastIndexOfAny(charArrayOf(' ', '\n', '\t')).let { it + 1 }
+        val trailingToken = trimmedInput.substring(trailingTokenStart)
+        val canReplaceToken = SLASH_COMMAND_TOKEN_REGEX.matches(trailingToken)
+
+        return if (canReplaceToken) {
+            trimmedInput.substring(0, trailingTokenStart) + "/$commandName "
+        } else if (trimmedInput.isEmpty()) {
+            "/$commandName "
+        } else {
+            "$trimmedInput /$commandName "
         }
     }
 
@@ -1245,6 +1308,8 @@ class ChatViewModel(
         const val TREE_FILTER_USER_ONLY = "user-only"
         const val TREE_FILTER_LABELED_ONLY = "labeled-only"
 
+        private val SLASH_COMMAND_TOKEN_REGEX = Regex("^/([a-zA-Z0-9:_-]*)$")
+
         private const val ASSISTANT_STREAM_PREFIX = "assistant-stream-"
         private const val ASSISTANT_UPDATE_THROTTLE_MS = 40L
         private const val TOOL_UPDATE_THROTTLE_MS = 50L
@@ -1273,6 +1338,7 @@ data class ChatUiState(
     val extensionWidgets: Map<String, ExtensionWidget> = emptyMap(),
     val extensionTitle: String? = null,
     val isCommandPaletteVisible: Boolean = false,
+    val isCommandPaletteAutoOpened: Boolean = false,
     val commands: List<SlashCommandInfo> = emptyList(),
     val commandsQuery: String = "",
     val isLoadingCommands: Boolean = false,

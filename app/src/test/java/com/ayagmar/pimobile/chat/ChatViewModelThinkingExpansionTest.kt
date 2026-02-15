@@ -214,6 +214,85 @@ class ChatViewModelThinkingExpansionTest {
             assertEquals("Hello world", item.text)
         }
 
+    @Test
+    fun slashInputAutoOpensCommandPaletteAndUpdatesQuery() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.availableCommands =
+                listOf(
+                    SlashCommandInfo(
+                        name = "tree",
+                        description = "Show tree",
+                        source = "extension",
+                        location = null,
+                        path = null,
+                    ),
+                )
+
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.onInputTextChanged("/")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value.isCommandPaletteVisible)
+            assertTrue(viewModel.uiState.value.isCommandPaletteAutoOpened)
+            assertEquals("", viewModel.uiState.value.commandsQuery)
+            assertEquals(1, controller.getCommandsCallCount)
+
+            viewModel.onInputTextChanged("/tr")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value.isCommandPaletteVisible)
+            assertEquals("tr", viewModel.uiState.value.commandsQuery)
+            assertEquals(1, controller.getCommandsCallCount)
+        }
+
+    @Test
+    fun slashPaletteDoesNotAutoOpenForRegularTextContexts() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.onInputTextChanged("Please inspect /tmp/file.txt")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertFalse(viewModel.uiState.value.isCommandPaletteVisible)
+            assertEquals(0, controller.getCommandsCallCount)
+
+            viewModel.onInputTextChanged("/tmp/file.txt")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertFalse(viewModel.uiState.value.isCommandPaletteVisible)
+            assertEquals(0, controller.getCommandsCallCount)
+        }
+
+    @Test
+    fun selectingCommandReplacesTrailingSlashToken() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.onInputTextChanged("/tr")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.onCommandSelected(
+                SlashCommandInfo(
+                    name = "tree",
+                    description = "Show tree",
+                    source = "extension",
+                    location = null,
+                    path = null,
+                ),
+            )
+
+            assertEquals("/tree ", viewModel.uiState.value.inputText)
+            assertFalse(viewModel.uiState.value.isCommandPaletteVisible)
+            assertFalse(viewModel.uiState.value.isCommandPaletteAutoOpened)
+        }
+
     private fun ChatViewModel.assistantItems(): List<ChatTimelineItem.Assistant> =
         uiState.value.timeline.filterIsInstance<ChatTimelineItem.Assistant>()
 
@@ -265,6 +344,9 @@ class ChatViewModelThinkingExpansionTest {
 
 private class FakeSessionController : SessionController {
     private val events = MutableSharedFlow<RpcIncomingMessage>(extraBufferCapacity = 16)
+
+    var availableCommands: List<SlashCommandInfo> = emptyList()
+    var getCommandsCallCount: Int = 0
 
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = events
     override val connectionState: StateFlow<ConnectionState> = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -343,7 +425,10 @@ private class FakeSessionController : SessionController {
 
     override suspend fun newSession(): Result<Unit> = Result.success(Unit)
 
-    override suspend fun getCommands(): Result<List<SlashCommandInfo>> = Result.success(emptyList())
+    override suspend fun getCommands(): Result<List<SlashCommandInfo>> {
+        getCommandsCallCount += 1
+        return Result.success(availableCommands)
+    }
 
     override suspend fun executeBash(
         command: String,
