@@ -514,6 +514,32 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun historyLoadingUsesRecentWindowCapForVeryLargeSessions() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.messagesPayload = historyWithUserMessages(count = 1_500)
+
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            val initialState = viewModel.uiState.value
+            assertEquals(120, initialState.timeline.size)
+            assertTrue(initialState.hasOlderMessages)
+            assertEquals(1_080, initialState.hiddenHistoryCount)
+
+            repeat(9) {
+                viewModel.loadOlderMessages()
+                dispatcher.scheduler.advanceUntilIdle()
+            }
+
+            val cappedWindowState = viewModel.uiState.value
+            assertEquals(1_200, cappedWindowState.timeline.size)
+            assertFalse(cappedWindowState.hasOlderMessages)
+            assertEquals(0, cappedWindowState.hiddenHistoryCount)
+        }
+
+    @Test
     fun jumpAndContinueUsesInPlaceTreeNavigationResult() =
         runTest(dispatcher) {
             val controller = FakeSessionController()

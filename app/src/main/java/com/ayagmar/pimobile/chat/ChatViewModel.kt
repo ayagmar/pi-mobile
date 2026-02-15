@@ -17,6 +17,7 @@ import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
 import com.ayagmar.pimobile.corerpc.MessageEndEvent
 import com.ayagmar.pimobile.corerpc.MessageStartEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
+import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.corerpc.SessionStats
 import com.ayagmar.pimobile.corerpc.ToolExecutionEndEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionStartEvent
@@ -47,6 +48,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
 
+private const val HISTORY_WINDOW_MAX_ITEMS = 1_200
+
 @Suppress("TooManyFunctions", "LargeClass")
 class ChatViewModel(
     private val sessionController: SessionController,
@@ -63,6 +66,9 @@ class ChatViewModel(
     private var lastLifecycleNotificationTimestampMs: Long = 0L
     private var fullTimeline: List<ChatTimelineItem> = emptyList()
     private var visibleTimelineSize: Int = 0
+    private var historyWindowMessages: List<JsonObject> = emptyList()
+    private var historyWindowAbsoluteOffset: Int = 0
+    private var historyParsedStartIndex: Int = 0
 
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -809,12 +815,45 @@ class ChatViewModel(
     }
 
     fun loadOlderMessages() {
-        if (visibleTimelineSize >= fullTimeline.size) {
-            return
-        }
+        when {
+            visibleTimelineSize < fullTimeline.size -> {
+                visibleTimelineSize = minOf(visibleTimelineSize + TIMELINE_PAGE_SIZE, fullTimeline.size)
+                publishVisibleTimeline()
+            }
 
-        visibleTimelineSize = minOf(visibleTimelineSize + TIMELINE_PAGE_SIZE, fullTimeline.size)
-        publishVisibleTimeline()
+            historyParsedStartIndex > 0 && historyWindowMessages.isNotEmpty() -> {
+                loadOlderHistoryChunk()
+            }
+        }
+    }
+
+    private fun loadOlderHistoryChunk() {
+        val nextStartIndex = (historyParsedStartIndex - TIMELINE_PAGE_SIZE).coerceAtLeast(0)
+        val olderHistoryItems =
+            parseHistoryItems(
+                messages = historyWindowMessages,
+                absoluteIndexOffset = historyWindowAbsoluteOffset,
+                startIndex = nextStartIndex,
+                endExclusive = historyParsedStartIndex,
+            )
+
+        historyParsedStartIndex = nextStartIndex
+
+        if (olderHistoryItems.isEmpty()) {
+            publishVisibleTimeline()
+        } else {
+            val existingHistoryItems = fullTimeline.filter { item -> item.id.startsWith(HISTORY_ITEM_PREFIX) }
+            val mergedHistory = olderHistoryItems + existingHistoryItems
+            val mergedTimeline = mergeHistoryWithRealtimeTimeline(mergedHistory)
+
+            fullTimeline =
+                ChatTimelineReducer.limitTimeline(
+                    timeline = mergedTimeline,
+                    maxTimelineItems = MAX_TIMELINE_ITEMS,
+                )
+            visibleTimelineSize = minOf(visibleTimelineSize + olderHistoryItems.size, fullTimeline.size)
+            publishVisibleTimeline()
+        }
     }
 
     private fun loadInitialMessages() {
@@ -823,54 +862,102 @@ class ChatViewModel(
             val stateResult = sessionController.getState()
 
             val stateData = stateResult.getOrNull()?.data
-            val modelInfo = stateData?.let { parseModelInfo(it) }
-            val thinkingLevel = stateData?.stringField("thinkingLevel")
-            val isStreaming = stateData?.booleanField("isStreaming") ?: false
-            val steeringMode = stateData.deliveryModeField("steeringMode", "steering_mode")
-            val followUpMode = stateData.deliveryModeField("followUpMode", "follow_up_mode")
+            val metadata =
+                InitialLoadMetadata(
+                    modelInfo = stateData?.let { parseModelInfo(it) },
+                    thinkingLevel = stateData?.stringField("thinkingLevel"),
+                    isStreaming = stateData?.booleanField("isStreaming") ?: false,
+                    steeringMode = stateData.deliveryModeField("steeringMode", "steering_mode"),
+                    followUpMode = stateData.deliveryModeField("followUpMode", "follow_up_mode"),
+                )
 
             _uiState.update { state ->
                 if (messagesResult.isFailure) {
-                    fullTimeline = emptyList()
-                    visibleTimelineSize = 0
-                    state.copy(
-                        isLoading = false,
-                        errorMessage = messagesResult.exceptionOrNull()?.message,
-                        timeline = emptyList(),
-                        hasOlderMessages = false,
-                        hiddenHistoryCount = 0,
-                        currentModel = modelInfo,
-                        thinkingLevel = thinkingLevel,
-                        isStreaming = isStreaming,
-                        steeringMode = steeringMode,
-                        followUpMode = followUpMode,
+                    buildInitialLoadFailureState(
+                        state = state,
+                        messagesResult = messagesResult,
+                        metadata = metadata,
                     )
                 } else {
-                    // Record first messages rendered for resume timing
-                    PerformanceMetrics.recordFirstMessagesRendered()
-                    val historyTimeline = parseHistoryItems(messagesResult.getOrNull()?.data)
-                    val mergedTimeline =
-                        if (state.isLoading) {
-                            mergeHistoryWithRealtimeTimeline(historyTimeline)
-                        } else {
-                            historyTimeline
-                        }
-                    setInitialTimeline(mergedTimeline)
-                    state.copy(
-                        isLoading = false,
-                        errorMessage = null,
-                        timeline = visibleTimeline(),
-                        hasOlderMessages = hasOlderMessages(),
-                        hiddenHistoryCount = hiddenHistoryCount(),
-                        currentModel = modelInfo,
-                        thinkingLevel = thinkingLevel,
-                        isStreaming = isStreaming,
-                        steeringMode = steeringMode,
-                        followUpMode = followUpMode,
+                    buildInitialLoadSuccessState(
+                        state = state,
+                        messagesData = messagesResult.getOrNull()?.data,
+                        metadata = metadata,
                     )
                 }
             }
         }
+    }
+
+    private fun buildInitialLoadFailureState(
+        state: ChatUiState,
+        messagesResult: Result<RpcResponse>,
+        metadata: InitialLoadMetadata,
+    ): ChatUiState {
+        fullTimeline = emptyList()
+        visibleTimelineSize = 0
+        resetHistoryWindow()
+
+        return state.copy(
+            isLoading = false,
+            errorMessage = messagesResult.exceptionOrNull()?.message,
+            timeline = emptyList(),
+            hasOlderMessages = false,
+            hiddenHistoryCount = 0,
+            currentModel = metadata.modelInfo,
+            thinkingLevel = metadata.thinkingLevel,
+            isStreaming = metadata.isStreaming,
+            steeringMode = metadata.steeringMode,
+            followUpMode = metadata.followUpMode,
+        )
+    }
+
+    private fun buildInitialLoadSuccessState(
+        state: ChatUiState,
+        messagesData: JsonObject?,
+        metadata: InitialLoadMetadata,
+    ): ChatUiState {
+        val historyWindow = extractHistoryMessageWindow(messagesData)
+        historyWindowMessages = historyWindow.messages
+        historyWindowAbsoluteOffset = historyWindow.absoluteOffset
+        historyParsedStartIndex = (historyWindowMessages.size - INITIAL_TIMELINE_SIZE).coerceAtLeast(0)
+
+        PerformanceMetrics.recordFirstMessagesRendered()
+
+        val historyTimeline =
+            parseHistoryItems(
+                messages = historyWindowMessages,
+                absoluteIndexOffset = historyWindowAbsoluteOffset,
+                startIndex = historyParsedStartIndex,
+            )
+
+        val mergedTimeline =
+            if (state.isLoading) {
+                mergeHistoryWithRealtimeTimeline(historyTimeline)
+            } else {
+                historyTimeline
+            }
+
+        setInitialTimeline(mergedTimeline)
+
+        return state.copy(
+            isLoading = false,
+            errorMessage = null,
+            timeline = visibleTimeline(),
+            hasOlderMessages = hasOlderMessages(),
+            hiddenHistoryCount = hiddenHistoryCount(),
+            currentModel = metadata.modelInfo,
+            thinkingLevel = metadata.thinkingLevel,
+            isStreaming = metadata.isStreaming,
+            steeringMode = metadata.steeringMode,
+            followUpMode = metadata.followUpMode,
+        )
+    }
+
+    private fun resetHistoryWindow() {
+        historyWindowMessages = emptyList()
+        historyWindowAbsoluteOffset = 0
+        historyParsedStartIndex = 0
     }
 
     private var hasRecordedFirstToken = false
@@ -1440,11 +1527,12 @@ class ChatViewModel(
     }
 
     private fun hasOlderMessages(): Boolean {
-        return fullTimeline.size > visibleTimelineSize
+        return historyParsedStartIndex > 0 || fullTimeline.size > visibleTimelineSize
     }
 
     private fun hiddenHistoryCount(): Int {
-        return (fullTimeline.size - visibleTimelineSize).coerceAtLeast(0)
+        val hiddenLoadedItems = (fullTimeline.size - visibleTimelineSize).coerceAtLeast(0)
+        return hiddenLoadedItems + historyParsedStartIndex
     }
 
     fun addImage(pendingImage: PendingImage) {
@@ -1536,7 +1624,7 @@ class ChatViewModel(
         private const val ASSISTANT_UPDATE_THROTTLE_MS = 40L
         private const val TOOL_UPDATE_THROTTLE_MS = 50L
         private const val TOOL_COLLAPSE_THRESHOLD = 400
-        private const val MAX_TIMELINE_ITEMS = 1_200
+        private const val MAX_TIMELINE_ITEMS = HISTORY_WINDOW_MAX_ITEMS
         private const val INITIAL_TIMELINE_SIZE = 120
         private const val TIMELINE_PAGE_SIZE = 120
         private const val BASH_HISTORY_SIZE = 10
@@ -1716,22 +1804,64 @@ class ChatViewModelFactory(
     }
 }
 
-private fun parseHistoryItems(data: JsonObject?): List<ChatTimelineItem> {
-    val messages = runCatching { data?.get("messages")?.jsonArray }.getOrNull() ?: JsonArray(emptyList())
+private data class InitialLoadMetadata(
+    val modelInfo: ModelInfo?,
+    val thinkingLevel: String?,
+    val isStreaming: Boolean,
+    val steeringMode: String,
+    val followUpMode: String,
+)
 
-    return messages.mapIndexedNotNull { index, messageElement ->
-        val message = messageElement.jsonObject
+private data class HistoryMessageWindow(
+    val messages: List<JsonObject>,
+    val absoluteOffset: Int,
+)
+
+private fun extractHistoryMessageWindow(data: JsonObject?): HistoryMessageWindow {
+    val rawMessages = runCatching { data?.get("messages")?.jsonArray }.getOrNull() ?: JsonArray(emptyList())
+    val startIndex = (rawMessages.size - HISTORY_WINDOW_MAX_ITEMS).coerceAtLeast(0)
+
+    val messages =
+        rawMessages
+            .drop(startIndex)
+            .mapNotNull { messageElement ->
+                runCatching { messageElement.jsonObject }.getOrNull()
+            }
+
+    return HistoryMessageWindow(
+        messages = messages,
+        absoluteOffset = startIndex,
+    )
+}
+
+private fun parseHistoryItems(
+    messages: List<JsonObject>,
+    absoluteIndexOffset: Int,
+    startIndex: Int = 0,
+    endExclusive: Int = messages.size,
+): List<ChatTimelineItem> {
+    if (messages.isEmpty()) {
+        return emptyList()
+    }
+
+    val boundedStart = startIndex.coerceIn(0, messages.size)
+    val boundedEnd = endExclusive.coerceIn(boundedStart, messages.size)
+
+    return (boundedStart until boundedEnd).mapNotNull { index ->
+        val message = messages[index]
+        val absoluteIndex = absoluteIndexOffset + index
+
         when (message.stringField("role")) {
             "user" -> {
                 val text = extractUserText(message["content"])
-                ChatTimelineItem.User(id = "history-user-$index", text = text)
+                ChatTimelineItem.User(id = "history-user-$absoluteIndex", text = text)
             }
 
             "assistant" -> {
                 val text = extractAssistantText(message["content"])
                 val thinking = extractAssistantThinking(message["content"])
                 ChatTimelineItem.Assistant(
-                    id = "history-assistant-$index",
+                    id = "history-assistant-$absoluteIndex",
                     text = text,
                     thinking = thinking,
                     isThinkingComplete = thinking != null,
@@ -1742,7 +1872,7 @@ private fun parseHistoryItems(data: JsonObject?): List<ChatTimelineItem> {
             "toolResult" -> {
                 val output = extractToolOutput(message)
                 ChatTimelineItem.Tool(
-                    id = "history-tool-$index",
+                    id = "history-tool-$absoluteIndex",
                     toolName = message.stringField("toolName") ?: "tool",
                     output = output,
                     isCollapsed = output.length > 400,

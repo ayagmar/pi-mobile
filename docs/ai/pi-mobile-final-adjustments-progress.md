@@ -94,7 +94,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 |---|---|---|---|---|---|---|
 | 23 | H1 True `/tree` parity (in-place navigate) | DONE | feat(tree): add bridge-backed in-place tree navigation parity |  | ktlint✅ detekt✅ test✅ bridge✅ | Added bridge `bridge_navigate_tree` flow powered by internal Pi extension command (`ctx.navigateTree`), wired Chat jump action to in-place navigation (not fork), and propagated runtime current leaf to tree responses |
 | 24 | H2 Session parsing alignment with Pi internals | DONE | refactor(bridge): align session index parsing with pi metadata semantics |  | ktlint✅ detekt✅ test✅ bridge✅ | Added resilient tree normalization for legacy entries without ids, aligned `updatedAt` to user/assistant activity semantics, and mapped hidden active leaves to visible ancestors under tree filters with compatibility tests |
-| 25 | H3 Incremental session history loading strategy | TODO |  |  |  |  |
+| 25 | H3 Incremental session history loading strategy | DONE | perf(chat): incrementally parse resume history with paged windows |  | ktlint✅ detekt✅ test✅ bridge✅ | Added capped history window extraction with on-demand page parsing for older messages, preserving hidden-count pagination semantics while avoiding full-history timeline materialization on resume |
 | 26 | H4 Extension-ize selected hardcoded workflows | TODO |  |  |  |  |
 
 ---
@@ -518,15 +518,33 @@ Notes/blockers:
 - Improved tree snapshot parity by mapping hidden active leaves to nearest visible ancestors and expanding compatibility coverage in `session-indexer` tests.
 ```
 
+### 2026-02-15
+
+```text
+Task: H3
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Switched chat history resume to an incremental parsing model: retain a capped message window, parse only the initial visible page, then parse older pages on demand.
+- Preserved pagination UX (`hasOlderMessages`, `hiddenHistoryCount`) while avoiding eager materialization of the whole retained history timeline.
+- Added coverage for very large-session window cap behavior in `ChatViewModelThinkingExpansionTest`.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 24
+- Backlog done: 25
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 2
+- Backlog remaining (not done): 1
 - Reference completed items (not counted in backlog): 6
 
 ---
@@ -539,7 +557,7 @@ Notes/blockers:
 - [x] Maintainability improvements complete
 - [x] Theming + Design System complete
 - [ ] Heavy hitters complete (or documented protocol limits)
-- [ ] Final green run (`ktlintCheck`, `detekt`, `test`, bridge check)
+- [x] Final green run (`ktlintCheck`, `detekt`, `test`, bridge check)
 
 ---
 
