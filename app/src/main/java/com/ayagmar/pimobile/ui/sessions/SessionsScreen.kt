@@ -10,12 +10,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +36,11 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionsUiState
 import com.ayagmar.pimobile.sessions.SessionsViewModel
 import com.ayagmar.pimobile.sessions.SessionsViewModelFactory
+import com.ayagmar.pimobile.ui.components.PiButton
+import com.ayagmar.pimobile.ui.components.PiCard
+import com.ayagmar.pimobile.ui.components.PiSpacing
+import com.ayagmar.pimobile.ui.components.PiTextField
+import com.ayagmar.pimobile.ui.components.PiTopBar
 import kotlinx.coroutines.delay
 
 @Composable
@@ -155,8 +157,8 @@ private fun SessionsScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().padding(PiSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(PiSpacing.sm),
     ) {
         SessionsHeader(
             isRefreshing = state.isRefreshing,
@@ -171,12 +173,10 @@ private fun SessionsScreen(
             onHostSelected = callbacks.onHostSelected,
         )
 
-        OutlinedTextField(
+        PiTextField(
             value = state.query,
             onValueChange = callbacks.onSearchChanged,
-            label = { Text("Search sessions") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
+            label = "Search sessions",
         )
 
         StatusMessages(
@@ -250,30 +250,31 @@ private fun SessionsHeader(
     onToggleFlatView: () -> Unit,
     onNewSession: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "Sessions",
-            style = MaterialTheme.typography.headlineSmall,
-        )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onToggleFlatView) {
-                Text(if (isFlatView) "Tree" else "All")
+    PiTopBar(
+        title = {
+            Text(
+                text = "Sessions",
+                style = MaterialTheme.typography.headlineSmall,
+            )
+        },
+        actions = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(PiSpacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onToggleFlatView) {
+                    Text(if (isFlatView) "Tree" else "All")
+                }
+                TextButton(onClick = onRefreshClick, enabled = !isRefreshing) {
+                    Text(if (isRefreshing) "Refreshing" else "Refresh")
+                }
+                PiButton(
+                    label = "New",
+                    onClick = onNewSession,
+                )
             }
-            TextButton(onClick = onRefreshClick, enabled = !isRefreshing) {
-                Text(if (isRefreshing) "Refreshing" else "Refresh")
-            }
-            Button(onClick = onNewSession) {
-                Text("New")
-            }
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -470,66 +471,60 @@ private fun SessionCard(
     actions: ActiveSessionActionCallbacks,
     showCwd: Boolean = false,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    PiCard(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = session.displayTitle,
+            style = MaterialTheme.typography.titleMedium,
+        )
+
+        if (showCwd) {
+            val cwd = session.sessionPath.substringBeforeLast("/", "")
+            if (cwd.isNotEmpty()) {
+                Text(
+                    text = cwd,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Text(
+            text = session.sessionPath,
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        session.firstUserMessagePreview?.let { preview ->
+            Text(
+                text = preview,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = session.displayTitle,
-                style = MaterialTheme.typography.titleMedium,
-            )
-
-            if (showCwd) {
-                val cwd = session.sessionPath.substringBeforeLast("/", "")
-                if (cwd.isNotEmpty()) {
-                    Text(
-                        text = cwd,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            Text(
-                text = session.sessionPath,
+                text = "Updated ${session.updatedAt}",
                 style = MaterialTheme.typography.bodySmall,
             )
 
-            session.firstUserMessagePreview?.let { preview ->
-                Text(
-                    text = preview,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
+            PiButton(
+                label = if (isActive) "Active" else "Resume",
+                enabled = !isBusy && !isActive,
+                onClick = onResumeClick,
+            )
+        }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Updated ${session.updatedAt}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                Button(
-                    enabled = !isBusy && !isActive,
-                    onClick = onResumeClick,
-                ) {
-                    Text(if (isActive) "Active" else "Resume")
-                }
-            }
-
-            if (isActive) {
-                SessionActionsRow(
-                    isBusy = isBusy,
-                    onRenameClick = actions.onRename,
-                    onForkClick = actions.onFork,
-                    onExportClick = actions.onExport,
-                    onCompactClick = actions.onCompact,
-                )
-            }
+        if (isActive) {
+            SessionActionsRow(
+                isBusy = isBusy,
+                onRenameClick = actions.onRename,
+                onForkClick = actions.onFork,
+                onExportClick = actions.onExport,
+                onCompactClick = actions.onCompact,
+            )
         }
     }
 }

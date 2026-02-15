@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -27,6 +25,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.TransportPreference
+import com.ayagmar.pimobile.ui.components.PiButton
+import com.ayagmar.pimobile.ui.components.PiCard
+import com.ayagmar.pimobile.ui.components.PiSpacing
+import com.ayagmar.pimobile.ui.components.PiTopBar
 import com.ayagmar.pimobile.ui.theme.ThemePreference
 import kotlinx.coroutines.delay
 
@@ -74,12 +76,17 @@ private fun SettingsScreen(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(PiSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(PiSpacing.md),
     ) {
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.headlineSmall,
+        PiTopBar(
+            title = {
+                Text(
+                    text = "Settings",
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+            },
+            actions = {},
         )
 
         ConnectionStatusCard(
@@ -121,36 +128,30 @@ private fun ConnectionStatusCard(
     transientStatusMessage: String?,
     onPing: () -> Unit,
 ) {
-    Card(
+    PiCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "Connection",
-                style = MaterialTheme.typography.titleMedium,
-            )
+        Text(
+            text = "Connection",
+            style = MaterialTheme.typography.titleMedium,
+        )
 
-            ConnectionStatusRow(
-                connectionStatus = state.connectionStatus,
-                isChecking = state.isChecking,
-            )
+        ConnectionStatusRow(
+            connectionStatus = state.connectionStatus,
+            isChecking = state.isChecking,
+        )
 
-            ConnectionMessages(
-                state = state,
-                transientStatusMessage = transientStatusMessage,
-            )
+        ConnectionMessages(
+            state = state,
+            transientStatusMessage = transientStatusMessage,
+        )
 
-            Button(
-                onClick = onPing,
-                enabled = !state.isChecking,
-                modifier = Modifier.padding(top = 8.dp),
-            ) {
-                Text("Check Connection")
-            }
-        }
+        PiButton(
+            label = "Check Connection",
+            onClick = onPing,
+            enabled = !state.isChecking,
+            modifier = Modifier.padding(top = PiSpacing.sm),
+        )
     }
 }
 
@@ -234,60 +235,55 @@ private fun AgentBehaviorCard(
     onSteeringModeSelected: (String) -> Unit,
     onFollowUpModeSelected: (String) -> Unit,
 ) {
-    Card(
+    PiCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = "Agent Behavior",
-                style = MaterialTheme.typography.titleMedium,
-            )
+        Text(
+            text = "Agent Behavior",
+            style = MaterialTheme.typography.titleMedium,
+        )
 
-            SettingsToggleRow(
-                title = "Auto-compact context",
-                description = "Automatically compact conversation when nearing token limit",
-                checked = autoCompactionEnabled,
-                onToggle = onToggleAutoCompaction,
-            )
+        SettingsToggleRow(
+            title = "Auto-compact context",
+            description = "Automatically compact conversation when nearing token limit",
+            checked = autoCompactionEnabled,
+            onToggle = onToggleAutoCompaction,
+        )
 
-            SettingsToggleRow(
-                title = "Auto-retry on errors",
-                description = "Automatically retry failed requests with exponential backoff",
-                checked = autoRetryEnabled,
-                onToggle = onToggleAutoRetry,
-            )
+        SettingsToggleRow(
+            title = "Auto-retry on errors",
+            description = "Automatically retry failed requests with exponential backoff",
+            checked = autoRetryEnabled,
+            onToggle = onToggleAutoRetry,
+        )
 
-            TransportPreferenceRow(
-                selectedPreference = transportPreference,
-                effectivePreference = effectiveTransportPreference,
-                runtimeNote = transportRuntimeNote,
-                onPreferenceSelected = onTransportPreferenceSelected,
-            )
+        TransportPreferenceRow(
+            selectedPreference = transportPreference,
+            effectivePreference = effectiveTransportPreference,
+            runtimeNote = transportRuntimeNote,
+            onPreferenceSelected = onTransportPreferenceSelected,
+        )
 
-            ThemePreferenceRow(
-                selectedPreference = themePreference,
-                onPreferenceSelected = onThemePreferenceSelected,
-            )
+        ThemePreferenceRow(
+            selectedPreference = themePreference,
+            onPreferenceSelected = onThemePreferenceSelected,
+        )
 
-            ModeSelectorRow(
-                title = "Steering mode",
-                description = "How steer messages are delivered while streaming",
-                selectedMode = steeringMode,
-                isUpdating = isUpdatingSteeringMode,
-                onModeSelected = onSteeringModeSelected,
-            )
+        ModeSelectorRow(
+            title = "Steering mode",
+            description = "How steer messages are delivered while streaming",
+            selectedMode = steeringMode,
+            isUpdating = isUpdatingSteeringMode,
+            onModeSelected = onSteeringModeSelected,
+        )
 
-            ModeSelectorRow(
-                title = "Follow-up mode",
-                description = "How follow-up messages are queued while streaming",
-                selectedMode = followUpMode,
-                isUpdating = isUpdatingFollowUpMode,
-                onModeSelected = onFollowUpModeSelected,
-            )
-        }
+        ModeSelectorRow(
+            title = "Follow-up mode",
+            description = "How follow-up messages are queued while streaming",
+            selectedMode = followUpMode,
+            isUpdating = isUpdatingFollowUpMode,
+            onModeSelected = onFollowUpModeSelected,
+        )
     }
 }
 
@@ -469,12 +465,11 @@ private fun TransportOptionButton(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    Button(
+    PiButton(
+        label = label,
+        selected = selected,
         onClick = onClick,
-    ) {
-        val prefix = if (selected) "✓ " else ""
-        Text("$prefix$label")
-    }
+    )
 }
 
 @Composable
@@ -483,10 +478,11 @@ private fun ThemeOptionButton(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    Button(onClick = onClick) {
-        val prefix = if (selected) "✓ " else ""
-        Text("$prefix$label")
-    }
+    PiButton(
+        label = label,
+        selected = selected,
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -496,52 +492,46 @@ private fun ModeOptionButton(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    Button(
-        onClick = onClick,
+    PiButton(
+        label = label,
+        selected = selected,
         enabled = enabled,
-    ) {
-        val prefix = if (selected) "✓ " else ""
-        Text("$prefix$label")
-    }
+        onClick = onClick,
+    )
 }
 
 @Composable
 private fun ChatHelpCard() {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "Chat actions & gestures",
-                style = MaterialTheme.typography.titleMedium,
-            )
+    PiCard(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Chat actions & gestures",
+            style = MaterialTheme.typography.titleMedium,
+        )
 
-            HelpItem(
-                action = "Send",
-                help = "Tap the send icon or use keyboard Send action",
-            )
-            HelpItem(
-                action = "Commands",
-                help = "Tap the menu icon in the prompt field to open slash commands",
-            )
-            HelpItem(
-                action = "Model",
-                help = "Tap model chip to cycle; long-press to open full picker",
-            )
-            HelpItem(
-                action = "Thinking/Tool output",
-                help = "Tap show more/show less to expand or collapse long sections",
-            )
-            HelpItem(
-                action = "Tree",
-                help = "Open Tree from chat header to inspect branches and fork from entries",
-            )
-            HelpItem(
-                action = "Bash & Stats",
-                help = "Use terminal and chart icons in chat header",
-            )
-        }
+        HelpItem(
+            action = "Send",
+            help = "Tap the send icon or use keyboard Send action",
+        )
+        HelpItem(
+            action = "Commands",
+            help = "Tap the menu icon in the prompt field to open slash commands",
+        )
+        HelpItem(
+            action = "Model",
+            help = "Tap model chip to cycle; long-press to open full picker",
+        )
+        HelpItem(
+            action = "Thinking/Tool output",
+            help = "Tap show more/show less to expand or collapse long sections",
+        )
+        HelpItem(
+            action = "Tree",
+            help = "Open Tree from chat header to inspect branches and fork from entries",
+        )
+        HelpItem(
+            action = "Bash & Stats",
+            help = "Use terminal and chart icons in chat header",
+        )
     }
 }
 
@@ -565,22 +555,17 @@ private fun HelpItem(
 
 @Composable
 private fun AppInfoCard(version: String) {
-    Card(
+    PiCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = "About",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = "Version: $version",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
+        Text(
+            text = "About",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = "Version: $version",
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 

@@ -84,7 +84,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
 | 21 | T1 Centralized theme architecture (PiMobileTheme) | DONE | feat(theme): add PiMobileTheme with system/light/dark preference |  | ktlint✅ detekt✅ test✅ bridge✅ | Added `ui/theme` package, wrapped app in `PiMobileTheme`, introduced persisted theme preference + settings controls, and removed chat hardcoded tool colors in favor of theme roles |
-| 22 | T2 Component design system | TODO |  |  |  | Reusable components, spacing tokens |
+| 22 | T2 Component design system | DONE | feat(ui): introduce reusable Pi design system primitives |  | ktlint✅ detekt✅ test✅ bridge✅ | Added `ui/components` (`PiCard`, `PiButton`, `PiTextField`, `PiTopBar`, `PiSpacing`) and adopted them across Settings + Sessions for consistent spacing/actions/search patterns |
 
 ---
 
@@ -464,15 +464,33 @@ Notes/blockers:
 - Added theme preference controls in Settings and removed hardcoded chat tool colors in favor of theme color roles.
 ```
 
+### 2026-02-15
+
+```text
+Task: T2
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Added reusable design-system primitives under `ui/components`: `PiCard`, `PiButton`, `PiTextField`, `PiTopBar`, and `PiSpacing`.
+- Migrated Settings and Sessions screens to shared components for card layouts, top bars, option buttons, and text fields.
+- Standardized key spacing to shared tokens (`PiSpacing`) in updated screen flows.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 21
+- Backlog done: 22
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 5
+- Backlog remaining (not done): 4
 - Reference completed items (not counted in backlog): 6
 
 ---
