@@ -10,7 +10,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 
 | Task | Status | Commit | Verification | Notes |
 |------|--------|--------|--------------|-------|
-| **1.1** Reasoning/Thinking Block Display | `DONE` | [PENDING] | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Parse `thinking_delta` events, display with toggle |
+| **1.1** Reasoning/Thinking Block Display | `DONE` | a5b5611 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Parse `thinking_delta` events, display with toggle |
 | **1.2** Slash Commands Palette | `TODO` | - | - | Implement `get_commands`, add command palette UI |
 | **1.3** Auto-Compaction/Retry Event Handling | `TODO` | - | - | Show banners for compaction/retry events |
 

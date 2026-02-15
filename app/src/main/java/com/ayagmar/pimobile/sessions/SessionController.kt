@@ -57,6 +57,8 @@ interface SessionController {
     ): Result<Unit>
 
     suspend fun newSession(): Result<Unit>
+
+    suspend fun getCommands(): Result<List<SlashCommandInfo>>
 }
 
 /**
@@ -76,4 +78,15 @@ data class ModelInfo(
     val name: String,
     val provider: String,
     val thinkingLevel: String,
+)
+
+/**
+ * Slash command information from get_commands response.
+ */
+data class SlashCommandInfo(
+    val name: String,
+    val description: String?,
+    val source: String,
+    val location: String?,
+    val path: String?,
 )

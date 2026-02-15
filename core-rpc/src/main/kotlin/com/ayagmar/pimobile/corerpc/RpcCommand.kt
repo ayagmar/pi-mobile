@@ -123,8 +123,23 @@ data class NewSessionCommand(
 ) : RpcCommand
 
 @Serializable
+data class GetCommandsCommand(
+    override val id: String? = null,
+    override val type: String = "get_commands",
+) : RpcCommand
+
+@Serializable
 data class ImagePayload(
     val type: String = "image",
     val data: String,
     val mimeType: String,
+)
+
+@Serializable
+data class SlashCommand(
+    val name: String,
+    val description: String? = null,
+    val source: String,
+    val location: String? = null,
+    val path: String? = null,
 )

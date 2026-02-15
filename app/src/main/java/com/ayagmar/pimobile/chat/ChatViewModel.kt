@@ -14,6 +14,7 @@ import com.ayagmar.pimobile.di.AppServices
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionController
+import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -118,6 +119,57 @@ class ChatViewModel(
             } else {
                 result.getOrNull()?.let { level ->
                     _uiState.update { it.copy(thinkingLevel = level) }
+                }
+            }
+        }
+    }
+
+    fun showCommandPalette() {
+        _uiState.update { it.copy(isCommandPaletteVisible = true, commandsQuery = "") }
+        loadCommands()
+    }
+
+    fun hideCommandPalette() {
+        _uiState.update { it.copy(isCommandPaletteVisible = false) }
+    }
+
+    fun onCommandsQueryChanged(query: String) {
+        _uiState.update { it.copy(commandsQuery = query) }
+    }
+
+    fun onCommandSelected(command: SlashCommandInfo) {
+        val currentText = _uiState.value.inputText
+        val newText =
+            if (currentText.isBlank()) {
+                "/${command.name} "
+            } else {
+                "$currentText /${command.name} "
+            }
+        _uiState.update {
+            it.copy(
+                inputText = newText,
+                isCommandPaletteVisible = false,
+            )
+        }
+    }
+
+    private fun loadCommands() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingCommands = true) }
+            val result = sessionController.getCommands()
+            if (result.isSuccess) {
+                _uiState.update {
+                    it.copy(
+                        commands = result.getOrNull() ?: emptyList(),
+                        isLoadingCommands = false,
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        isLoadingCommands = false,
+                        errorMessage = result.exceptionOrNull()?.message,
+                    )
                 }
             }
         }
@@ -523,6 +575,10 @@ data class ChatUiState(
     val extensionStatuses: Map<String, String> = emptyMap(),
     val extensionWidgets: Map<String, ExtensionWidget> = emptyMap(),
     val extensionTitle: String? = null,
+    val isCommandPaletteVisible: Boolean = false,
+    val commands: List<SlashCommandInfo> = emptyList(),
+    val commandsQuery: String = "",
+    val isLoadingCommands: Boolean = false,
 )
 
 data class ExtensionNotification(

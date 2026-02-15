@@ -14,6 +14,7 @@ import com.ayagmar.pimobile.corerpc.ExportHtmlCommand
 import com.ayagmar.pimobile.corerpc.ExtensionUiResponseCommand
 import com.ayagmar.pimobile.corerpc.FollowUpCommand
 import com.ayagmar.pimobile.corerpc.ForkCommand
+import com.ayagmar.pimobile.corerpc.GetCommandsCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
 import com.ayagmar.pimobile.corerpc.NewSessionCommand
 import com.ayagmar.pimobile.corerpc.PromptCommand
@@ -363,6 +364,23 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun getCommands(): Result<List<SlashCommandInfo>> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val response =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = GetCommandsCommand(id = UUID.randomUUID().toString()),
+                        expectedCommand = GET_COMMANDS_COMMAND,
+                    ).requireSuccess("Failed to load commands")
+
+                parseSlashCommands(response.data)
+            }
+        }
+    }
+
     private suspend fun clearActiveConnection() {
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
@@ -430,6 +448,7 @@ class RpcSessionController(
         private const val CYCLE_MODEL_COMMAND = "cycle_model"
         private const val CYCLE_THINKING_COMMAND = "cycle_thinking_level"
         private const val NEW_SESSION_COMMAND = "new_session"
+        private const val GET_COMMANDS_COMMAND = "get_commands"
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
     }
@@ -506,5 +525,21 @@ private fun parseModelInfo(data: JsonObject?): ModelInfo? {
                 thinkingLevel = data.stringField("thinkingLevel") ?: "off",
             )
         }
+    }
+}
+
+private fun parseSlashCommands(data: JsonObject?): List<SlashCommandInfo> {
+    val commands = runCatching { data?.get("commands")?.jsonArray }.getOrNull() ?: JsonArray(emptyList())
+
+    return commands.mapNotNull { commandElement ->
+        val commandObject = commandElement.jsonObject
+        val name = commandObject.stringField("name") ?: return@mapNotNull null
+        SlashCommandInfo(
+            name = name,
+            description = commandObject.stringField("description"),
+            source = commandObject.stringField("source") ?: "unknown",
+            location = commandObject.stringField("location"),
+            path = commandObject.stringField("path"),
+        )
     }
 }

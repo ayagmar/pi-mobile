@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,6 +48,7 @@ import com.ayagmar.pimobile.chat.ExtensionNotification
 import com.ayagmar.pimobile.chat.ExtensionUiRequest
 import com.ayagmar.pimobile.chat.ExtensionWidget
 import com.ayagmar.pimobile.sessions.ModelInfo
+import com.ayagmar.pimobile.sessions.SlashCommandInfo
 
 private data class ChatCallbacks(
     val onToggleToolExpansion: (String) -> Unit,
@@ -61,6 +63,10 @@ private data class ChatCallbacks(
     val onSendExtensionUiResponse: (String, String?, Boolean?, Boolean) -> Unit,
     val onDismissExtensionRequest: () -> Unit,
     val onClearNotification: (Int) -> Unit,
+    val onShowCommandPalette: () -> Unit,
+    val onHideCommandPalette: () -> Unit,
+    val onCommandsQueryChanged: (String) -> Unit,
+    val onCommandSelected: (SlashCommandInfo) -> Unit,
 )
 
 @Composable
@@ -84,6 +90,10 @@ fun ChatRoute() {
                 onSendExtensionUiResponse = chatViewModel::sendExtensionUiResponse,
                 onDismissExtensionRequest = chatViewModel::dismissExtensionRequest,
                 onClearNotification = chatViewModel::clearNotification,
+                onShowCommandPalette = chatViewModel::showCommandPalette,
+                onHideCommandPalette = chatViewModel::hideCommandPalette,
+                onCommandsQueryChanged = chatViewModel::onCommandsQueryChanged,
+                onCommandSelected = chatViewModel::onCommandSelected,
             )
         }
 
@@ -112,6 +122,16 @@ private fun ChatScreen(
     NotificationsDisplay(
         notifications = state.notifications,
         onClear = callbacks.onClearNotification,
+    )
+
+    CommandPalette(
+        isVisible = state.isCommandPaletteVisible,
+        commands = state.commands,
+        query = state.commandsQuery,
+        isLoading = state.isLoadingCommands,
+        onQueryChange = callbacks.onCommandsQueryChanged,
+        onCommandSelected = callbacks.onCommandSelected,
+        onDismiss = callbacks.onHideCommandPalette,
     )
 }
 
@@ -419,6 +439,125 @@ private fun NotificationsDisplay(
     }
 }
 
+@Suppress("LongParameterList", "LongMethod")
+@Composable
+private fun CommandPalette(
+    isVisible: Boolean,
+    commands: List<SlashCommandInfo>,
+    query: String,
+    isLoading: Boolean,
+    onQueryChange: (String) -> Unit,
+    onCommandSelected: (SlashCommandInfo) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (!isVisible) return
+
+    val filteredCommands =
+        remember(commands, query) {
+            if (query.isBlank()) {
+                commands
+            } else {
+                commands.filter { command ->
+                    command.name.contains(query, ignoreCase = true) ||
+                        command.description?.contains(query, ignoreCase = true) == true
+                }
+            }
+        }
+
+    val groupedCommands =
+        remember(filteredCommands) {
+            filteredCommands.groupBy { it.source }
+        }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Commands") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    placeholder = { Text("Search commands...") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                )
+
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else if (filteredCommands.isEmpty()) {
+                    Text(
+                        text = "No commands found",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        groupedCommands.forEach { (source, commandsInGroup) ->
+                            item {
+                                Text(
+                                    text = source.replaceFirstChar { it.uppercase() },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                )
+                            }
+                            items(commandsInGroup) { command ->
+                                CommandItem(
+                                    command = command,
+                                    onClick = { onCommandSelected(command) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun CommandItem(
+    command: SlashCommandInfo,
+    onClick: () -> Unit,
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start,
+        ) {
+            Text(
+                text = "/${command.name}",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            command.description?.let { desc ->
+                Text(
+                    text = desc,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ChatTimeline(
     timeline: List<ChatTimelineItem>,
@@ -626,6 +765,7 @@ private fun PromptControls(
             isStreaming = state.isStreaming,
             onInputTextChanged = callbacks.onInputTextChanged,
             onSendPrompt = callbacks.onSendPrompt,
+            onShowCommandPalette = callbacks.onShowCommandPalette,
         )
     }
 
@@ -701,6 +841,7 @@ private fun PromptInputRow(
     isStreaming: Boolean,
     onInputTextChanged: (String) -> Unit,
     onSendPrompt: () -> Unit,
+    onShowCommandPalette: () -> Unit = {},
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -717,6 +858,16 @@ private fun PromptInputRow(
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { onSendPrompt() }),
             enabled = !isStreaming,
+            trailingIcon = {
+                if (inputText.isEmpty() && !isStreaming) {
+                    IconButton(onClick = onShowCommandPalette) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.Menu,
+                            contentDescription = "Commands",
+                        )
+                    }
+                }
+            },
         )
 
         IconButton(
