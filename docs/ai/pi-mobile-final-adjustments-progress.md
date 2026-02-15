@@ -73,7 +73,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
 | 17 | M1 Replace service locator with explicit DI | DONE | refactor(di): replace app service locator with explicit graph |  | ktlint✅ detekt✅ test✅ bridge✅ | Introduced AppGraph dependency container and removed global `AppServices` singleton usage from routes/viewmodel factories |
-| 18 | M2 Split god classes (complexity-focused, non-rigid) | TODO |  |  |  | Reduce `LargeClass` / `LongMethod` / `TooManyFunctions` signals |
+| 18 | M2 Split god classes (complexity-focused, non-rigid) | DONE | refactor(chat): extract overlay and command palette components |  | ktlint✅ detekt✅ test✅ bridge✅ | Extracted extension dialogs, notifications, and command palette from `ChatScreen.kt` into dedicated `ChatOverlays.kt` and tightened DI wiring split from M1 |
 | 19 | M3 Unify streaming/backpressure runtime pipeline | TODO |  |  |  |  |
 | 20 | M4 Tighten static analysis rules/suppressions | TODO |  |  |  |  |
 
@@ -392,15 +392,33 @@ Notes/blockers:
 - MainActivity lifecycle teardown now disconnects via graph-owned SessionController instance.
 ```
 
+### 2026-02-15
+
+```text
+Task: M2
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Extracted extension dialogs, notifications, and command palette rendering from `ChatScreen.kt` into new `ChatOverlays.kt`.
+- Reduced `ChatScreen.kt` responsibilities toward timeline/layout concerns while preserving behavior.
+- Continued DI cleanup from M1 by keeping route/factory wiring explicit and test-safe.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 17
+- Backlog done: 18
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 9
+- Backlog remaining (not done): 8
 - Reference completed items (not counted in backlog): 6
 
 ---
