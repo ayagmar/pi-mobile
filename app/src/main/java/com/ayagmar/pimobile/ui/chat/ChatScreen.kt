@@ -350,9 +350,6 @@ private fun ChatScreenContent(
             placement = "belowEditor",
         )
 
-        // Extension statuses
-        ExtensionStatuses(statuses = state.extensionStatuses)
-
         PromptControls(
             state = state,
             callbacks = callbacks,
@@ -366,123 +363,77 @@ private fun ChatHeader(
     state: ChatUiState,
     callbacks: ChatCallbacks,
 ) {
-    val clipboardManager = LocalClipboardManager.current
     val isCompact = state.isStreaming
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            val title = state.extensionTitle ?: "Chat"
-            Text(
-                text = title,
-                style = if (isCompact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
-            )
-
-            if (!isCompact && state.extensionTitle == null) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Top row: Title and minimal actions
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                val title = state.extensionTitle ?: "Chat"
                 Text(
-                    text = "Connection: ${state.connectionState.name.lowercase()}",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = title,
+                    style =
+                        if (isCompact) {
+                            MaterialTheme.typography.titleMedium
+                        } else {
+                            MaterialTheme.typography.headlineSmall
+                        },
                 )
-            }
-        }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            TextButton(onClick = callbacks.onShowTreeSheet) {
-                Text("Tree")
-            }
-
-            if (isCompact) {
-                IconButton(onClick = callbacks.onShowModelPicker) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Select model",
-                    )
-                }
-            } else {
-                IconButton(onClick = callbacks.onShowStatsSheet) {
-                    Icon(
-                        imageVector = Icons.Default.BarChart,
-                        contentDescription = "Session Stats",
-                    )
-                }
-
-                IconButton(
-                    onClick = {
-                        callbacks.onFetchLastAssistantText { text ->
-                            text?.let { clipboardManager.setText(AnnotatedString(it)) }
+                // Subtle connection status
+                if (!isCompact && state.extensionTitle == null) {
+                    val statusText =
+                        when (state.connectionState) {
+                            com.ayagmar.pimobile.corenet.ConnectionState.CONNECTED -> "●"
+                            com.ayagmar.pimobile.corenet.ConnectionState.CONNECTING -> "○"
+                            else -> "○"
                         }
-                    },
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Copy last assistant text",
-                    )
-                }
-
-                IconButton(onClick = callbacks.onShowBashDialog) {
-                    Icon(
-                        imageVector = Icons.Default.Terminal,
-                        contentDescription = "Run Bash",
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color =
+                            when (state.connectionState) {
+                                com.ayagmar.pimobile.corenet.ConnectionState.CONNECTED ->
+                                    MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.outline
+                            },
                     )
                 }
             }
+
+            // Minimal action buttons - only stats and more menu
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!isCompact) {
+                    IconButton(onClick = callbacks.onShowStatsSheet) {
+                        Icon(
+                            imageVector = Icons.Default.BarChart,
+                            contentDescription = "Stats",
+                        )
+                    }
+                }
+            }
         }
-    }
 
-    ModelThinkingControls(
-        currentModel = state.currentModel,
-        thinkingLevel = state.thinkingLevel,
-        onSetThinkingLevel = callbacks.onSetThinkingLevel,
-        onShowModelPicker = callbacks.onShowModelPicker,
-        compact = isCompact,
-    )
-
-    GlobalExpansionControls(
-        timeline = state.timeline,
-        onCollapseAll = callbacks.onCollapseAllToolAndReasoning,
-        onExpandAll = callbacks.onExpandAllToolAndReasoning,
-    )
-
-    state.errorMessage?.let { errorMessage ->
-        Text(
-            text = errorMessage,
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodyMedium,
+        // Compact model/thinking controls
+        ModelThinkingControls(
+            currentModel = state.currentModel,
+            thinkingLevel = state.thinkingLevel,
+            onSetThinkingLevel = callbacks.onSetThinkingLevel,
+            onShowModelPicker = callbacks.onShowModelPicker,
+            compact = true,
         )
-    }
-}
 
-@Composable
-private fun GlobalExpansionControls(
-    timeline: List<ChatTimelineItem>,
-    onCollapseAll: () -> Unit,
-    onExpandAll: () -> Unit,
-) {
-    val hasExpandableContent =
-        timeline.any { item ->
-            when (item) {
-                is ChatTimelineItem.Tool -> true
-                is ChatTimelineItem.Assistant -> !item.thinking.isNullOrBlank()
-                else -> false
-            }
-        }
-
-    if (!hasExpandableContent) {
-        return
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
-    ) {
-        TextButton(onClick = onCollapseAll) {
-            Text("Collapse all")
-        }
-        TextButton(onClick = onExpandAll) {
-            Text("Expand all")
+        // Error message if any
+        state.errorMessage?.let { errorMessage ->
+            Text(
+                text = errorMessage,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
@@ -1544,27 +1495,6 @@ private fun ExtensionWidgets(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ExtensionStatuses(statuses: Map<String, String>) {
-    if (statuses.isEmpty()) return
-
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        statuses.values.forEach { status ->
-            Text(
-                text = status,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
