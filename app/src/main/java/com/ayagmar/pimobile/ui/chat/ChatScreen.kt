@@ -9,7 +9,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -56,6 +56,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
@@ -110,8 +111,6 @@ private data class ChatCallbacks(
     val onAbort: () -> Unit,
     val onSteer: (String) -> Unit,
     val onFollowUp: (String) -> Unit,
-    val onCycleModel: () -> Unit,
-    val onCycleThinking: () -> Unit,
     val onSetThinkingLevel: (String) -> Unit,
     val onFetchLastAssistantText: ((String?) -> Unit) -> Unit,
     val onAbortRetry: () -> Unit,
@@ -171,8 +170,6 @@ fun ChatRoute() {
                 onAbort = chatViewModel::abort,
                 onSteer = chatViewModel::steer,
                 onFollowUp = chatViewModel::followUp,
-                onCycleModel = chatViewModel::cycleModel,
-                onCycleThinking = chatViewModel::cycleThinkingLevel,
                 onSetThinkingLevel = chatViewModel::setThinkingLevel,
                 onFetchLastAssistantText = chatViewModel::fetchLastAssistantText,
                 onAbortRetry = chatViewModel::abortRetry,
@@ -406,8 +403,6 @@ private fun ChatHeader(
     ModelThinkingControls(
         currentModel = state.currentModel,
         thinkingLevel = state.thinkingLevel,
-        onCycleModel = callbacks.onCycleModel,
-        onCycleThinking = callbacks.onCycleThinking,
         onSetThinkingLevel = callbacks.onSetThinkingLevel,
         onShowModelPicker = callbacks.onShowModelPicker,
     )
@@ -1569,78 +1564,92 @@ private fun SteerFollowUpDialog(
 private fun ModelThinkingControls(
     currentModel: ModelInfo?,
     thinkingLevel: String?,
-    onCycleModel: () -> Unit,
-    onCycleThinking: () -> Unit,
     onSetThinkingLevel: (String) -> Unit,
     onShowModelPicker: () -> Unit,
 ) {
     var showThinkingMenu by remember { mutableStateOf(false) }
 
+    val modelText = currentModel?.let { "${it.name}" } ?: "Select model"
+    val providerText = currentModel?.provider?.uppercase() ?: ""
+    val thinkingText = thinkingLevel?.uppercase() ?: "OFF"
+
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val modelText = currentModel?.let { "${it.name} (${it.provider})" } ?: "No model"
-        val thinkingText = thinkingLevel?.let { "Thinking: $it" } ?: "Thinking: off"
-
-        // Model button - tap to cycle, long press for picker
-        Box(
-            modifier =
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .combinedClickable(
-                        onClick = onCycleModel,
-                        onLongClick = onShowModelPicker,
-                    )
-                    .padding(8.dp),
-        ) {
-            Text(
-                text = modelText,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-
-        Row(
+        // Model selector button
+        OutlinedButton(
+            onClick = onShowModelPicker,
             modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            TextButton(
-                onClick = onCycleThinking,
-                modifier = Modifier.weight(1f),
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    text = thinkingText,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
                 )
-            }
-
-            Box {
-                IconButton(onClick = { showThinkingMenu = true }) {
-                    Icon(
-                        imageVector = Icons.Default.ExpandMore,
-                        contentDescription = "Set thinking level",
+                Column {
+                    Text(
+                        text = modelText,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
                     )
-                }
-
-                DropdownMenu(
-                    expanded = showThinkingMenu,
-                    onDismissRequest = { showThinkingMenu = false },
-                ) {
-                    THINKING_LEVEL_OPTIONS.forEach { level ->
-                        DropdownMenuItem(
-                            text = { Text(level) },
-                            onClick = {
-                                onSetThinkingLevel(level)
-                                showThinkingMenu = false
-                            },
+                    if (providerText.isNotEmpty()) {
+                        Text(
+                            text = providerText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            maxLines = 1,
                         )
                     }
+                }
+            }
+        }
+
+        // Thinking level selector
+        Box(modifier = Modifier.wrapContentWidth()) {
+            OutlinedButton(
+                onClick = { showThinkingMenu = true },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Menu,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text = thinkingText,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+
+            DropdownMenu(
+                expanded = showThinkingMenu,
+                onDismissRequest = { showThinkingMenu = false },
+            ) {
+                THINKING_LEVEL_OPTIONS.forEach { level ->
+                    DropdownMenuItem(
+                        text = { Text(level.replaceFirstChar { it.uppercase() }) },
+                        onClick = {
+                            onSetThinkingLevel(level)
+                            showThinkingMenu = false
+                        },
+                    )
                 }
             }
         }
