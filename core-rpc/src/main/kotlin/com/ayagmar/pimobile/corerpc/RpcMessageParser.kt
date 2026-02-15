@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonPrimitive
 class RpcMessageParser(
     private val json: Json = defaultJson,
 ) {
+    @Suppress("CyclomaticComplexMethod")
     fun parse(line: String): RpcIncomingMessage {
         val jsonObject = parseObject(line)
         val type =
@@ -25,6 +26,10 @@ class RpcMessageParser(
             "extension_ui_request" -> json.decodeFromJsonElement<ExtensionUiRequestEvent>(jsonObject)
             "agent_start" -> json.decodeFromJsonElement<AgentStartEvent>(jsonObject)
             "agent_end" -> json.decodeFromJsonElement<AgentEndEvent>(jsonObject)
+            "auto_compaction_start" -> json.decodeFromJsonElement<AutoCompactionStartEvent>(jsonObject)
+            "auto_compaction_end" -> json.decodeFromJsonElement<AutoCompactionEndEvent>(jsonObject)
+            "auto_retry_start" -> json.decodeFromJsonElement<AutoRetryStartEvent>(jsonObject)
+            "auto_retry_end" -> json.decodeFromJsonElement<AutoRetryEndEvent>(jsonObject)
             else -> GenericRpcEvent(type = type, payload = jsonObject)
         }
     }

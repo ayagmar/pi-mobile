@@ -5,6 +5,10 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.corerpc.AssistantTextAssembler
+import com.ayagmar.pimobile.corerpc.AutoCompactionEndEvent
+import com.ayagmar.pimobile.corerpc.AutoCompactionStartEvent
+import com.ayagmar.pimobile.corerpc.AutoRetryEndEvent
+import com.ayagmar.pimobile.corerpc.AutoRetryStartEvent
 import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionEndEvent
@@ -219,6 +223,10 @@ class ChatViewModel(
                     is ToolExecutionUpdateEvent -> handleToolUpdate(event)
                     is ToolExecutionEndEvent -> handleToolEnd(event)
                     is ExtensionUiRequestEvent -> handleExtensionUiRequest(event)
+                    is AutoCompactionStartEvent -> handleCompactionStart(event)
+                    is AutoCompactionEndEvent -> handleCompactionEnd(event)
+                    is AutoRetryStartEvent -> handleRetryStart(event)
+                    is AutoRetryEndEvent -> handleRetryEnd(event)
                     else -> Unit
                 }
             }
@@ -347,6 +355,60 @@ class ChatViewModel(
     private fun updateEditorText(event: ExtensionUiRequestEvent) {
         event.text?.let { text ->
             _uiState.update { it.copy(inputText = text) }
+        }
+    }
+
+    private fun handleCompactionStart(event: AutoCompactionStartEvent) {
+        val message =
+            when (event.reason) {
+                "threshold" -> "Compacting context (approaching limit)..."
+                "overflow" -> "Compacting context (overflow recovery)..."
+                else -> "Compacting context..."
+            }
+        addSystemNotification(message, "info")
+    }
+
+    private fun handleCompactionEnd(event: AutoCompactionEndEvent) {
+        val message =
+            when {
+                event.aborted -> "Compaction aborted"
+                event.willRetry -> "Compaction complete, retrying..."
+                else -> "Context compacted successfully"
+            }
+        val type = if (event.aborted) "warning" else "info"
+        addSystemNotification(message, type)
+    }
+
+    @Suppress("MagicNumber")
+    private fun handleRetryStart(event: AutoRetryStartEvent) {
+        val message = "Retrying (${event.attempt}/${event.maxAttempts}) in ${event.delayMs / 1000}s..."
+        addSystemNotification(message, "warning")
+    }
+
+    private fun handleRetryEnd(event: AutoRetryEndEvent) {
+        val message =
+            if (event.success) {
+                "Retry successful (attempt ${event.attempt})"
+            } else {
+                "Max retries exceeded: ${event.finalError ?: "Unknown error"}"
+            }
+        val type = if (event.success) "info" else "error"
+        addSystemNotification(message, type)
+    }
+
+    private fun addSystemNotification(
+        message: String,
+        type: String,
+    ) {
+        _uiState.update {
+            it.copy(
+                notifications =
+                    it.notifications +
+                        ExtensionNotification(
+                            message = message,
+                            type = type,
+                        ),
+            )
         }
     }
 

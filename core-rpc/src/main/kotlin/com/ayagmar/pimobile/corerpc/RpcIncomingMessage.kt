@@ -110,3 +110,34 @@ data class TurnEndEvent(
     val message: JsonObject? = null,
     val toolResults: List<JsonObject>? = null,
 ) : RpcEvent
+
+@Serializable
+data class AutoCompactionStartEvent(
+    override val type: String,
+    val reason: String,
+) : RpcEvent
+
+@Serializable
+data class AutoCompactionEndEvent(
+    override val type: String,
+    val summary: String? = null,
+    val aborted: Boolean = false,
+    val willRetry: Boolean = false,
+) : RpcEvent
+
+@Serializable
+data class AutoRetryStartEvent(
+    override val type: String,
+    val attempt: Int,
+    val maxAttempts: Int,
+    val delayMs: Int,
+    val errorMessage: String,
+) : RpcEvent
+
+@Serializable
+data class AutoRetryEndEvent(
+    override val type: String,
+    val success: Boolean,
+    val attempt: Int,
+    val finalError: String? = null,
+) : RpcEvent
