@@ -4,6 +4,7 @@ import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.BashResult
 import com.ayagmar.pimobile.corerpc.SessionStats
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -172,6 +173,52 @@ class RpcSessionControllerTest {
         assertEquals("GPT-4.1", model.name)
         assertEquals("openai", model.provider)
         assertEquals("off", model.thinkingLevel)
+    }
+
+    @Test
+    fun parseSessionTreeSnapshotMapsBridgePayload() {
+        val tree =
+            invokeParser<SessionTreeSnapshot>(
+                functionName = "parseSessionTreeSnapshot",
+                data =
+                    buildJsonObject {
+                        put("sessionPath", "/tmp/session-tree.jsonl")
+                        put("rootIds", buildJsonArray { add(JsonPrimitive("m1")) })
+                        put("currentLeafId", "m3")
+                        put(
+                            "entries",
+                            buildJsonArray {
+                                add(
+                                    buildJsonObject {
+                                        put("entryId", "m1")
+                                        put("entryType", "message")
+                                        put("role", "user")
+                                        put("preview", "first")
+                                    },
+                                )
+                                add(
+                                    buildJsonObject {
+                                        put("entryId", "m2")
+                                        put("parentId", "m1")
+                                        put("entryType", "message")
+                                        put("role", "assistant")
+                                        put("timestamp", "2026-02-01T00:00:02.000Z")
+                                        put("preview", "second")
+                                    },
+                                )
+                            },
+                        )
+                    },
+            )
+
+        assertEquals("/tmp/session-tree.jsonl", tree.sessionPath)
+        assertEquals(listOf("m1"), tree.rootIds)
+        assertEquals("m3", tree.currentLeafId)
+        assertEquals(2, tree.entries.size)
+        assertEquals("m1", tree.entries[0].entryId)
+        assertEquals(null, tree.entries[0].parentId)
+        assertEquals("m2", tree.entries[1].entryId)
+        assertEquals("m1", tree.entries[1].parentId)
     }
 
     @Test

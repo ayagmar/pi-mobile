@@ -44,6 +44,32 @@ describe("createSessionIndexer", () => {
         expect(projectB.sessions[0].lastModel).toBe("claude-sonnet-4");
     });
 
+    it("builds a session tree snapshot with parent relationships", async () => {
+        const fixturesDirectory = path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            "fixtures/sessions",
+        );
+
+        const sessionIndexer = createSessionIndexer({
+            sessionsDirectory: fixturesDirectory,
+            logger: createLogger("silent"),
+        });
+
+        const tree = await sessionIndexer.getSessionTree(
+            path.join(fixturesDirectory, "--tmp-project-a--", "2026-02-01T00-00-00-000Z_a1111111.jsonl"),
+        );
+
+        expect(tree.sessionPath).toContain("2026-02-01T00-00-00-000Z_a1111111.jsonl");
+        expect(tree.rootIds).toEqual(["m1"]);
+        expect(tree.currentLeafId).toBe("i1");
+        expect(tree.entries.map((entry) => entry.entryId)).toEqual(["m1", "m2", "i1"]);
+
+        const assistant = tree.entries.find((entry) => entry.entryId === "m2");
+        expect(assistant?.parentId).toBe("m1");
+        expect(assistant?.role).toBe("assistant");
+        expect(assistant?.preview).toContain("Working on it");
+    });
+
     it("returns an empty list if session directory does not exist", async () => {
         const sessionIndexer = createSessionIndexer({
             sessionsDirectory: "/tmp/path-does-not-exist-for-tests",

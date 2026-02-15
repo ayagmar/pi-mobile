@@ -171,6 +171,92 @@ describe("bridge websocket server", () => {
         ws.close();
     });
 
+    it("returns session tree payload via bridge_get_session_tree", async () => {
+        const fakeSessionIndexer = new FakeSessionIndexer(
+            [],
+            {
+                sessionPath: "/tmp/session-tree.jsonl",
+                rootIds: ["m1"],
+                currentLeafId: "m2",
+                entries: [
+                    {
+                        entryId: "m1",
+                        parentId: null,
+                        entryType: "message",
+                        role: "user",
+                        preview: "start",
+                    },
+                    {
+                        entryId: "m2",
+                        parentId: "m1",
+                        entryType: "message",
+                        role: "assistant",
+                        preview: "answer",
+                    },
+                ],
+            },
+        )
+        const { baseUrl, server } = await startBridgeServer({ sessionIndexer: fakeSessionIndexer });
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const waitForTree = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_session_tree");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_get_session_tree",
+                    sessionPath: "/tmp/session-tree.jsonl",
+                },
+            }),
+        );
+
+        const treeEnvelope = await waitForTree;
+
+        expect(fakeSessionIndexer.treeCalls).toBe(1);
+        expect(fakeSessionIndexer.requestedSessionPath).toBe("/tmp/session-tree.jsonl");
+        expect(treeEnvelope.payload?.type).toBe("bridge_session_tree");
+        expect(treeEnvelope.payload?.sessionPath).toBe("/tmp/session-tree.jsonl");
+        expect(treeEnvelope.payload?.rootIds).toEqual(["m1"]);
+        expect(treeEnvelope.payload?.currentLeafId).toBe("m2");
+
+        ws.close();
+    });
+
+    it("returns bridge_error for bridge_get_session_tree without sessionPath", async () => {
+        const { baseUrl, server } = await startBridgeServer();
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const waitForError = waitForEnvelope(ws, (envelope) => {
+            return envelope.payload?.type === "bridge_error" && envelope.payload?.code === "invalid_session_path";
+        });
+
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_get_session_tree",
+                },
+            }),
+        );
+
+        const errorEnvelope = await waitForError;
+        expect(errorEnvelope.payload?.message).toBe("sessionPath must be a non-empty string");
+
+        ws.close();
+    });
+
     it("forwards rpc payload using cwd-specific process manager context", async () => {
         const fakeProcessManager = new FakeProcessManager();
         const { baseUrl, server } = await startBridgeServer({ processManager: fakeProcessManager });
@@ -571,6 +657,8 @@ function isEnvelopeLike(value: unknown): value is EnvelopeLike {
 
 class FakeSessionIndexer implements SessionIndexer {
     listCalls = 0;
+    treeCalls = 0;
+    requestedSessionPath: string | undefined;
 
     constructor(
         private readonly groups: SessionIndexGroup[],
@@ -587,7 +675,8 @@ class FakeSessionIndexer implements SessionIndexer {
     }
 
     async getSessionTree(sessionPath: string): Promise<SessionTreeSnapshot> {
-        void sessionPath;
+        this.treeCalls += 1;
+        this.requestedSessionPath = sessionPath;
         return this.tree;
     }
 }
