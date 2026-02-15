@@ -7,6 +7,7 @@ import com.ayagmar.pimobile.corerpc.AssistantMessageEvent
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.BashResult
 import com.ayagmar.pimobile.corerpc.ImagePayload
+import com.ayagmar.pimobile.corerpc.MessageEndEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
 import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
 import com.ayagmar.pimobile.corerpc.RpcResponse
@@ -169,6 +170,48 @@ class ChatViewModelThinkingExpansionTest {
             assertEquals("hello world", finalItem.text)
             assertFalse(finalItem.isStreaming)
             assertEquals(longThinking, finalItem.thinking)
+        }
+
+    @Test
+    fun pendingAssistantDeltaIsFlushedWhenMessageEnds() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_start",
+                    messageTimestamp = "1733234567901",
+                ),
+            )
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = "Hello",
+                    messageTimestamp = "1733234567901",
+                ),
+            )
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = " world",
+                    messageTimestamp = "1733234567901",
+                ),
+            )
+            controller.emitEvent(
+                MessageEndEvent(
+                    type = "message_end",
+                    message =
+                        buildJsonObject {
+                            put("role", "assistant")
+                        },
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val item = viewModel.singleAssistantItem()
+            assertEquals("Hello world", item.text)
         }
 
     private fun ChatViewModel.assistantItems(): List<ChatTimelineItem.Assistant> =

@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ayagmar.pimobile.corenet.ConnectionState
+import com.ayagmar.pimobile.corerpc.AgentEndEvent
 import com.ayagmar.pimobile.corerpc.AssistantTextAssembler
+import com.ayagmar.pimobile.corerpc.AssistantTextUpdate
 import com.ayagmar.pimobile.corerpc.AutoCompactionEndEvent
 import com.ayagmar.pimobile.corerpc.AutoCompactionStartEvent
 import com.ayagmar.pimobile.corerpc.AutoRetryEndEvent
@@ -21,6 +23,7 @@ import com.ayagmar.pimobile.corerpc.ToolExecutionStartEvent
 import com.ayagmar.pimobile.corerpc.ToolExecutionUpdateEvent
 import com.ayagmar.pimobile.corerpc.TurnEndEvent
 import com.ayagmar.pimobile.corerpc.TurnStartEvent
+import com.ayagmar.pimobile.corerpc.UiUpdateThrottler
 import com.ayagmar.pimobile.di.AppServices
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import com.ayagmar.pimobile.sessions.ModelInfo
@@ -28,6 +31,8 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,6 +54,10 @@ class ChatViewModel(
 ) : ViewModel() {
     private val assembler = AssistantTextAssembler()
     private val _uiState = MutableStateFlow(ChatUiState(isLoading = true))
+    private val assistantUpdateThrottler = UiUpdateThrottler<AssistantTextUpdate>(ASSISTANT_UPDATE_THROTTLE_MS)
+    private val toolUpdateThrottlers = mutableMapOf<String, UiUpdateThrottler<ToolExecutionUpdateEvent>>()
+    private val toolUpdateFlushJobs = mutableMapOf<String, Job>()
+    private var assistantUpdateFlushJob: Job? = null
     private val recentLifecycleNotificationTimestamps = ArrayDeque<Long>()
     private var lastLifecycleNotificationMessage: String? = null
     private var lastLifecycleNotificationTimestampMs: Long = 0L
@@ -290,18 +299,35 @@ class ChatViewModel(
                 when (event) {
                     is MessageUpdateEvent -> handleMessageUpdate(event)
                     is MessageStartEvent -> handleMessageStart(event)
-                    is MessageEndEvent -> handleMessageEnd(event)
+                    is MessageEndEvent -> {
+                        flushPendingAssistantUpdate(force = true)
+                        handleMessageEnd(event)
+                    }
                     is TurnStartEvent -> handleTurnStart()
-                    is TurnEndEvent -> handleTurnEnd(event)
-                    is ToolExecutionStartEvent -> handleToolStart(event)
+                    is TurnEndEvent -> {
+                        flushAllPendingStreamUpdates(force = true)
+                        handleTurnEnd(event)
+                    }
+                    is ToolExecutionStartEvent -> {
+                        flushPendingToolUpdate(event.toolCallId, force = true)
+                        handleToolStart(event)
+                    }
                     is ToolExecutionUpdateEvent -> handleToolUpdate(event)
-                    is ToolExecutionEndEvent -> handleToolEnd(event)
+                    is ToolExecutionEndEvent -> {
+                        flushPendingToolUpdate(event.toolCallId, force = true)
+                        handleToolEnd(event)
+                        clearToolUpdateThrottle(event.toolCallId)
+                    }
                     is ExtensionUiRequestEvent -> handleExtensionUiRequest(event)
-                    is ExtensionErrorEvent -> handleExtensionError(event)
+                    is ExtensionErrorEvent -> {
+                        flushAllPendingStreamUpdates(force = true)
+                        handleExtensionError(event)
+                    }
                     is AutoCompactionStartEvent -> handleCompactionStart(event)
                     is AutoCompactionEndEvent -> handleCompactionEnd(event)
                     is AutoRetryStartEvent -> handleRetryStart(event)
                     is AutoRetryEndEvent -> handleRetryEnd(event)
+                    is AgentEndEvent -> flushAllPendingStreamUpdates(force = true)
                     else -> Unit
                 }
             }
@@ -631,9 +657,28 @@ class ChatViewModel(
             hasRecordedFirstToken = true
         }
 
-        val update = assembler.apply(event) ?: return
-        val itemId = "assistant-stream-${update.messageKey}-${update.contentIndex}"
+        val assistantEventType = event.assistantMessageEvent?.type
+        if (assistantEventType == "done" || assistantEventType == "error") {
+            flushPendingAssistantUpdate(force = true)
+            return
+        }
 
+        val update = assembler.apply(event) ?: return
+        val isHighFrequencyDelta =
+            assistantEventType == "text_delta" ||
+                assistantEventType == "thinking_delta"
+
+        if (isHighFrequencyDelta) {
+            assistantUpdateThrottler.offer(update)?.let(::applyAssistantUpdate)
+                ?: scheduleAssistantUpdateFlush()
+        } else {
+            flushPendingAssistantUpdate(force = true)
+            applyAssistantUpdate(update)
+        }
+    }
+
+    private fun applyAssistantUpdate(update: AssistantTextUpdate) {
+        val itemId = "assistant-stream-${update.messageKey}-${update.contentIndex}"
         val nextItem =
             ChatTimelineItem.Assistant(
                 id = itemId,
@@ -921,6 +966,16 @@ class ChatViewModel(
     }
 
     private fun handleToolUpdate(event: ToolExecutionUpdateEvent) {
+        val throttler =
+            toolUpdateThrottlers.getOrPut(event.toolCallId) {
+                UiUpdateThrottler(TOOL_UPDATE_THROTTLE_MS)
+            }
+
+        throttler.offer(event)?.let(::applyToolUpdate)
+            ?: scheduleToolUpdateFlush(event.toolCallId)
+    }
+
+    private fun applyToolUpdate(event: ToolExecutionUpdateEvent) {
         val output = extractToolOutput(event.partialResult)
         val itemId = "tool-${event.toolCallId}"
         val isCollapsed = output.length > TOOL_COLLAPSE_THRESHOLD
@@ -960,6 +1015,77 @@ class ChatViewModel(
             )
 
         upsertTimelineItem(nextItem)
+    }
+
+    private fun scheduleAssistantUpdateFlush() {
+        if (assistantUpdateFlushJob?.isActive == true) return
+        assistantUpdateFlushJob =
+            viewModelScope.launch {
+                delay(ASSISTANT_UPDATE_THROTTLE_MS)
+                flushPendingAssistantUpdate(force = true)
+            }
+    }
+
+    private fun flushPendingAssistantUpdate(force: Boolean) {
+        val update =
+            if (force) {
+                assistantUpdateThrottler.flushPending()
+            } else {
+                assistantUpdateThrottler.drainReady()
+            }
+
+        if (update != null) {
+            applyAssistantUpdate(update)
+        }
+
+        if (!assistantUpdateThrottler.hasPending()) {
+            assistantUpdateFlushJob?.cancel()
+            assistantUpdateFlushJob = null
+        }
+    }
+
+    private fun scheduleToolUpdateFlush(toolCallId: String) {
+        val existingJob = toolUpdateFlushJobs[toolCallId]
+        if (existingJob?.isActive == true) return
+
+        toolUpdateFlushJobs[toolCallId] =
+            viewModelScope.launch {
+                delay(TOOL_UPDATE_THROTTLE_MS)
+                flushPendingToolUpdate(toolCallId = toolCallId, force = true)
+            }
+    }
+
+    private fun flushPendingToolUpdate(
+        toolCallId: String,
+        force: Boolean,
+    ) {
+        val throttler = toolUpdateThrottlers[toolCallId] ?: return
+        val update =
+            if (force) {
+                throttler.flushPending()
+            } else {
+                throttler.drainReady()
+            }
+
+        if (update != null) {
+            applyToolUpdate(update)
+        }
+
+        if (!throttler.hasPending()) {
+            toolUpdateFlushJobs.remove(toolCallId)?.cancel()
+        }
+    }
+
+    private fun clearToolUpdateThrottle(toolCallId: String) {
+        toolUpdateFlushJobs.remove(toolCallId)?.cancel()
+        toolUpdateThrottlers.remove(toolCallId)
+    }
+
+    private fun flushAllPendingStreamUpdates(force: Boolean) {
+        flushPendingAssistantUpdate(force = force)
+        toolUpdateThrottlers.keys.toList().forEach { toolCallId ->
+            flushPendingToolUpdate(toolCallId = toolCallId, force = force)
+        }
     }
 
     private fun upsertTimelineItem(item: ChatTimelineItem) {
@@ -1079,8 +1205,18 @@ class ChatViewModel(
         _uiState.update { it.copy(pendingImages = emptyList()) }
     }
 
+    override fun onCleared() {
+        assistantUpdateFlushJob?.cancel()
+        toolUpdateFlushJobs.values.forEach { it.cancel() }
+        toolUpdateFlushJobs.clear()
+        toolUpdateThrottlers.clear()
+        super.onCleared()
+    }
+
     companion object {
         private const val ASSISTANT_STREAM_PREFIX = "assistant-stream-"
+        private const val ASSISTANT_UPDATE_THROTTLE_MS = 40L
+        private const val TOOL_UPDATE_THROTTLE_MS = 50L
         private const val TOOL_COLLAPSE_THRESHOLD = 400
         private const val BASH_HISTORY_SIZE = 10
         private const val MAX_NOTIFICATIONS = 6
