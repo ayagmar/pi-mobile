@@ -49,7 +49,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 5 | Q1 Fix image-only prompt mismatch | DONE | fix(chat): allow image-only prompt flow and guard failed image encoding |  | ktlint✅ detekt✅ test✅ bridge✅ | ChatViewModel now allows empty text when image payloads exist |
 | 6 | Q2 Add full tree filters (`all` included) | DONE | feat(tree): add all filter end-to-end (bridge + app) |  | ktlint✅ detekt✅ test✅ bridge✅ | Added `all` in bridge validator/indexer + chat tree filter chips |
 | 7 | Q3 Command palette built-in parity layer | DONE | feat(chat): add built-in command support states in palette |  | ktlint✅ detekt✅ test✅ bridge✅ | Built-ins now appear as supported/bridge-backed/unsupported with explicit behavior |
-| 8 | Q4 Global collapse/expand controls | TODO |  |  |  |  |
+| 8 | Q4 Global collapse/expand controls | DONE | feat(chat): add global collapse/expand for tools and reasoning |  | ktlint✅ detekt✅ test✅ bridge✅ | Added one-tap header controls with view-model actions for tools/reasoning expansion |
 | 9 | Q5 Wire frame metrics into live chat | TODO |  |  |  |  |
 | 10 | Q6 Transport preference setting parity | TODO |  |  |  |  |
 | 11 | Q7 Queue inspector UX for pending steer/follow-up | TODO |  |  |  |  |
@@ -213,15 +213,33 @@ Notes/blockers:
 - Selecting or sending interactive-only built-ins now shows explicit mobile UX instead of silent no-op.
 ```
 
+### 2026-02-15
+
+```text
+Task: Q4
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Added global "Collapse all" / "Expand all" controls for tools and reasoning.
+- Hooked controls to new ChatViewModel actions for timeline-wide expansion state updates.
+- Added coverage for global expand/collapse behavior in ChatViewModel tests.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 7
+- Backlog done: 8
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 19
+- Backlog remaining (not done): 18
 - Reference completed items (not counted in backlog): 6
 
 ---

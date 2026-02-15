@@ -12,6 +12,7 @@ import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
 import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
 import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.corerpc.SessionStats
+import com.ayagmar.pimobile.corerpc.ToolExecutionStartEvent
 import com.ayagmar.pimobile.coresessions.SessionRecord
 import com.ayagmar.pimobile.hosts.HostProfile
 import com.ayagmar.pimobile.sessions.ForkableMessage
@@ -374,6 +375,54 @@ class ChatViewModelThinkingExpansionTest {
             dispatcher.scheduler.advanceUntilIdle()
 
             assertTrue(viewModel.uiState.value.isTreeSheetVisible)
+        }
+
+    @Test
+    fun globalCollapseAndExpandAffectToolsAndReasoning() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.emitEvent(
+                ToolExecutionStartEvent(
+                    type = "tool_execution_start",
+                    toolCallId = "tool-1",
+                    toolName = "bash",
+                    args = buildJsonObject { put("command", "echo test") },
+                ),
+            )
+            controller.emitEvent(
+                thinkingUpdate(
+                    eventType = "thinking_start",
+                    messageTimestamp = "1733234567999",
+                ),
+            )
+            controller.emitEvent(
+                thinkingUpdate(
+                    eventType = "thinking_delta",
+                    delta = "x".repeat(250),
+                    messageTimestamp = "1733234567999",
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.expandAllToolAndReasoning()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val expandedTool = viewModel.uiState.value.timeline.filterIsInstance<ChatTimelineItem.Tool>().firstOrNull()
+            val expandedAssistant = viewModel.singleAssistantItem()
+            expandedTool?.let { tool -> assertFalse(tool.isCollapsed) }
+            assertTrue(expandedAssistant.isThinkingExpanded)
+
+            viewModel.collapseAllToolAndReasoning()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val collapsedTool = viewModel.uiState.value.timeline.filterIsInstance<ChatTimelineItem.Tool>().firstOrNull()
+            val collapsedAssistant = viewModel.singleAssistantItem()
+            collapsedTool?.let { tool -> assertTrue(tool.isCollapsed) }
+            assertFalse(collapsedAssistant.isThinkingExpanded)
         }
 
     @Test

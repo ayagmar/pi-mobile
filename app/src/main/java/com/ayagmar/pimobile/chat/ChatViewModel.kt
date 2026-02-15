@@ -859,6 +859,45 @@ class ChatViewModel(
         }
     }
 
+    fun collapseAllToolAndReasoning() {
+        fullTimeline =
+            fullTimeline.map { item ->
+                when (item) {
+                    is ChatTimelineItem.Tool -> item.copy(isCollapsed = true, isDiffExpanded = false)
+                    is ChatTimelineItem.Assistant -> item.copy(isThinkingExpanded = false)
+                    else -> item
+                }
+            }
+
+        publishVisibleTimeline()
+        _uiState.update { state -> state.copy(expandedToolArguments = emptySet()) }
+    }
+
+    fun expandAllToolAndReasoning() {
+        fullTimeline =
+            fullTimeline.map { item ->
+                when (item) {
+                    is ChatTimelineItem.Tool ->
+                        item.copy(
+                            isCollapsed = false,
+                            isDiffExpanded = item.editDiff != null,
+                        )
+
+                    is ChatTimelineItem.Assistant -> item.copy(isThinkingExpanded = !item.thinking.isNullOrBlank())
+                    else -> item
+                }
+            }
+
+        val expandedArgumentToolIds =
+            fullTimeline
+                .filterIsInstance<ChatTimelineItem.Tool>()
+                .filter { tool -> tool.arguments.isNotEmpty() }
+                .mapTo(mutableSetOf()) { tool -> tool.id }
+
+        publishVisibleTimeline()
+        _uiState.update { state -> state.copy(expandedToolArguments = expandedArgumentToolIds) }
+    }
+
     // Bash dialog functions
     fun showBashDialog() {
         _uiState.update {

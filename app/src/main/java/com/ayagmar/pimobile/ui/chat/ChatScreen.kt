@@ -106,6 +106,8 @@ private data class ChatCallbacks(
     val onToggleThinkingExpansion: (String) -> Unit,
     val onToggleDiffExpansion: (String) -> Unit,
     val onToggleToolArgumentsExpansion: (String) -> Unit,
+    val onCollapseAllToolAndReasoning: () -> Unit,
+    val onExpandAllToolAndReasoning: () -> Unit,
     val onLoadOlderMessages: () -> Unit,
     val onInputTextChanged: (String) -> Unit,
     val onSendPrompt: () -> Unit,
@@ -165,6 +167,8 @@ fun ChatRoute() {
                 onToggleThinkingExpansion = chatViewModel::toggleThinkingExpansion,
                 onToggleDiffExpansion = chatViewModel::toggleDiffExpansion,
                 onToggleToolArgumentsExpansion = chatViewModel::toggleToolArgumentsExpansion,
+                onCollapseAllToolAndReasoning = chatViewModel::collapseAllToolAndReasoning,
+                onExpandAllToolAndReasoning = chatViewModel::expandAllToolAndReasoning,
                 onLoadOlderMessages = chatViewModel::loadOlderMessages,
                 onInputTextChanged = chatViewModel::onInputTextChanged,
                 onSendPrompt = chatViewModel::sendPrompt,
@@ -414,12 +418,50 @@ private fun ChatHeader(
         compact = isCompact,
     )
 
+    GlobalExpansionControls(
+        timeline = state.timeline,
+        onCollapseAll = callbacks.onCollapseAllToolAndReasoning,
+        onExpandAll = callbacks.onExpandAllToolAndReasoning,
+    )
+
     state.errorMessage?.let { errorMessage ->
         Text(
             text = errorMessage,
             color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.bodyMedium,
         )
+    }
+}
+
+@Composable
+private fun GlobalExpansionControls(
+    timeline: List<ChatTimelineItem>,
+    onCollapseAll: () -> Unit,
+    onExpandAll: () -> Unit,
+) {
+    val hasExpandableContent =
+        timeline.any { item ->
+            when (item) {
+                is ChatTimelineItem.Tool -> true
+                is ChatTimelineItem.Assistant -> !item.thinking.isNullOrBlank()
+                else -> false
+            }
+        }
+
+    if (!hasExpandableContent) {
+        return
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        TextButton(onClick = onCollapseAll) {
+            Text("Collapse all")
+        }
+        TextButton(onClick = onExpandAll) {
+            Text("Expand all")
+        }
     }
 }
 
