@@ -39,12 +39,24 @@ import com.ayagmar.pimobile.sessions.SessionsViewModelFactory
 import kotlinx.coroutines.delay
 
 @Composable
-fun SessionsRoute() {
+fun SessionsRoute(onNavigateToChat: () -> Unit = {}) {
     val context = LocalContext.current
     val factory = remember(context) { SessionsViewModelFactory(context) }
     val sessionsViewModel: SessionsViewModel = viewModel(factory = factory)
     val uiState by sessionsViewModel.uiState.collectAsStateWithLifecycle()
     var transientStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    // Refresh hosts when screen is resumed (e.g., after adding a host)
+    LaunchedEffect(Unit) {
+        sessionsViewModel.refreshHosts()
+    }
+
+    // Navigate to chat when session is successfully resumed
+    LaunchedEffect(sessionsViewModel) {
+        sessionsViewModel.navigateToChat.collect {
+            onNavigateToChat()
+        }
+    }
 
     LaunchedEffect(sessionsViewModel) {
         sessionsViewModel.messages.collect { message ->

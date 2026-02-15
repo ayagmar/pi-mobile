@@ -37,14 +37,20 @@ class SessionsViewModel(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SessionsUiState(isLoading = true))
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    private val _navigateToChat = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val uiState: StateFlow<SessionsUiState> = _uiState.asStateFlow()
     val messages: SharedFlow<String> = _messages.asSharedFlow()
+    val navigateToChat: SharedFlow<Unit> = _navigateToChat.asSharedFlow()
 
     private val collapsedCwds = linkedSetOf<String>()
     private var observeJob: Job? = null
     private var searchDebounceJob: Job? = null
 
     init {
+        loadHosts()
+    }
+
+    fun refreshHosts() {
         loadHosts()
     }
 
@@ -154,6 +160,7 @@ class SessionsViewModel(
 
             if (resumeResult.isSuccess) {
                 emitMessage("Resumed ${session.summaryTitle()}")
+                _navigateToChat.tryEmit(Unit)
             }
 
             _uiState.update { current ->

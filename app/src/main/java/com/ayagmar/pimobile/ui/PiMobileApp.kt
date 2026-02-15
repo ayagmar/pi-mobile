@@ -79,7 +79,14 @@ fun piMobileApp() {
                 HostsRoute()
             }
             composable(route = "sessions") {
-                SessionsRoute()
+                SessionsRoute(
+                    onNavigateToChat = {
+                        navController.navigate("chat") {
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
             }
             composable(route = "chat") {
                 ChatRoute()

@@ -25,12 +25,14 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
+import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
 class WebSocketTransport(
-    private val client: OkHttpClient = OkHttpClient(),
+    client: OkHttpClient? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : SocketTransport {
+    private val client: OkHttpClient = client ?: createDefaultClient()
     private val lifecycleMutex = Mutex()
     private val outboundQueue = Channel<String>(DEFAULT_OUTBOUND_BUFFER_CAPACITY)
     private val inbound =
@@ -298,6 +300,19 @@ class WebSocketTransport(
         private const val NORMAL_CLOSE_CODE = 1000
         private const val DEFAULT_INBOUND_BUFFER_CAPACITY = 256
         private const val DEFAULT_OUTBOUND_BUFFER_CAPACITY = 256
+
+        private fun createDefaultClient(): OkHttpClient {
+            return OkHttpClient.Builder()
+                .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
+                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .readTimeout(NO_TIMEOUT, TimeUnit.SECONDS)
+                .writeTimeout(NO_TIMEOUT, TimeUnit.SECONDS)
+                .build()
+        }
+
+        private const val PING_INTERVAL_SECONDS = 30L
+        private const val CONNECT_TIMEOUT_SECONDS = 10L
+        private const val NO_TIMEOUT = 0L
     }
 }
 
