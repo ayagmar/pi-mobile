@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 @Suppress("TooManyFunctions")
 class SessionsViewModel(
@@ -48,6 +50,9 @@ class SessionsViewModel(
     private val collapsedCwds = linkedSetOf<String>()
     private var observeJob: Job? = null
     private var searchDebounceJob: Job? = null
+    private var warmupConnectionJob: Job? = null
+    private var warmConnectionHostId: String? = null
+    private var warmConnectionCwd: String? = null
 
     init {
         loadHosts()
@@ -69,6 +74,7 @@ class SessionsViewModel(
 
         collapsedCwds.clear()
         searchDebounceJob?.cancel()
+        resetWarmConnectionIfHostChanged(hostId)
 
         _uiState.update { current ->
             current.copy(
@@ -131,15 +137,6 @@ class SessionsViewModel(
         }
     }
 
-    /**
-     * Creates a new session.
-     *
-     * FIXME (C4): This is a quick fix that establishes a connection before creating the session.
-     * Once C4 (persistent bridge connection) is implemented, this should be simplified to just
-     * send the new_session command over the existing connection.
-     *
-     * See: docs/ai/pi-mobile-final-adjustments-plan.md task C4
-     */
     fun newSession() {
         val hostId = _uiState.value.selectedHostId ?: return
         val selectedHost = _uiState.value.hosts.firstOrNull { host -> host.id == hostId } ?: return
@@ -155,40 +152,22 @@ class SessionsViewModel(
                 current.copy(isResuming = true, isPerformingAction = false, errorMessage = null)
             }
 
-            // FIXME (C4): Remove this connection step once persistent bridge connection is in place
-            val connectResult = connectForNewSession(selectedHost, token)
-
-            if (connectResult.isSuccess) {
-                completeNewSession(connectResult.getOrNull())
-            } else {
+            val cwd = resolveConnectionCwd(hostId)
+            val connectResult = sessionController.ensureConnected(selectedHost, token, cwd)
+            if (connectResult.isFailure) {
                 emitError(connectResult.exceptionOrNull()?.message ?: "Failed to connect for new session")
+                return@launch
             }
+
+            markConnectionWarm(hostId = hostId, cwd = cwd)
+            completeNewSession()
         }
     }
 
-    private suspend fun connectForNewSession(
-        host: HostProfile,
-        token: String,
-    ): Result<String?> =
-        runCatching {
-            // Use first group's CWD or a reasonable default
-            val cwd = _uiState.value.groups.firstOrNull()?.cwd ?: "/home/user"
-            val newSessionRecord =
-                SessionRecord(
-                    sessionPath = "",
-                    cwd = cwd,
-                    displayName = null,
-                    firstUserMessagePreview = null,
-                    updatedAt = "",
-                    createdAt = "",
-                )
-            sessionController.resume(hostProfile = host, token = token, session = newSessionRecord)
-                .getOrThrow()
-        }
-
-    private suspend fun completeNewSession(sessionPath: String?) {
+    private suspend fun completeNewSession() {
         val newSessionResult = sessionController.newSession()
         if (newSessionResult.isSuccess) {
+            val sessionPath = resolveActiveSessionPath()
             emitMessage("New session created")
             _navigateToChat.trySend(Unit)
             _uiState.update { current ->
@@ -201,6 +180,63 @@ class SessionsViewModel(
 
     private fun emitError(message: String) {
         _uiState.update { current -> current.copy(isResuming = false, errorMessage = message) }
+    }
+
+    private fun maybeWarmupConnection(
+        hostId: String,
+        preferredCwd: String?,
+    ) {
+        val selectedHost = _uiState.value.hosts.firstOrNull { host -> host.id == hostId }
+        val shouldSkipWarmup =
+            preferredCwd.isNullOrBlank() ||
+                selectedHost == null ||
+                (warmConnectionHostId == hostId && warmConnectionCwd == preferredCwd) ||
+                warmupConnectionJob?.isActive == true
+        if (shouldSkipWarmup) return
+
+        val cwd = requireNotNull(preferredCwd)
+
+        warmupConnectionJob =
+            viewModelScope.launch(Dispatchers.IO) {
+                val token = tokenStore.getToken(hostId)
+                if (token.isNullOrBlank()) return@launch
+
+                val result = sessionController.ensureConnected(requireNotNull(selectedHost), token, cwd)
+                if (result.isSuccess) {
+                    markConnectionWarm(hostId = hostId, cwd = cwd)
+                }
+            }
+    }
+
+    private fun resolveConnectionCwd(hostId: String): String {
+        val state = _uiState.value
+
+        return warmConnectionCwd?.takeIf { warmConnectionHostId == hostId }
+            ?: state.groups.firstOrNull()?.cwd
+            ?: DEFAULT_NEW_SESSION_CWD
+    }
+
+    private suspend fun resolveActiveSessionPath(): String? {
+        val stateResponse = sessionController.getState().getOrNull() ?: return null
+        return stateResponse.data
+            ?.get("sessionFile")
+            ?.jsonPrimitive
+            ?.contentOrNull
+    }
+
+    private fun markConnectionWarm(
+        hostId: String,
+        cwd: String,
+    ) {
+        warmConnectionHostId = hostId
+        warmConnectionCwd = cwd
+    }
+
+    private fun resetWarmConnectionIfHostChanged(hostId: String) {
+        if (warmConnectionHostId != null && warmConnectionHostId != hostId) {
+            warmConnectionHostId = null
+            warmConnectionCwd = null
+        }
     }
 
     fun resumeSession(session: SessionRecord) {
@@ -240,6 +276,7 @@ class SessionsViewModel(
                 )
 
             if (resumeResult.isSuccess) {
+                markConnectionWarm(hostId = hostId, cwd = session.cwd)
                 emitMessage("Resumed ${session.summaryTitle()}")
                 _navigateToChat.trySend(Unit)
             }
@@ -534,6 +571,8 @@ class SessionsViewModel(
                 )
             }
 
+            maybeWarmupConnection(hostId = selectedHostId, preferredCwd = _uiState.value.groups.firstOrNull()?.cwd)
+
             if (needsObserve) {
                 observeHost(selectedHostId)
                 viewModelScope.launch(Dispatchers.IO) {
@@ -560,6 +599,11 @@ class SessionsViewModel(
                             errorMessage = state.errorMessage,
                         )
                     }
+
+                    maybeWarmupConnection(
+                        hostId = hostId,
+                        preferredCwd = state.groups.firstOrNull()?.cwd,
+                    )
                 }
             }
     }
@@ -567,12 +611,14 @@ class SessionsViewModel(
     override fun onCleared() {
         observeJob?.cancel()
         searchDebounceJob?.cancel()
+        warmupConnectionJob?.cancel()
         _navigateToChat.close()
         super.onCleared()
     }
 }
 
 private const val SEARCH_DEBOUNCE_MS = 250L
+private const val DEFAULT_NEW_SESSION_CWD = "/home/user"
 
 sealed interface SessionAction {
     val successMessage: String

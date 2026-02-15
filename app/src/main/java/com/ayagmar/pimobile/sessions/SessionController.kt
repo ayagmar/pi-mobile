@@ -21,6 +21,14 @@ interface SessionController {
     val connectionState: StateFlow<ConnectionState>
     val isStreaming: StateFlow<Boolean>
 
+    suspend fun ensureConnected(
+        hostProfile: HostProfile,
+        token: String,
+        cwd: String,
+    ): Result<Unit>
+
+    suspend fun disconnect(): Result<Unit>
+
     suspend fun resume(
         hostProfile: HostProfile,
         token: String,

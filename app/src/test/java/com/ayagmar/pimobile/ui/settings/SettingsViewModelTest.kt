@@ -119,6 +119,14 @@ private class FakeSessionController : SessionController {
     var lastSteeringMode: String? = null
     var lastFollowUpMode: String? = null
 
+    override suspend fun ensureConnected(
+        hostProfile: HostProfile,
+        token: String,
+        cwd: String,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun disconnect(): Result<Unit> = Result.success(Unit)
+
     override suspend fun resume(
         hostProfile: HostProfile,
         token: String,

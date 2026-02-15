@@ -72,7 +72,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.util.UUID
 
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LargeClass")
 class RpcSessionController(
     private val connectionFactory: () -> PiRpcConnection = { PiRpcConnection() },
     private val connectTimeoutMs: Long = DEFAULT_TIMEOUT_MS,
@@ -85,6 +85,7 @@ class RpcSessionController(
     private val _isStreaming = MutableStateFlow(false)
 
     private var activeConnection: PiRpcConnection? = null
+    private var activeContext: ActiveConnectionContext? = null
     private var clientId: String = UUID.randomUUID().toString()
     private var rpcEventsJob: Job? = null
     private var connectionStateJob: Job? = null
@@ -94,6 +95,32 @@ class RpcSessionController(
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
     override val isStreaming: StateFlow<Boolean> = _isStreaming.asStateFlow()
 
+    override suspend fun ensureConnected(
+        hostProfile: HostProfile,
+        token: String,
+        cwd: String,
+    ): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                ensureConnectionLocked(
+                    hostProfile = hostProfile,
+                    token = token,
+                    cwd = cwd,
+                )
+                Unit
+            }
+        }
+    }
+
+    override suspend fun disconnect(): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                clearActiveConnection()
+                Unit
+            }
+        }
+    }
+
     override suspend fun resume(
         hostProfile: HostProfile,
         token: String,
@@ -101,29 +128,16 @@ class RpcSessionController(
     ): Result<String?> {
         return mutex.withLock {
             runCatching {
-                clearActiveConnection()
-
-                val nextConnection = connectionFactory()
-
-                val config =
-                    PiRpcConnectionConfig(
-                        target =
-                            WebSocketTarget(
-                                url = hostProfile.endpoint,
-                                headers = mapOf(AUTHORIZATION_HEADER to "Bearer $token"),
-                                connectTimeoutMs = connectTimeoutMs,
-                            ),
+                val connection =
+                    ensureConnectionLocked(
+                        hostProfile = hostProfile,
+                        token = token,
                         cwd = session.cwd,
-                        sessionPath = session.sessionPath,
-                        clientId = clientId,
-                        connectTimeoutMs = connectTimeoutMs,
-                        requestTimeoutMs = requestTimeoutMs,
                     )
 
-                runCatching {
-                    nextConnection.connect(config)
+                if (session.sessionPath.isNotBlank()) {
                     sendAndAwaitResponse(
-                        connection = nextConnection,
+                        connection = connection,
                         requestTimeoutMs = requestTimeoutMs,
                         command =
                             SwitchSessionCommand(
@@ -132,13 +146,9 @@ class RpcSessionController(
                             ),
                         expectedCommand = SWITCH_SESSION_COMMAND,
                     ).requireSuccess("Failed to resume selected session")
-                }.onFailure {
-                    runCatching { nextConnection.disconnect() }
-                }.getOrThrow()
+                }
 
-                activeConnection = nextConnection
-                observeConnection(nextConnection)
-                refreshCurrentSessionPath(nextConnection)
+                refreshCurrentSessionPath(connection)
             }
         }
     }
@@ -657,7 +667,61 @@ class RpcSessionController(
         }
     }
 
-    private suspend fun clearActiveConnection() {
+    private suspend fun ensureConnectionLocked(
+        hostProfile: HostProfile,
+        token: String,
+        cwd: String,
+    ): PiRpcConnection {
+        val normalizedCwd = cwd.trim()
+        require(normalizedCwd.isNotBlank()) { "cwd must not be blank" }
+
+        val currentConnection = activeConnection
+        val currentContext = activeContext
+        val shouldReuse =
+            currentConnection != null &&
+                currentContext != null &&
+                currentContext.matches(hostProfile = hostProfile, token = token, cwd = normalizedCwd) &&
+                _connectionState.value != ConnectionState.DISCONNECTED
+
+        if (shouldReuse) {
+            return requireNotNull(currentConnection)
+        }
+
+        clearActiveConnection(resetContext = false)
+
+        val nextConnection = connectionFactory()
+        val config =
+            PiRpcConnectionConfig(
+                target =
+                    WebSocketTarget(
+                        url = hostProfile.endpoint,
+                        headers = mapOf(AUTHORIZATION_HEADER to "Bearer $token"),
+                        connectTimeoutMs = connectTimeoutMs,
+                    ),
+                cwd = normalizedCwd,
+                clientId = clientId,
+                connectTimeoutMs = connectTimeoutMs,
+                requestTimeoutMs = requestTimeoutMs,
+            )
+
+        runCatching {
+            nextConnection.connect(config)
+        }.onFailure {
+            runCatching { nextConnection.disconnect() }
+        }.getOrThrow()
+
+        activeConnection = nextConnection
+        activeContext =
+            ActiveConnectionContext(
+                endpoint = hostProfile.endpoint,
+                token = token,
+                cwd = normalizedCwd,
+            )
+        observeConnection(nextConnection)
+        return nextConnection
+    }
+
+    private suspend fun clearActiveConnection(resetContext: Boolean = true) {
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
         streamingMonitorJob?.cancel()
@@ -667,6 +731,9 @@ class RpcSessionController(
 
         activeConnection?.disconnect()
         activeConnection = null
+        if (resetContext) {
+            activeContext = null
+        }
         _connectionState.value = ConnectionState.DISCONNECTED
         _isStreaming.value = false
     }
@@ -711,6 +778,20 @@ class RpcSessionController(
     private suspend fun refreshCurrentSessionPath(connection: PiRpcConnection): String? {
         val stateResponse = connection.requestState().requireSuccess("Failed to read connection state")
         return stateResponse.data.stringField("sessionFile")
+    }
+
+    private data class ActiveConnectionContext(
+        val endpoint: String,
+        val token: String,
+        val cwd: String,
+    ) {
+        fun matches(
+            hostProfile: HostProfile,
+            token: String,
+            cwd: String,
+        ): Boolean {
+            return endpoint == hostProfile.endpoint && this.token == token && this.cwd == cwd
+        }
     }
 
     companion object {

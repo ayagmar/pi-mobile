@@ -433,6 +433,14 @@ private class FakeSessionController : SessionController {
         events.emit(event)
     }
 
+    override suspend fun ensureConnected(
+        hostProfile: HostProfile,
+        token: String,
+        cwd: String,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun disconnect(): Result<Unit> = Result.success(Unit)
+
     override suspend fun resume(
         hostProfile: HostProfile,
         token: String,
