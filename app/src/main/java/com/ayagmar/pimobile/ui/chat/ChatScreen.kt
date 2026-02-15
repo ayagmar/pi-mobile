@@ -2,6 +2,8 @@
 
 package com.ayagmar.pimobile.ui.chat
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,17 +12,35 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +56,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -54,6 +80,7 @@ private data class ChatCallbacks(
     val onToggleToolExpansion: (String) -> Unit,
     val onToggleThinkingExpansion: (String) -> Unit,
     val onToggleDiffExpansion: (String) -> Unit,
+    val onToggleToolArgumentsExpansion: (String) -> Unit,
     val onInputTextChanged: (String) -> Unit,
     val onSendPrompt: () -> Unit,
     val onAbort: () -> Unit,
@@ -68,6 +95,13 @@ private data class ChatCallbacks(
     val onHideCommandPalette: () -> Unit,
     val onCommandsQueryChanged: (String) -> Unit,
     val onCommandSelected: (SlashCommandInfo) -> Unit,
+    // Bash callbacks
+    val onShowBashDialog: () -> Unit,
+    val onHideBashDialog: () -> Unit,
+    val onBashCommandChanged: (String) -> Unit,
+    val onExecuteBash: () -> Unit,
+    val onAbortBash: () -> Unit,
+    val onSelectBashHistory: (String) -> Unit,
 )
 
 @Composable
@@ -82,6 +116,7 @@ fun ChatRoute() {
                 onToggleToolExpansion = chatViewModel::toggleToolExpansion,
                 onToggleThinkingExpansion = chatViewModel::toggleThinkingExpansion,
                 onToggleDiffExpansion = chatViewModel::toggleDiffExpansion,
+                onToggleToolArgumentsExpansion = chatViewModel::toggleToolArgumentsExpansion,
                 onInputTextChanged = chatViewModel::onInputTextChanged,
                 onSendPrompt = chatViewModel::sendPrompt,
                 onAbort = chatViewModel::abort,
@@ -96,6 +131,12 @@ fun ChatRoute() {
                 onHideCommandPalette = chatViewModel::hideCommandPalette,
                 onCommandsQueryChanged = chatViewModel::onCommandsQueryChanged,
                 onCommandSelected = chatViewModel::onCommandSelected,
+                onShowBashDialog = chatViewModel::showBashDialog,
+                onHideBashDialog = chatViewModel::hideBashDialog,
+                onBashCommandChanged = chatViewModel::onBashCommandChanged,
+                onExecuteBash = chatViewModel::executeBash,
+                onAbortBash = chatViewModel::abortBash,
+                onSelectBashHistory = chatViewModel::selectBashHistoryItem,
             )
         }
 
@@ -134,6 +175,22 @@ private fun ChatScreen(
         onQueryChange = callbacks.onCommandsQueryChanged,
         onCommandSelected = callbacks.onCommandSelected,
         onDismiss = callbacks.onHideCommandPalette,
+    )
+
+    BashDialog(
+        isVisible = state.isBashDialogVisible,
+        command = state.bashCommand,
+        output = state.bashOutput,
+        exitCode = state.bashExitCode,
+        isExecuting = state.isBashExecuting,
+        wasTruncated = state.bashWasTruncated,
+        fullLogPath = state.bashFullLogPath,
+        history = state.bashHistory,
+        onCommandChange = callbacks.onBashCommandChanged,
+        onExecute = callbacks.onExecuteBash,
+        onAbort = callbacks.onAbortBash,
+        onSelectHistory = callbacks.onSelectBashHistory,
+        onDismiss = callbacks.onHideBashDialog,
     )
 }
 
@@ -185,19 +242,35 @@ private fun ChatHeader(
     state: ChatUiState,
     callbacks: ChatCallbacks,
 ) {
-    // Show extension title if set, otherwise "Chat"
-    val title = state.extensionTitle ?: "Chat"
-    Text(
-        text = title,
-        style = MaterialTheme.typography.headlineSmall,
-    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            // Show extension title if set, otherwise "Chat"
+            val title = state.extensionTitle ?: "Chat"
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+            )
 
-    // Only show connection status if no custom title
-    if (state.extensionTitle == null) {
-        Text(
-            text = "Connection: ${state.connectionState.name.lowercase()}",
-            style = MaterialTheme.typography.bodyMedium,
-        )
+            // Only show connection status if no custom title
+            if (state.extensionTitle == null) {
+                Text(
+                    text = "Connection: ${state.connectionState.name.lowercase()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+
+        // Bash button
+        IconButton(onClick = callbacks.onShowBashDialog) {
+            Icon(
+                imageVector = Icons.Default.Terminal,
+                contentDescription = "Run Bash",
+            )
+        }
     }
 
     ModelThinkingControls(
@@ -236,9 +309,11 @@ private fun ChatBody(
     } else {
         ChatTimeline(
             timeline = state.timeline,
+            expandedToolArguments = state.expandedToolArguments,
             onToggleToolExpansion = callbacks.onToggleToolExpansion,
             onToggleThinkingExpansion = callbacks.onToggleThinkingExpansion,
             onToggleDiffExpansion = callbacks.onToggleDiffExpansion,
+            onToggleToolArgumentsExpansion = callbacks.onToggleToolArgumentsExpansion,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -561,12 +636,15 @@ private fun CommandItem(
     }
 }
 
+@Suppress("LongParameterList")
 @Composable
 private fun ChatTimeline(
     timeline: List<ChatTimelineItem>,
+    expandedToolArguments: Set<String>,
     onToggleToolExpansion: (String) -> Unit,
     onToggleThinkingExpansion: (String) -> Unit,
     onToggleDiffExpansion: (String) -> Unit,
+    onToggleToolArgumentsExpansion: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -586,8 +664,10 @@ private fun ChatTimeline(
                 is ChatTimelineItem.Tool -> {
                     ToolCard(
                         item = item,
+                        isArgumentsExpanded = item.id in expandedToolArguments,
                         onToggleToolExpansion = onToggleToolExpansion,
                         onToggleDiffExpansion = onToggleDiffExpansion,
+                        onToggleArgumentsExpansion = onToggleToolArgumentsExpansion,
                     )
                 }
             }
@@ -703,30 +783,80 @@ private fun ThinkingBlock(
     }
 }
 
+@Suppress("LongMethod")
 @Composable
 private fun ToolCard(
     item: ChatTimelineItem.Tool,
+    isArgumentsExpanded: Boolean,
     onToggleToolExpansion: (String) -> Unit,
     onToggleDiffExpansion: (String) -> Unit,
+    onToggleArgumentsExpansion: (String) -> Unit,
 ) {
     val isEditTool = item.toolName == "edit" && item.editDiff != null
+    val toolInfo = getToolInfo(item.toolName)
+    val clipboardManager = LocalClipboardManager.current
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            val suffix =
-                when {
-                    item.isError -> "(error)"
-                    item.isStreaming -> "(running)"
-                    else -> ""
+            // Tool header with icon
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Tool icon with color
+                Box(
+                    modifier =
+                        Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(toolInfo.color.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = toolInfo.icon,
+                        contentDescription = item.toolName,
+                        tint = toolInfo.color,
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
 
-            Text(
-                text = "Tool: ${item.toolName} $suffix".trim(),
-                style = MaterialTheme.typography.titleSmall,
-            )
+                val suffix =
+                    when {
+                        item.isError -> "(error)"
+                        item.isStreaming -> "(running)"
+                        else -> ""
+                    }
+
+                Text(
+                    text = "${item.toolName} $suffix".trim(),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+
+                if (item.isStreaming) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+            }
+
+            // Collapsible arguments section
+            if (item.arguments.isNotEmpty()) {
+                ToolArgumentsSection(
+                    arguments = item.arguments,
+                    isExpanded = isArgumentsExpanded,
+                    onToggleExpand = { onToggleArgumentsExpansion(item.id) },
+                    onCopy = {
+                        val argsJson = item.arguments.entries.joinToString("\n") { (k, v) -> "\"$k\": \"$v\"" }
+                        clipboardManager.setText(AnnotatedString("{\n$argsJson\n}"))
+                    },
+                )
+            }
 
             // Show diff viewer for edit tools, otherwise show standard output
             if (isEditTool && item.editDiff != null) {
@@ -744,13 +874,21 @@ private fun ToolCard(
                         item.output
                     }
 
-                Text(
-                    text = displayOutput.ifBlank { "(no output yet)" },
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                SelectionContainer {
+                    Text(
+                        text = displayOutput.ifBlank { "(no output yet)" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
 
                 if (item.output.length > COLLAPSED_OUTPUT_LENGTH) {
                     TextButton(onClick = { onToggleToolExpansion(item.id) }) {
+                        Icon(
+                            imageVector = if (item.isCollapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
                         Text(if (item.isCollapsed) "Expand" else "Collapse")
                     }
                 }
@@ -758,6 +896,123 @@ private fun ToolCard(
         }
     }
 }
+
+@Suppress("LongMethod")
+@Composable
+private fun ToolArgumentsSection(
+    arguments: Map<String, String>,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onCopy: () -> Unit,
+) {
+    Column(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .padding(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier.clickable { onToggleExpand() },
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Arguments (${arguments.size})",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            IconButton(
+                onClick = onCopy,
+                modifier = Modifier.size(24.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = "Copy arguments",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        if (isExpanded) {
+            SelectionContainer {
+                Column(
+                    modifier = Modifier.padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    arguments.forEach { (key, value) ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = key,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                            Text(
+                                text = "=",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            val displayValue =
+                                if (value.length > MAX_ARG_DISPLAY_LENGTH) {
+                                    value.take(MAX_ARG_DISPLAY_LENGTH) + "…"
+                                } else {
+                                    value
+                                }
+                            Text(
+                                text = displayValue,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Get tool icon and color based on tool name.
+ */
+@Suppress("MagicNumber")
+private fun getToolInfo(toolName: String): ToolDisplayInfo {
+    return when (toolName) {
+        "read" -> ToolDisplayInfo(Icons.Default.Description, Color(0xFF2196F3)) // Blue
+        "write" -> ToolDisplayInfo(Icons.Default.Edit, Color(0xFF4CAF50)) // Green
+        "edit" -> ToolDisplayInfo(Icons.Default.Edit, Color(0xFFFFC107)) // Yellow/Amber
+        "bash" -> ToolDisplayInfo(Icons.Default.Terminal, Color(0xFF9C27B0)) // Purple
+        "grep", "rg" -> ToolDisplayInfo(Icons.Default.Search, Color(0xFFFF9800)) // Orange
+        "find" -> ToolDisplayInfo(Icons.Default.Search, Color(0xFFFF9800)) // Orange
+        "ls" -> ToolDisplayInfo(Icons.Default.Folder, Color(0xFF00BCD4)) // Cyan
+        else -> ToolDisplayInfo(Icons.Default.Terminal, Color(0xFF607D8B)) // Gray
+    }
+}
+
+private data class ToolDisplayInfo(
+    val icon: ImageVector,
+    val color: Color,
+)
 
 @Composable
 private fun PromptControls(
@@ -1029,3 +1284,220 @@ private fun ExtensionStatuses(statuses: Map<String, String>) {
 
 private const val COLLAPSED_OUTPUT_LENGTH = 280
 private const val THINKING_COLLAPSE_THRESHOLD = 280
+private const val MAX_ARG_DISPLAY_LENGTH = 100
+
+@Suppress("LongParameterList", "LongMethod")
+@Composable
+private fun BashDialog(
+    isVisible: Boolean,
+    command: String,
+    output: String,
+    exitCode: Int?,
+    isExecuting: Boolean,
+    wasTruncated: Boolean,
+    fullLogPath: String?,
+    history: List<String>,
+    onCommandChange: (String) -> Unit,
+    onExecute: () -> Unit,
+    onAbort: () -> Unit,
+    onSelectHistory: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (!isVisible) return
+
+    var showHistoryDropdown by remember { mutableStateOf(false) }
+    val clipboardManager = LocalClipboardManager.current
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { if (!isExecuting) onDismiss() },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Run Bash Command")
+                Icon(
+                    imageVector = Icons.Default.Terminal,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp, max = 400.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // Command input with history dropdown
+                Box {
+                    OutlinedTextField(
+                        value = command,
+                        onValueChange = onCommandChange,
+                        placeholder = { Text("Enter command...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        enabled = !isExecuting,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        trailingIcon = {
+                            if (history.isNotEmpty() && !isExecuting) {
+                                IconButton(onClick = { showHistoryDropdown = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.ExpandMore,
+                                        contentDescription = "History",
+                                    )
+                                }
+                            }
+                        },
+                    )
+
+                    DropdownMenu(
+                        expanded = showHistoryDropdown,
+                        onDismissRequest = { showHistoryDropdown = false },
+                    ) {
+                        history.forEach { historyCommand ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = historyCommand,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                    )
+                                },
+                                onClick = {
+                                    onSelectHistory(historyCommand)
+                                    showHistoryDropdown = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                // Output display
+                Card(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    colors =
+                        androidx.compose.material3.CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Output",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+
+                            if (output.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { clipboardManager.setText(AnnotatedString(output)) },
+                                    modifier = Modifier.size(24.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy output",
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                        }
+
+                        SelectionContainer {
+                            Text(
+                                text = output.ifEmpty { "(no output)" },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                        .verticalScroll(rememberScrollState()),
+                            )
+                        }
+                    }
+                }
+
+                // Exit code and truncation info
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (exitCode != null) {
+                        val exitColor =
+                            if (exitCode == 0) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            }
+                        AssistChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    text = "Exit: $exitCode",
+                                    color = exitColor,
+                                )
+                            },
+                        )
+                    }
+
+                    if (wasTruncated && fullLogPath != null) {
+                        TextButton(
+                            onClick = { clipboardManager.setText(AnnotatedString(fullLogPath)) },
+                        ) {
+                            Text(
+                                text = "Output truncated (copy path)",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (isExecuting) {
+                Button(
+                    onClick = onAbort,
+                    colors =
+                        androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                        ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Stop,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp).padding(end = 4.dp),
+                    )
+                    Text("Abort")
+                }
+            } else {
+                Button(
+                    onClick = onExecute,
+                    enabled = command.isNotBlank(),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp).padding(end = 4.dp),
+                    )
+                    Text("Execute")
+                }
+            }
+        },
+        dismissButton = {
+            if (!isExecuting) {
+                TextButton(onClick = onDismiss) {
+                    Text("Close")
+                }
+            }
+        },
+    )
+}

@@ -26,13 +26,13 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 | Task | Status | Commit | Verification | Notes |
 |------|--------|--------|--------------|-------|
 | **2.1** File Edit Diff View | `DONE` | 653cfe6 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Show unified diff for edit tool calls |
-| **2.2** Bash Tool Execution UI | `TODO` | - | - | Add bash dialog with streaming output |
-| **2.3** Enhanced Tool Argument Display | `TODO` | - | - | Collapsible arguments, tool icons |
+| **2.2** Bash Tool Execution UI | `DONE` | ce76ea5 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Full bash dialog with history, abort, exit code |
+| **2.3** Enhanced Tool Argument Display | `DONE` | ce76ea5 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Tool icons, collapsible arguments, copy functionality |
 
 ### Phase 2 Completion Criteria
-- [ ] Edit operations show diffs with syntax highlight
-- [ ] Bash commands executable from UI
-- [ ] Tool arguments visible and copyable
+- [x] Edit operations show diffs with syntax highlight
+- [x] Bash commands executable from UI
+- [x] Tool arguments visible and copyable
 
 ---
 

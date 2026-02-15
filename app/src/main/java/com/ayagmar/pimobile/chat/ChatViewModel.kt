@@ -34,7 +34,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LargeClass")
 class ChatViewModel(
     private val sessionController: SessionController,
 ) : ViewModel() {
@@ -543,6 +543,105 @@ class ChatViewModel(
         }
     }
 
+    fun toggleToolArgumentsExpansion(itemId: String) {
+        _uiState.update { state ->
+            val expanded = state.expandedToolArguments.toMutableSet()
+            if (itemId in expanded) {
+                expanded.remove(itemId)
+            } else {
+                expanded.add(itemId)
+            }
+            state.copy(expandedToolArguments = expanded)
+        }
+    }
+
+    // Bash dialog functions
+    fun showBashDialog() {
+        _uiState.update {
+            it.copy(
+                isBashDialogVisible = true,
+                bashCommand = "",
+                bashOutput = "",
+                bashExitCode = null,
+                isBashExecuting = false,
+                bashWasTruncated = false,
+                bashFullLogPath = null,
+            )
+        }
+    }
+
+    fun hideBashDialog() {
+        _uiState.update { it.copy(isBashDialogVisible = false) }
+    }
+
+    fun onBashCommandChanged(command: String) {
+        _uiState.update { it.copy(bashCommand = command) }
+    }
+
+    fun executeBash() {
+        val command = _uiState.value.bashCommand.trim()
+        if (command.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isBashExecuting = true,
+                    bashOutput = "Executing...\n",
+                    bashExitCode = null,
+                    bashWasTruncated = false,
+                    bashFullLogPath = null,
+                )
+            }
+
+            val result = sessionController.executeBash(command)
+
+            _uiState.update { state ->
+                if (result.isSuccess) {
+                    val bashResult = result.getOrNull()!!
+                    // Add to history if not already present
+                    val newHistory =
+                        if (command in state.bashHistory) {
+                            state.bashHistory
+                        } else {
+                            (listOf(command) + state.bashHistory).take(BASH_HISTORY_SIZE)
+                        }
+                    state.copy(
+                        isBashExecuting = false,
+                        bashOutput = bashResult.output,
+                        bashExitCode = bashResult.exitCode,
+                        bashWasTruncated = bashResult.wasTruncated,
+                        bashFullLogPath = bashResult.fullLogPath,
+                        bashHistory = newHistory,
+                    )
+                } else {
+                    state.copy(
+                        isBashExecuting = false,
+                        bashOutput = "Error: ${result.exceptionOrNull()?.message ?: "Unknown error"}",
+                        bashExitCode = -1,
+                    )
+                }
+            }
+        }
+    }
+
+    fun abortBash() {
+        viewModelScope.launch {
+            val result = sessionController.abortBash()
+            if (result.isSuccess) {
+                _uiState.update {
+                    it.copy(
+                        isBashExecuting = false,
+                        bashOutput = it.bashOutput + "\n--- Aborted ---",
+                    )
+                }
+            }
+        }
+    }
+
+    fun selectBashHistoryItem(command: String) {
+        _uiState.update { it.copy(bashCommand = command) }
+    }
+
     private fun handleToolStart(event: ToolExecutionStartEvent) {
         val arguments = extractToolArguments(event.args)
         val editDiff = if (event.toolName == "edit") extractEditDiff(event.args) else null
@@ -651,6 +750,7 @@ class ChatViewModel(
     companion object {
         private const val TOOL_COLLAPSE_THRESHOLD = 400
         private const val THINKING_COLLAPSE_THRESHOLD = 280
+        private const val BASH_HISTORY_SIZE = 10
     }
 }
 
@@ -672,6 +772,17 @@ data class ChatUiState(
     val commands: List<SlashCommandInfo> = emptyList(),
     val commandsQuery: String = "",
     val isLoadingCommands: Boolean = false,
+    // Bash dialog state
+    val isBashDialogVisible: Boolean = false,
+    val bashCommand: String = "",
+    val bashOutput: String = "",
+    val bashExitCode: Int? = null,
+    val isBashExecuting: Boolean = false,
+    val bashWasTruncated: Boolean = false,
+    val bashFullLogPath: String? = null,
+    val bashHistory: List<String> = emptyList(),
+    // Tool argument expansion state (per tool ID)
+    val expandedToolArguments: Set<String> = emptySet(),
 )
 
 data class ExtensionNotification(
