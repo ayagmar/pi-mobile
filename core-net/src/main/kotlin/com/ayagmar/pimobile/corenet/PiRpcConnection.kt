@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -46,8 +47,16 @@ class PiRpcConnection(
     private val pendingResponses = ConcurrentHashMap<String, CompletableDeferred<RpcResponse>>()
     private val bridgeChannels = ConcurrentHashMap<String, Channel<BridgeMessage>>()
 
-    private val _rpcEvents = MutableSharedFlow<RpcIncomingMessage>(extraBufferCapacity = DEFAULT_BUFFER_CAPACITY)
-    private val _bridgeEvents = MutableSharedFlow<BridgeMessage>(extraBufferCapacity = DEFAULT_BUFFER_CAPACITY)
+    private val _rpcEvents =
+        MutableSharedFlow<RpcIncomingMessage>(
+            extraBufferCapacity = DEFAULT_BUFFER_CAPACITY,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+    private val _bridgeEvents =
+        MutableSharedFlow<BridgeMessage>(
+            extraBufferCapacity = DEFAULT_BUFFER_CAPACITY,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
     private val _resyncEvents = MutableSharedFlow<RpcResyncSnapshot>(replay = 1, extraBufferCapacity = 1)
 
     private var inboundJob: Job? = null
@@ -66,6 +75,8 @@ class PiRpcConnection(
             startBackgroundJobs()
         }
 
+        val helloChannel = bridgeChannel(bridgeChannels, BRIDGE_HELLO_TYPE)
+
         transport.connect(resolvedConfig.targetWithClientId())
         withTimeout(resolvedConfig.connectTimeoutMs) {
             connectionState.first { state -> state == ConnectionState.CONNECTED }
@@ -73,7 +84,7 @@ class PiRpcConnection(
 
         val hello =
             withTimeout(resolvedConfig.requestTimeoutMs) {
-                bridgeChannel(bridgeChannels, BRIDGE_HELLO_TYPE).receive()
+                helloChannel.receive()
             }
         val resumed = hello.payload.booleanField("resumed") ?: false
         val helloCwd = hello.payload.stringField("cwd")
@@ -93,6 +104,10 @@ class PiRpcConnection(
     suspend fun disconnect() {
         lifecycleMutex.withLock {
             activeConfig = null
+            inboundJob?.cancel()
+            connectionMonitorJob?.cancel()
+            inboundJob = null
+            connectionMonitorJob = null
         }
 
         pendingResponses.values.forEach { deferred ->
@@ -100,7 +115,11 @@ class PiRpcConnection(
         }
         pendingResponses.clear()
 
+        bridgeChannels.values.forEach { channel ->
+            channel.close()
+        }
         bridgeChannels.clear()
+
         transport.disconnect()
     }
 
@@ -116,6 +135,9 @@ class PiRpcConnection(
     ): BridgeMessage {
         val config = activeConfig ?: error("Connection is not active")
 
+        val expectedChannel = bridgeChannel(bridgeChannels, expectedType)
+        val errorChannel = bridgeChannel(bridgeChannels, BRIDGE_ERROR_TYPE)
+
         transport.send(
             encodeEnvelope(
                 json = json,
@@ -124,11 +146,9 @@ class PiRpcConnection(
             ),
         )
 
-        val errorChannel = bridgeChannel(bridgeChannels, BRIDGE_ERROR_TYPE)
-
         return withTimeout(config.requestTimeoutMs) {
             select {
-                bridgeChannel(bridgeChannels, expectedType).onReceive { message ->
+                expectedChannel.onReceive { message ->
                     message
                 }
                 errorChannel.onReceive { message ->
@@ -211,16 +231,17 @@ class PiRpcConnection(
                     payload = envelope.payload,
                 )
             _bridgeEvents.emit(bridgeMessage)
-            bridgeChannel(bridgeChannels, bridgeMessage.type).trySend(bridgeMessage)
+            bridgeChannels[bridgeMessage.type]?.trySend(bridgeMessage)
         }
     }
 
     private suspend fun synchronizeAfterReconnect() {
         val config = activeConfig ?: return
 
+        val helloChannel = bridgeChannel(bridgeChannels, BRIDGE_HELLO_TYPE)
         val hello =
             withTimeout(config.requestTimeoutMs) {
-                bridgeChannel(bridgeChannels, BRIDGE_HELLO_TYPE).receive()
+                helloChannel.receive()
             }
         val resumed = hello.payload.booleanField("resumed") ?: false
         val helloCwd = hello.payload.stringField("cwd")
@@ -305,6 +326,8 @@ private suspend fun ensureBridgeControl(
     config: PiRpcConnectionConfig,
 ) {
     val errorChannel = bridgeChannel(channels, BRIDGE_ERROR_TYPE)
+    val cwdSetChannel = bridgeChannel(channels, BRIDGE_CWD_SET_TYPE)
+    val controlAcquiredChannel = bridgeChannel(channels, BRIDGE_CONTROL_ACQUIRED_TYPE)
 
     transport.send(
         encodeEnvelope(
@@ -320,7 +343,7 @@ private suspend fun ensureBridgeControl(
 
     withTimeout(config.requestTimeoutMs) {
         select<Unit> {
-            bridgeChannel(channels, BRIDGE_CWD_SET_TYPE).onReceive {
+            cwdSetChannel.onReceive {
                 Unit
             }
             errorChannel.onReceive { message ->
@@ -346,7 +369,7 @@ private suspend fun ensureBridgeControl(
 
     withTimeout(config.requestTimeoutMs) {
         select<Unit> {
-            bridgeChannel(channels, BRIDGE_CONTROL_ACQUIRED_TYPE).onReceive {
+            controlAcquiredChannel.onReceive {
                 Unit
             }
             errorChannel.onReceive { message ->
@@ -422,7 +445,7 @@ private fun bridgeChannel(
     type: String,
 ): Channel<BridgeMessage> {
     return channels.computeIfAbsent(type) {
-        Channel(Channel.UNLIMITED)
+        Channel(BRIDGE_CHANNEL_BUFFER_CAPACITY)
     }
 }
 
@@ -435,3 +458,4 @@ private const val BRIDGE_CHANNEL = "bridge"
 private const val BRIDGE_ERROR_TYPE = "bridge_error"
 private const val BRIDGE_CWD_SET_TYPE = "bridge_cwd_set"
 private const val BRIDGE_CONTROL_ACQUIRED_TYPE = "bridge_control_acquired"
+private const val BRIDGE_CHANNEL_BUFFER_CAPACITY = 16

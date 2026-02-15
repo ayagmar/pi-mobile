@@ -180,10 +180,16 @@ class SessionsViewModel(
             return
         }
 
+        if (_uiState.value.isLoadingForkMessages) {
+            return
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.update {
                 it.copy(
                     isLoadingForkMessages = true,
+                    isForkPickerVisible = true,
+                    forkCandidates = emptyList(),
                     errorMessage = null,
                     statusMessage = null,
                 )

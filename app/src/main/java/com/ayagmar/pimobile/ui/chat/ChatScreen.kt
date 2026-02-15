@@ -684,7 +684,10 @@ private fun CommandPalette(
                                     modifier = Modifier.padding(vertical = 4.dp),
                                 )
                             }
-                            items(commandsInGroup) { command ->
+                            items(
+                                items = commandsInGroup,
+                                key = { command -> "${command.source}:${command.name}" },
+                            ) { command ->
                                 CommandItem(
                                     command = command,
                                     onClick = { onCommandSelected(command) },
@@ -1305,7 +1308,10 @@ private fun ImageAttachmentStrip(
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        itemsIndexed(images) { index, image ->
+        itemsIndexed(
+            items = images,
+            key = { _, image -> image.uri },
+        ) { index, image ->
             ImageThumbnail(
                 image = image,
                 onRemove = { onRemove(index) },
@@ -2001,7 +2007,10 @@ private fun ModelPickerSheet(
                                     modifier = Modifier.padding(vertical = 8.dp),
                                 )
                             }
-                            items(modelsInGroup) { model ->
+                            items(
+                                items = modelsInGroup,
+                                key = { model -> "${model.provider}:${model.id}" },
+                            ) { model ->
                                 ModelItem(
                                     model = model,
                                     isSelected =
@@ -2164,7 +2173,10 @@ private fun TreeNavigationSheet(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            items(entries) { entry ->
+                            items(
+                                items = entries,
+                                key = { entry -> entry.entryId },
+                            ) { entry ->
                                 TreeEntryRow(
                                     entry = entry,
                                     depth = depthByEntry[entry.entryId] ?: 0,
@@ -2254,16 +2266,29 @@ private fun computeDepthMap(entries: List<SessionTreeEntry>): Map<String, Int> {
     val byId = entries.associateBy { it.entryId }
     val memo = mutableMapOf<String, Int>()
 
-    fun depth(entryId: String): Int {
+    fun depth(
+        entryId: String,
+        stack: MutableSet<String>,
+    ): Int {
         memo[entryId]?.let { return it }
-        val entry = byId[entryId] ?: return 0
-        val parentId = entry.parentId ?: return 0.also { memo[entryId] = it }
-        val value = depth(parentId) + 1
-        memo[entryId] = value
-        return value
+        if (!stack.add(entryId)) {
+            return 0
+        }
+
+        val entry = byId[entryId]
+        val resolvedDepth =
+            when {
+                entry == null -> 0
+                entry.parentId == null -> 0
+                else -> depth(entry.parentId, stack) + 1
+            }
+
+        stack.remove(entryId)
+        memo[entryId] = resolvedDepth
+        return resolvedDepth
     }
 
-    entries.forEach { entry -> depth(entry.entryId) }
+    entries.forEach { entry -> depth(entry.entryId, mutableSetOf()) }
     return memo
 }
 

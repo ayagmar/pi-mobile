@@ -47,6 +47,8 @@ export interface SessionIndexerOptions {
 }
 
 export function createSessionIndexer(options: SessionIndexerOptions): SessionIndexer {
+    const sessionsRoot = path.resolve(options.sessionsDirectory);
+
     return {
         async listSessions(): Promise<SessionIndexGroup[]> {
             const sessionFiles = await findSessionFiles(options.sessionsDirectory, options.logger);
@@ -77,9 +79,28 @@ export function createSessionIndexer(options: SessionIndexerOptions): SessionInd
         },
 
         async getSessionTree(sessionPath: string): Promise<SessionTreeSnapshot> {
-            return parseSessionTreeFile(sessionPath, options.logger);
+            const resolvedSessionPath = resolveSessionPath(sessionPath, sessionsRoot);
+            return parseSessionTreeFile(resolvedSessionPath, options.logger);
         },
     };
+}
+
+function resolveSessionPath(sessionPath: string, sessionsRoot: string): string {
+    const resolvedSessionPath = path.resolve(sessionPath);
+
+    const isWithinSessionsRoot =
+        resolvedSessionPath === sessionsRoot ||
+        resolvedSessionPath.startsWith(`${sessionsRoot}${path.sep}`);
+
+    if (!isWithinSessionsRoot) {
+        throw new Error("Session path is outside configured session directory");
+    }
+
+    if (!resolvedSessionPath.endsWith(".jsonl")) {
+        throw new Error("Session path must point to a .jsonl file");
+    }
+
+    return resolvedSessionPath;
 }
 
 async function findSessionFiles(rootDir: string, logger: Logger): Promise<string[]> {

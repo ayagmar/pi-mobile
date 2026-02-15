@@ -3,6 +3,7 @@ package com.ayagmar.pimobile.sessions
 import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.BashResult
+import com.ayagmar.pimobile.corerpc.ImagePayload
 import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
 import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.corerpc.SessionStats
@@ -32,7 +33,7 @@ interface SessionController {
 
     suspend fun sendPrompt(
         message: String,
-        images: List<com.ayagmar.pimobile.corerpc.ImagePayload> = emptyList(),
+        images: List<ImagePayload> = emptyList(),
     ): Result<Unit>
 
     suspend fun abort(): Result<Unit>

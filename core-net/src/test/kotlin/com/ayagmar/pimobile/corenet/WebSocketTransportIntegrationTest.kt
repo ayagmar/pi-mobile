@@ -88,6 +88,44 @@ class WebSocketTransportIntegrationTest {
         }
 
     @Test
+    fun `disconnect clears queued outbound messages`() {
+        runBlocking {
+            val server = MockWebServer()
+            val receivedMessages = Channel<String>(Channel.UNLIMITED)
+
+            server.enqueue(
+                MockResponse().withWebSocketUpgrade(
+                    object : WebSocketListener() {
+                        override fun onMessage(
+                            webSocket: WebSocket,
+                            text: String,
+                        ) {
+                            receivedMessages.trySend(text)
+                        }
+                    },
+                ),
+            )
+            server.start()
+
+            val transport = WebSocketTransport(client = OkHttpClient())
+
+            try {
+                transport.send("stale-before-connect")
+                transport.disconnect()
+                transport.connect(targetFor(server))
+
+                awaitState(transport, ConnectionState.CONNECTED)
+                assertFailsWith<kotlinx.coroutines.TimeoutCancellationException> {
+                    withTimeout(250) { receivedMessages.receive() }
+                }
+            } finally {
+                transport.disconnect()
+                server.shutdown()
+            }
+        }
+    }
+
+    @Test
     fun `reconnect flushes queued outbound message after socket drop`() =
         runBlocking {
             val server = MockWebServer()

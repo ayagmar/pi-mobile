@@ -3,6 +3,8 @@ package com.ayagmar.pimobile.ui.sessions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -25,9 +27,24 @@ fun SessionActionsRow(
     onCompactClick: () -> Unit,
 ) {
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(actionItems(onRenameClick, onForkClick, onExportClick, onCompactClick)) { actionItem ->
-            TextButton(onClick = actionItem.onClick, enabled = !isBusy) {
-                Text(actionItem.label)
+        item {
+            TextButton(onClick = onRenameClick, enabled = !isBusy) {
+                Text("Rename")
+            }
+        }
+        item {
+            TextButton(onClick = onForkClick, enabled = !isBusy) {
+                Text("Fork")
+            }
+        }
+        item {
+            TextButton(onClick = onExportClick, enabled = !isBusy) {
+                Text("Export")
+            }
+        }
+        item {
+            TextButton(onClick = onCompactClick, enabled = !isBusy) {
+                Text("Compact")
             }
         }
     }
@@ -83,12 +100,20 @@ fun ForkPickerDialog(
                 if (isLoading) {
                     CircularProgressIndicator()
                 } else {
-                    candidates.forEach { candidate ->
-                        TextButton(
-                            onClick = { onSelect(candidate.entryId) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(candidate.preview)
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        items(
+                            items = candidates,
+                            key = { candidate -> candidate.entryId },
+                        ) { candidate ->
+                            TextButton(
+                                onClick = { onSelect(candidate.entryId) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(candidate.preview)
+                            }
                         }
                     }
                 }
@@ -107,22 +132,3 @@ val SessionRecord.displayTitle: String
     get() {
         return displayName ?: firstUserMessagePreview ?: sessionPath.substringAfterLast('/')
     }
-
-private data class ActionItem(
-    val label: String,
-    val onClick: () -> Unit,
-)
-
-private fun actionItems(
-    onRenameClick: () -> Unit,
-    onForkClick: () -> Unit,
-    onExportClick: () -> Unit,
-    onCompactClick: () -> Unit,
-): List<ActionItem> {
-    return listOf(
-        ActionItem(label = "Rename", onClick = onRenameClick),
-        ActionItem(label = "Fork", onClick = onForkClick),
-        ActionItem(label = "Export", onClick = onExportClick),
-        ActionItem(label = "Compact", onClick = onCompactClick),
-    )
-}

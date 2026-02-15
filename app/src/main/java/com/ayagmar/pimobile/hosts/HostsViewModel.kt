@@ -131,9 +131,16 @@ class HostsViewModel(
                         }
                     }
 
+                val hasExistingToken = profile.id.isNotBlank() && tokenStore.hasToken(profile.id)
+                val hasProvidedToken = draft.token.isNotBlank()
+                if (!hasProvidedToken && !hasExistingToken) {
+                    _uiState.update { state -> state.copy(errorMessage = "Token is required") }
+                    return
+                }
+
                 viewModelScope.launch(Dispatchers.IO) {
                     profileStore.upsert(profile)
-                    if (draft.token.isNotBlank()) {
+                    if (hasProvidedToken) {
                         tokenStore.setToken(profile.id, draft.token)
                     }
                     refresh()

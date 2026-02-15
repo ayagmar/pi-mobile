@@ -97,6 +97,7 @@ class WebSocketTransport(
 
         jobToCancel?.cancel()
         jobToCancel?.join()
+        clearOutboundQueue()
         state.value = ConnectionState.DISCONNECTED
     }
 
@@ -272,6 +273,12 @@ class WebSocketTransport(
                 outboundQueue.trySend(queuedMessage)
                 return
             }
+        }
+    }
+
+    private fun clearOutboundQueue() {
+        while (outboundQueue.tryReceive().isSuccess) {
+            // drain stale unsent messages on explicit disconnect
         }
     }
 

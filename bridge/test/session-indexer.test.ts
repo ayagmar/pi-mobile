@@ -70,6 +70,22 @@ describe("createSessionIndexer", () => {
         expect(assistant?.preview).toContain("Working on it");
     });
 
+    it("rejects session tree requests outside configured session directory", async () => {
+        const fixturesDirectory = path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            "fixtures/sessions",
+        );
+
+        const sessionIndexer = createSessionIndexer({
+            sessionsDirectory: fixturesDirectory,
+            logger: createLogger("silent"),
+        });
+
+        await expect(sessionIndexer.getSessionTree("/etc/passwd")).rejects.toThrow(
+            "Session path is outside configured session directory",
+        );
+    });
+
     it("returns an empty list if session directory does not exist", async () => {
         const sessionIndexer = createSessionIndexer({
             sessionsDirectory: "/tmp/path-does-not-exist-for-tests",

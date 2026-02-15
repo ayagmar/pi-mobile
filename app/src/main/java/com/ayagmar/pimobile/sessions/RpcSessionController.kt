@@ -780,10 +780,8 @@ private fun JsonObject?.booleanField(fieldName: String): Boolean? {
 }
 
 private fun parseModelInfo(data: JsonObject?): ModelInfo? {
-    val model =
-        data?.get("model")?.jsonObject
-            ?: data?.takeIf { it.stringField("id") != null }
-            ?: return null
+    val nestedModel = data?.get("model") as? JsonObject
+    val model = nestedModel ?: data?.takeIf { it.stringField("id") != null } ?: return null
 
     return ModelInfo(
         id = model.stringField("id") ?: "unknown",

@@ -949,13 +949,9 @@ class ChatViewModel(
                                 existing is ChatTimelineItem.Assistant &&
                                     item is ChatTimelineItem.Assistant &&
                                     preserveThinkingState -> {
-                                    // Preserve thinking expansion state and collapse new thinking if long.
-                                    val shouldCollapse =
-                                        item.thinking != null &&
-                                            item.thinking.length > THINKING_COLLAPSE_THRESHOLD &&
-                                            !existing.isThinkingExpanded
+                                    // Preserve user expansion choice across streaming updates.
                                     item.copy(
-                                        isThinkingExpanded = existing.isThinkingExpanded && shouldCollapse,
+                                        isThinkingExpanded = existing.isThinkingExpanded,
                                     )
                                 }
                                 else -> item
@@ -993,7 +989,6 @@ class ChatViewModel(
 
     companion object {
         private const val TOOL_COLLAPSE_THRESHOLD = 400
-        private const val THINKING_COLLAPSE_THRESHOLD = 280
         private const val BASH_HISTORY_SIZE = 10
         private const val MAX_NOTIFICATIONS = 6
         private const val LIFECYCLE_NOTIFICATION_WINDOW_MS = 5_000L
@@ -1267,7 +1262,7 @@ private fun JsonObject.booleanField(fieldName: String): Boolean? {
 }
 
 private fun parseModelInfo(data: JsonObject?): ModelInfo? {
-    val model = data?.get("model")?.jsonObject ?: return null
+    val model = data?.get("model") as? JsonObject ?: return null
     return ModelInfo(
         id = model.stringField("id") ?: "unknown",
         name = model.stringField("name") ?: "Unknown Model",

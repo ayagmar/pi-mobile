@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Result of connection diagnostics check.
@@ -145,7 +147,7 @@ class ConnectionDiagnostics {
 }
 
 private fun JsonObject.stringField(fieldName: String): String? {
-    return this[fieldName]?.toString()?.trim('"')
+    return this[fieldName]?.jsonPrimitive?.contentOrNull
 }
 
 private fun JsonObject.extractModelName(): String? {
@@ -156,6 +158,6 @@ private fun JsonObject.extractModelName(): String? {
 private fun JsonElement.extractModelName(): String? {
     return when (this) {
         is JsonObject -> stringField("name") ?: stringField("id")
-        else -> toString().trim('"')
+        else -> jsonPrimitive.contentOrNull
     }
 }
