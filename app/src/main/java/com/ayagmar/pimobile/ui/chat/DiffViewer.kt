@@ -44,6 +44,7 @@ import io.noties.prism4j.AbsVisitor
 import io.noties.prism4j.Prism4j
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 import java.util.LinkedHashMap
 
 private const val DEFAULT_COLLAPSED_DIFF_LINES = 120
@@ -460,7 +461,7 @@ private object PrismDiffHighlighter {
         language: SyntaxLanguage,
     ): List<HighlightSpan> {
         val grammarName = language.prismGrammarName ?: return emptyList()
-        val cacheKey = "$grammarName\u0000$content"
+        val cacheKey = cacheKey(grammarName = grammarName, content = content)
         val cached = synchronized(cache) { cache[cacheKey] }
 
         val spans =
@@ -471,6 +472,20 @@ private object PrismDiffHighlighter {
             }
 
         return spans
+    }
+
+    private fun cacheKey(
+        grammarName: String,
+        content: String,
+    ): String {
+        val hash = sha256Hex(content)
+        return "$grammarName:${content.length}:$hash"
+    }
+
+    private fun sha256Hex(content: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val bytes = digest.digest(content.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString(separator = "") { byte -> "%02x".format(byte) }
     }
 
     private fun computeUncached(
