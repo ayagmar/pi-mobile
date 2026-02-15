@@ -307,31 +307,13 @@ class ChatViewModel(
 
     fun toggleToolExpansion(itemId: String) {
         _uiState.update { state ->
-            state.copy(
-                timeline =
-                    state.timeline.map { item ->
-                        if (item is ChatTimelineItem.Tool && item.id == itemId) {
-                            item.copy(isCollapsed = !item.isCollapsed)
-                        } else {
-                            item
-                        }
-                    },
-            )
+            ChatTimelineReducer.toggleToolExpansion(state, itemId)
         }
     }
 
     fun toggleDiffExpansion(itemId: String) {
         _uiState.update { state ->
-            state.copy(
-                timeline =
-                    state.timeline.map { item ->
-                        if (item is ChatTimelineItem.Tool && item.id == itemId) {
-                            item.copy(isDiffExpanded = !item.isDiffExpanded)
-                        } else {
-                            item
-                        }
-                    },
-            )
+            ChatTimelineReducer.toggleDiffExpansion(state, itemId)
         }
     }
 
@@ -756,31 +738,13 @@ class ChatViewModel(
 
     fun toggleThinkingExpansion(itemId: String) {
         _uiState.update { state ->
-            val existingIndex = state.timeline.indexOfFirst { it.id == itemId }
-            if (existingIndex < 0) return@update state
-
-            val existing = state.timeline[existingIndex]
-            if (existing !is ChatTimelineItem.Assistant) return@update state
-
-            val updatedTimeline = state.timeline.toMutableList()
-            updatedTimeline[existingIndex] =
-                existing.copy(
-                    isThinkingExpanded = !existing.isThinkingExpanded,
-                )
-
-            state.copy(timeline = updatedTimeline)
+            ChatTimelineReducer.toggleThinkingExpansion(state, itemId)
         }
     }
 
     fun toggleToolArgumentsExpansion(itemId: String) {
         _uiState.update { state ->
-            val expanded = state.expandedToolArguments.toMutableSet()
-            if (itemId in expanded) {
-                expanded.remove(itemId)
-            } else {
-                expanded.add(itemId)
-            }
-            state.copy(expandedToolArguments = expanded)
+            ChatTimelineReducer.toggleToolArgumentsExpansion(state, itemId)
         }
     }
 
