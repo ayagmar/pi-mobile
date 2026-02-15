@@ -606,7 +606,7 @@ class ChatViewModel(
                 isStreaming = !update.isFinal,
             )
 
-        upsertTimelineItem(nextItem, preserveThinkingState = true)
+        upsertTimelineItem(nextItem)
     }
 
     fun toggleThinkingExpansion(itemId: String) {
@@ -925,37 +925,14 @@ class ChatViewModel(
         upsertTimelineItem(nextItem)
     }
 
-    private fun upsertTimelineItem(
-        item: ChatTimelineItem,
-        preserveThinkingState: Boolean = false,
-    ) {
+    private fun upsertTimelineItem(item: ChatTimelineItem) {
         _uiState.update { state ->
-            val existingIndex = state.timeline.indexOfFirst { existing -> existing.id == item.id }
+            val targetIndex = findUpsertTargetIndex(state.timeline, item)
             val updatedTimeline =
-                if (existingIndex >= 0) {
+                if (targetIndex >= 0) {
                     state.timeline.toMutableList().also { timeline ->
-                        val existing = timeline[existingIndex]
-                        timeline[existingIndex] =
-                            when {
-                                existing is ChatTimelineItem.Tool && item is ChatTimelineItem.Tool -> {
-                                    // Preserve user toggled expansion state across streaming updates.
-                                    // Also preserve arguments and editDiff if new item doesn't have them.
-                                    item.copy(
-                                        isCollapsed = existing.isCollapsed,
-                                        arguments = item.arguments.takeIf { it.isNotEmpty() } ?: existing.arguments,
-                                        editDiff = item.editDiff ?: existing.editDiff,
-                                    )
-                                }
-                                existing is ChatTimelineItem.Assistant &&
-                                    item is ChatTimelineItem.Assistant &&
-                                    preserveThinkingState -> {
-                                    // Preserve user expansion choice across streaming updates.
-                                    item.copy(
-                                        isThinkingExpanded = existing.isThinkingExpanded,
-                                    )
-                                }
-                                else -> item
-                            }
+                        val existing = timeline[targetIndex]
+                        timeline[targetIndex] = mergeTimelineItems(existing = existing, incoming = item)
                     }
                 } else {
                     state.timeline + item
@@ -963,6 +940,84 @@ class ChatViewModel(
 
             state.copy(timeline = updatedTimeline)
         }
+    }
+
+    private fun findUpsertTargetIndex(
+        timeline: List<ChatTimelineItem>,
+        incoming: ChatTimelineItem,
+    ): Int {
+        val directIndex = timeline.indexOfFirst { existing -> existing.id == incoming.id }
+        val contentIndex = assistantStreamContentIndex(incoming.id)
+        return when {
+            directIndex >= 0 -> directIndex
+            incoming !is ChatTimelineItem.Assistant -> -1
+            contentIndex == null -> -1
+            else ->
+                timeline.indexOfFirst { existing ->
+                    existing is ChatTimelineItem.Assistant &&
+                        existing.isStreaming &&
+                        assistantStreamContentIndex(existing.id) == contentIndex
+                }
+        }
+    }
+
+    private fun mergeTimelineItems(
+        existing: ChatTimelineItem,
+        incoming: ChatTimelineItem,
+    ): ChatTimelineItem =
+        when {
+            existing is ChatTimelineItem.Tool && incoming is ChatTimelineItem.Tool -> {
+                // Preserve user toggled expansion state across streaming updates.
+                // Also preserve arguments and editDiff if new item doesn't have them.
+                incoming.copy(
+                    isCollapsed = existing.isCollapsed,
+                    arguments = incoming.arguments.takeIf { it.isNotEmpty() } ?: existing.arguments,
+                    editDiff = incoming.editDiff ?: existing.editDiff,
+                )
+            }
+            existing is ChatTimelineItem.Assistant && incoming is ChatTimelineItem.Assistant -> {
+                // Preserve user expansion choice across all assistant streaming updates.
+                // Also guard against stream key remaps that can temporarily reset assembler buffers.
+                incoming.copy(
+                    text = mergeStreamingContent(existing.text, incoming.text).orEmpty(),
+                    thinking = mergeStreamingContent(existing.thinking, incoming.thinking),
+                    isThinkingExpanded = existing.isThinkingExpanded,
+                )
+            }
+            else -> incoming
+        }
+
+    private fun assistantStreamContentIndex(itemId: String): Int? {
+        if (!itemId.startsWith(ASSISTANT_STREAM_PREFIX)) return null
+        return itemId.substringAfterLast('-').toIntOrNull()
+    }
+
+    private fun mergeStreamingContent(
+        previous: String?,
+        incoming: String?,
+    ): String? {
+        return when {
+            previous.isNullOrEmpty() -> incoming
+            incoming.isNullOrEmpty() -> previous
+            incoming.startsWith(previous) -> incoming
+            previous.startsWith(incoming) -> previous
+            else -> mergeStreamingContentWithOverlap(previous, incoming)
+        }
+    }
+
+    private fun mergeStreamingContentWithOverlap(
+        previous: String,
+        incoming: String,
+    ): String {
+        val maxOverlap = minOf(previous.length, incoming.length)
+        var overlapLength = 0
+        for (overlap in maxOverlap downTo 1) {
+            if (previous.endsWith(incoming.substring(0, overlap))) {
+                overlapLength = overlap
+                break
+            }
+        }
+        return previous + incoming.substring(overlapLength)
     }
 
     fun addImage(pendingImage: PendingImage) {
@@ -988,6 +1043,7 @@ class ChatViewModel(
     }
 
     companion object {
+        private const val ASSISTANT_STREAM_PREFIX = "assistant-stream-"
         private const val TOOL_COLLAPSE_THRESHOLD = 400
         private const val BASH_HISTORY_SIZE = 10
         private const val MAX_NOTIFICATIONS = 6
