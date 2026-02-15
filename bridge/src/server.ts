@@ -64,6 +64,9 @@ interface PendingRpcEventWaiter {
 const PI_MOBILE_TREE_EXTENSION_PATH = path.resolve(
     fileURLToPath(new URL("./extensions/pi-mobile-tree.ts", import.meta.url)),
 );
+const PI_MOBILE_WORKFLOW_EXTENSION_PATH = path.resolve(
+    fileURLToPath(new URL("./extensions/pi-mobile-workflows.ts", import.meta.url)),
+);
 
 const TREE_NAVIGATION_COMMAND = "pi-mobile-tree";
 const TREE_NAVIGATION_STATUS_PREFIX = "pi_mobile_tree_result:";
@@ -87,7 +90,14 @@ export function createBridgeServer(
                 return createPiRpcForwarder(
                     {
                         command: "pi",
-                        args: ["--mode", "rpc", "--extension", PI_MOBILE_TREE_EXTENSION_PATH],
+                        args: [
+                            "--mode",
+                            "rpc",
+                            "--extension",
+                            PI_MOBILE_TREE_EXTENSION_PATH,
+                            "--extension",
+                            PI_MOBILE_WORKFLOW_EXTENSION_PATH,
+                        ],
                         cwd,
                     },
                     logger.child({ component: "rpc-forwarder", cwd }),

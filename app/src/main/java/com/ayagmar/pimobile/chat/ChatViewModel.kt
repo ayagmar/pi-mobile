@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -336,7 +337,12 @@ class ChatViewModel(
 
         when (normalized) {
             BUILTIN_TREE_COMMAND -> showTreeSheet()
-            BUILTIN_STATS_COMMAND -> showStatsSheet()
+            BUILTIN_STATS_COMMAND -> {
+                invokeInternalWorkflowCommand(INTERNAL_STATS_WORKFLOW_COMMAND) {
+                    showStatsSheet()
+                }
+            }
+
             BUILTIN_SETTINGS_COMMAND -> {
                 _uiState.update {
                     it.copy(errorMessage = "Use the Settings tab for /settings on mobile")
@@ -353,6 +359,21 @@ class ChatViewModel(
                 _uiState.update {
                     it.copy(errorMessage = "/$normalized is interactive-only and unavailable via RPC prompt")
                 }
+            }
+        }
+    }
+
+    private fun invokeInternalWorkflowCommand(
+        commandName: String,
+        onFailure: (() -> Unit)? = null,
+    ) {
+        viewModelScope.launch {
+            val result = sessionController.sendPrompt(message = "/$commandName")
+            if (result.isFailure) {
+                onFailure?.invoke()
+                    ?: _uiState.update {
+                        it.copy(errorMessage = result.exceptionOrNull()?.message)
+                    }
             }
         }
     }
@@ -381,7 +402,7 @@ class ChatViewModel(
     }
 
     private fun mergeRpcCommandsWithBuiltins(rpcCommands: List<SlashCommandInfo>): List<SlashCommandInfo> {
-        val visibleRpcCommands = rpcCommands.filterNot { it.name == INTERNAL_TREE_NAVIGATION_COMMAND }
+        val visibleRpcCommands = rpcCommands.filterNot { it.name in INTERNAL_HIDDEN_COMMAND_NAMES }
         if (visibleRpcCommands.isEmpty()) {
             return BUILTIN_COMMANDS
         }
@@ -597,6 +618,14 @@ class ChatViewModel(
     private fun updateExtensionStatus(event: ExtensionUiRequestEvent) {
         val key = event.statusKey ?: "default"
         val text = event.statusText?.stripAnsi()
+
+        if (key == INTERNAL_WORKFLOW_STATUS_KEY) {
+            if (text != null) {
+                handleInternalWorkflowStatus(text)
+            }
+            return
+        }
+
         _uiState.update { state ->
             val newStatuses = state.extensionStatuses.toMutableMap()
             if (text == null) {
@@ -605,6 +634,18 @@ class ChatViewModel(
                 newStatuses[key] = text
             }
             state.copy(extensionStatuses = newStatuses)
+        }
+    }
+
+    private fun handleInternalWorkflowStatus(payloadText: String) {
+        val action =
+            runCatching {
+                Json.parseToJsonElement(payloadText).jsonObject.stringField("action")
+            }.getOrNull()
+
+        when (action) {
+            INTERNAL_WORKFLOW_ACTION_OPEN_STATS -> showStatsSheet()
+            else -> Unit
         }
     }
 
@@ -1583,6 +1624,9 @@ class ChatViewModel(
         private const val BUILTIN_STATS_COMMAND = "stats"
         private const val BUILTIN_HOTKEYS_COMMAND = "hotkeys"
         private const val INTERNAL_TREE_NAVIGATION_COMMAND = "pi-mobile-tree"
+        private const val INTERNAL_STATS_WORKFLOW_COMMAND = "pi-mobile-open-stats"
+        private const val INTERNAL_WORKFLOW_STATUS_KEY = "pi-mobile-workflow-action"
+        private const val INTERNAL_WORKFLOW_ACTION_OPEN_STATS = "open_stats"
 
         private val BUILTIN_COMMANDS =
             listOf(
@@ -1617,6 +1661,11 @@ class ChatViewModel(
             )
 
         private val BUILTIN_COMMAND_NAMES = BUILTIN_COMMANDS.map { it.name }.toSet()
+        private val INTERNAL_HIDDEN_COMMAND_NAMES =
+            setOf(
+                INTERNAL_TREE_NAVIGATION_COMMAND,
+                INTERNAL_STATS_WORKFLOW_COMMAND,
+            )
 
         private val SLASH_COMMAND_TOKEN_REGEX = Regex("^/([a-zA-Z0-9:_-]*)$")
 

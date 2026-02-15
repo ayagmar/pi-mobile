@@ -95,7 +95,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 23 | H1 True `/tree` parity (in-place navigate) | DONE | feat(tree): add bridge-backed in-place tree navigation parity |  | ktlint✅ detekt✅ test✅ bridge✅ | Added bridge `bridge_navigate_tree` flow powered by internal Pi extension command (`ctx.navigateTree`), wired Chat jump action to in-place navigation (not fork), and propagated runtime current leaf to tree responses |
 | 24 | H2 Session parsing alignment with Pi internals | DONE | refactor(bridge): align session index parsing with pi metadata semantics |  | ktlint✅ detekt✅ test✅ bridge✅ | Added resilient tree normalization for legacy entries without ids, aligned `updatedAt` to user/assistant activity semantics, and mapped hidden active leaves to visible ancestors under tree filters with compatibility tests |
 | 25 | H3 Incremental session history loading strategy | DONE | perf(chat): incrementally parse resume history with paged windows |  | ktlint✅ detekt✅ test✅ bridge✅ | Added capped history window extraction with on-demand page parsing for older messages, preserving hidden-count pagination semantics while avoiding full-history timeline materialization on resume |
-| 26 | H4 Extension-ize selected hardcoded workflows | TODO |  |  |  |  |
+| 26 | H4 Extension-ize selected hardcoded workflows | DONE | feat(extensions): route mobile stats workflow through internal command |  | ktlint✅ detekt✅ test✅ bridge✅ | Added bridge-shipped `pi-mobile-workflows` extension command and routed `/stats` built-in through extension status actions, reducing app-side hardcoded workflow execution while preserving fallback UX |
 
 ---
 
@@ -536,15 +536,33 @@ Notes/blockers:
 - Added coverage for very large-session window cap behavior in `ChatViewModelThinkingExpansionTest`.
 ```
 
+### 2026-02-15
+
+```text
+Task: H4
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Added a second bridge-internal extension (`pi-mobile-workflows`) and loaded it alongside `pi-mobile-tree` for RPC sessions.
+- Routed mobile `/stats` built-in command through an extension command (`/pi-mobile-open-stats`) that emits internal status action payloads.
+- Added ChatViewModel handling/tests for internal workflow status actions and hidden internal command filtering from command palette.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 25
+- Backlog done: 26
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 1
+- Backlog remaining (not done): 0
 - Reference completed items (not counted in backlog): 6
 
 ---
@@ -556,7 +574,7 @@ Notes/blockers:
 - [x] Stability/security fixes complete
 - [x] Maintainability improvements complete
 - [x] Theming + Design System complete
-- [ ] Heavy hitters complete (or documented protocol limits)
+- [x] Heavy hitters complete (or documented protocol limits)
 - [x] Final green run (`ktlintCheck`, `detekt`, `test`, bridge check)
 
 ---

@@ -73,7 +73,7 @@ Sessions are grouped by working directory (cwd). Each session is a JSONL file in
 ### Process Management
 
 The bridge manages one pi process per cwd:
-- First connection to a project spawns pi (with a small internal extension for tree in-place navigation parity)
+- First connection to a project spawns pi (with small internal extensions for tree in-place navigation parity and mobile workflow commands)
 - Process stays alive with idle timeout
 - Reconnecting reuses the existing process
 - Crash restart with exponential backoff
@@ -99,7 +99,7 @@ App renders streaming text/tools
 - **Thinking blocks**: streaming reasoning appears separately and can be collapsed/expanded.
 - **Tool cards**: tool args/output are grouped with icons and expandable output.
 - **Edit diff viewer**: `edit` tool calls show before/after content.
-- **Command palette**: insert slash commands quickly from the prompt field menu.
+- **Command palette**: insert slash commands quickly from the prompt field menu, including extension-driven mobile workflows.
 - **Bash dialog**: execute shell commands with timeout/truncation handling and history.
 - **Session stats sheet**: token/cost/message counters and session path.
 - **Model picker**: provider-aware searchable model selection.
