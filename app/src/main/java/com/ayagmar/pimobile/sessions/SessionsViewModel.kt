@@ -17,8 +17,11 @@ import com.ayagmar.pimobile.hosts.SharedPreferencesHostProfileStore
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
@@ -32,13 +35,19 @@ class SessionsViewModel(
     private val sessionController: SessionController,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SessionsUiState(isLoading = true))
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val uiState: StateFlow<SessionsUiState> = _uiState.asStateFlow()
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
 
     private val collapsedCwds = linkedSetOf<String>()
     private var observeJob: Job? = null
 
     init {
         loadHosts()
+    }
+
+    private fun emitMessage(message: String) {
+        _messages.tryEmit(message)
     }
 
     fun onHostSelected(hostId: String) {
@@ -58,7 +67,6 @@ class SessionsViewModel(
                 isForkPickerVisible = false,
                 forkCandidates = emptyList(),
                 isLoadingForkMessages = false,
-                statusMessage = null,
                 errorMessage = null,
             )
         }
@@ -73,7 +81,6 @@ class SessionsViewModel(
         _uiState.update { current ->
             current.copy(
                 query = query,
-                statusMessage = null,
             )
         }
 
@@ -114,7 +121,6 @@ class SessionsViewModel(
                 _uiState.update { current ->
                     current.copy(
                         errorMessage = "No token configured for host ${selectedHost.name}",
-                        statusMessage = null,
                     )
                 }
                 return@launch
@@ -128,7 +134,6 @@ class SessionsViewModel(
                     forkCandidates = emptyList(),
                     isLoadingForkMessages = false,
                     errorMessage = null,
-                    statusMessage = null,
                 )
             }
 
@@ -139,18 +144,20 @@ class SessionsViewModel(
                     session = session,
                 )
 
+            if (resumeResult.isSuccess) {
+                emitMessage("Resumed ${session.summaryTitle()}")
+            }
+
             _uiState.update { current ->
                 if (resumeResult.isSuccess) {
                     current.copy(
                         isResuming = false,
                         activeSessionPath = resumeResult.getOrNull() ?: session.sessionPath,
-                        statusMessage = "Resumed ${session.summaryTitle()}",
                         errorMessage = null,
                     )
                 } else {
                     current.copy(
                         isResuming = false,
-                        statusMessage = null,
                         errorMessage =
                             resumeResult.exceptionOrNull()?.message
                                 ?: "Failed to resume session",
@@ -174,7 +181,6 @@ class SessionsViewModel(
             _uiState.update { current ->
                 current.copy(
                     errorMessage = "Resume a session before forking",
-                    statusMessage = null,
                 )
             }
             return
@@ -191,7 +197,6 @@ class SessionsViewModel(
                     isForkPickerVisible = true,
                     forkCandidates = emptyList(),
                     errorMessage = null,
-                    statusMessage = null,
                 )
             }
 
@@ -248,7 +253,6 @@ class SessionsViewModel(
             _uiState.update { current ->
                 current.copy(
                     errorMessage = "Resume a session before forking",
-                    statusMessage = null,
                 )
             }
             return
@@ -264,7 +268,6 @@ class SessionsViewModel(
                     isForkPickerVisible = false,
                     forkCandidates = emptyList(),
                     errorMessage = null,
-                    statusMessage = null,
                 )
             }
 
@@ -274,19 +277,21 @@ class SessionsViewModel(
                 repository.refresh(hostId)
             }
 
+            if (result.isSuccess) {
+                emitMessage("Forked from selected message")
+            }
+
             _uiState.update { current ->
                 if (result.isSuccess) {
                     val updatedPath = result.getOrNull() ?: current.activeSessionPath
                     current.copy(
                         isPerformingAction = false,
                         activeSessionPath = updatedPath,
-                        statusMessage = "Forked from selected message",
                         errorMessage = null,
                     )
                 } else {
                     current.copy(
                         isPerformingAction = false,
-                        statusMessage = null,
                         errorMessage = result.exceptionOrNull()?.message ?: "Fork failed",
                     )
                 }
@@ -300,7 +305,6 @@ class SessionsViewModel(
             _uiState.update { current ->
                 current.copy(
                     errorMessage = "Resume a session before running this action",
-                    statusMessage = null,
                 )
             }
             return
@@ -317,7 +321,6 @@ class SessionsViewModel(
                     forkCandidates = emptyList(),
                     isLoadingForkMessages = false,
                     errorMessage = null,
-                    statusMessage = null,
                 )
             }
 
@@ -327,19 +330,21 @@ class SessionsViewModel(
                 repository.refresh(hostId)
             }
 
+            if (result.isSuccess) {
+                emitMessage(action.successMessage)
+            }
+
             _uiState.update { current ->
                 if (result.isSuccess) {
                     val updatedPath = result.getOrNull() ?: current.activeSessionPath
                     current.copy(
                         isPerformingAction = false,
                         activeSessionPath = updatedPath,
-                        statusMessage = action.successMessage,
                         errorMessage = null,
                     )
                 } else {
                     current.copy(
                         isPerformingAction = false,
-                        statusMessage = null,
                         errorMessage = result.exceptionOrNull()?.message ?: "Session action failed",
                     )
                 }
@@ -353,7 +358,6 @@ class SessionsViewModel(
             _uiState.update { current ->
                 current.copy(
                     errorMessage = "Resume a session before exporting",
-                    statusMessage = null,
                 )
             }
             return
@@ -368,23 +372,24 @@ class SessionsViewModel(
                     forkCandidates = emptyList(),
                     isLoadingForkMessages = false,
                     errorMessage = null,
-                    statusMessage = null,
                 )
             }
 
             val exportResult = sessionController.exportSession()
 
+            if (exportResult.isSuccess) {
+                emitMessage("Exported HTML to ${exportResult.getOrNull()}")
+            }
+
             _uiState.update { current ->
                 if (exportResult.isSuccess) {
                     current.copy(
                         isPerformingAction = false,
-                        statusMessage = "Exported HTML to ${exportResult.getOrNull()}",
                         errorMessage = null,
                     )
                 } else {
                     current.copy(
                         isPerformingAction = false,
-                        statusMessage = null,
                         errorMessage = exportResult.exceptionOrNull()?.message ?: "Failed to export session",
                     )
                 }
@@ -403,7 +408,6 @@ class SessionsViewModel(
                         hosts = emptyList(),
                         selectedHostId = null,
                         groups = emptyList(),
-                        statusMessage = null,
                         errorMessage = "Add a host to browse sessions.",
                     )
                 }
@@ -417,7 +421,6 @@ class SessionsViewModel(
                     isLoading = true,
                     hosts = hosts,
                     selectedHostId = selectedHostId,
-                    statusMessage = null,
                     errorMessage = null,
                 )
             }
@@ -532,7 +535,6 @@ data class SessionsUiState(
     val isForkPickerVisible: Boolean = false,
     val forkCandidates: List<ForkableMessage> = emptyList(),
     val activeSessionPath: String? = null,
-    val statusMessage: String? = null,
     val errorMessage: String? = null,
 )
 

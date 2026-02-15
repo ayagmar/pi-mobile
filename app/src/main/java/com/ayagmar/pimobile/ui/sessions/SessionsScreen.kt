@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import com.ayagmar.pimobile.coresessions.SessionRecord
 import com.ayagmar.pimobile.sessions.CwdSessionGroupUiState
 import com.ayagmar.pimobile.sessions.SessionAction
@@ -42,9 +44,24 @@ fun SessionsRoute() {
     val factory = remember(context) { SessionsViewModelFactory(context) }
     val sessionsViewModel: SessionsViewModel = viewModel(factory = factory)
     val uiState by sessionsViewModel.uiState.collectAsStateWithLifecycle()
+    var transientStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(sessionsViewModel) {
+        sessionsViewModel.messages.collect { message ->
+            transientStatusMessage = message
+        }
+    }
+
+    LaunchedEffect(transientStatusMessage) {
+        if (transientStatusMessage != null) {
+            delay(3_000)
+            transientStatusMessage = null
+        }
+    }
 
     SessionsScreen(
         state = uiState,
+        transientStatusMessage = transientStatusMessage,
         callbacks =
             SessionsScreenCallbacks(
                 onHostSelected = sessionsViewModel::onHostSelected,
@@ -99,6 +116,7 @@ private data class RenameDialogUiState(
 @Composable
 private fun SessionsScreen(
     state: SessionsUiState,
+    transientStatusMessage: String?,
     callbacks: SessionsScreenCallbacks,
 ) {
     var renameDraft by remember { mutableStateOf("") }
@@ -128,7 +146,7 @@ private fun SessionsScreen(
 
         StatusMessages(
             errorMessage = state.errorMessage,
-            statusMessage = state.statusMessage,
+            statusMessage = transientStatusMessage,
         )
 
         SessionsContent(
