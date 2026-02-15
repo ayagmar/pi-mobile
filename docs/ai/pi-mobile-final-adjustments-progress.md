@@ -60,7 +60,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 12 | F1 Bridge event isolation + lock correctness | TODO |  |  |  |  |
+| 12 | F1 Bridge event isolation + lock correctness | DONE | fix(bridge): isolate rpc events to control owner per cwd |  | ktlint✅ detekt✅ test✅ bridge✅ | RPC forwarder events now require active control ownership before fan-out; added tests for shared-cwd isolation and post-release send rejection |
 | 13 | F2 Reconnect/resync race hardening | TODO |  |  |  |  |
 | 14 | F3 Bridge auth + exposure hardening | TODO |  |  |  |  |
 | 15 | F4 Android network security tightening | TODO |  |  |  |  |
@@ -284,15 +284,33 @@ Notes/blockers:
 - Queue state auto-resets when streaming ends and is covered by ChatViewModel tests.
 ```
 
+### 2026-02-15
+
+```text
+Task: F1
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Tightened bridge RPC event fan-out so only the client that currently holds control for a cwd receives process events.
+- Added server tests proving no same-cwd RPC leakage to non-controlling clients.
+- Added regression test ensuring RPC send is rejected once control is released.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 11
+- Backlog done: 12
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 15
+- Backlog remaining (not done): 14
 - Reference completed items (not counted in backlog): 6
 
 ---

@@ -420,6 +420,141 @@ describe("bridge websocket server", () => {
         ws.close();
     });
 
+    it("isolates rpc events to the controlling client for a shared cwd", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        const { baseUrl, server } = await startBridgeServer({ processManager: fakeProcessManager });
+        bridgeServer = server;
+
+        const wsA = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+        const wsB = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        for (const ws of [wsA, wsB]) {
+            const waitForCwdSet = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+            ws.send(
+                JSON.stringify({
+                    channel: "bridge",
+                    payload: {
+                        type: "bridge_set_cwd",
+                        cwd: "/tmp/shared-project",
+                    },
+                }),
+            );
+            await waitForCwdSet;
+        }
+
+        const waitForControlAcquired = waitForEnvelope(wsA, (envelope) => envelope.payload?.type === "bridge_control_acquired");
+        wsA.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                    cwd: "/tmp/shared-project",
+                },
+            }),
+        );
+        await waitForControlAcquired;
+
+        const waitForWsARpc = waitForEnvelope(
+            wsA,
+            (envelope) => envelope.channel === "rpc" && envelope.payload?.id === "evt-1",
+        );
+        fakeProcessManager.emitRpcEvent("/tmp/shared-project", {
+            id: "evt-1",
+            type: "response",
+            success: true,
+            command: "get_state",
+        });
+
+        const eventForOwner = await waitForWsARpc;
+        expect(eventForOwner.payload?.id).toBe("evt-1");
+
+        await expect(
+            waitForEnvelope(
+                wsB,
+                (envelope) => envelope.channel === "rpc" && envelope.payload?.id === "evt-1",
+                150,
+            ),
+        ).rejects.toThrow("Timed out waiting for websocket message");
+
+        wsA.close();
+        wsB.close();
+    });
+
+    it("blocks rpc send after control is released", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        const { baseUrl, server } = await startBridgeServer({ processManager: fakeProcessManager });
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const waitForCwdSet = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_set_cwd",
+                    cwd: "/tmp/project-a",
+                },
+            }),
+        );
+        await waitForCwdSet;
+
+        const waitForControlAcquired = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_control_acquired");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                    cwd: "/tmp/project-a",
+                },
+            }),
+        );
+        await waitForControlAcquired;
+
+        const waitForControlReleased = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_control_released");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_release_control",
+                    cwd: "/tmp/project-a",
+                },
+            }),
+        );
+        await waitForControlReleased;
+
+        const waitForControlRequiredError = waitForEnvelope(ws, (envelope) => {
+            return envelope.payload?.type === "bridge_error" && envelope.payload?.code === "control_lock_required";
+        });
+        ws.send(
+            JSON.stringify({
+                channel: "rpc",
+                payload: {
+                    id: "req-after-release",
+                    type: "get_state",
+                },
+            }),
+        );
+
+        const controlRequiredError = await waitForControlRequiredError;
+        expect(controlRequiredError.payload?.message).toContain("Acquire control first");
+        expect(fakeProcessManager.sentPayloads).toHaveLength(0);
+
+        ws.close();
+    });
+
     it("rejects concurrent control lock attempts for the same cwd", async () => {
         const fakeProcessManager = new FakeProcessManager();
         const { baseUrl, server } = await startBridgeServer({ processManager: fakeProcessManager });
@@ -682,6 +817,7 @@ interface EnvelopeLike {
 async function waitForEnvelope(
     ws: WebSocket,
     predicate: (envelope: EnvelopeLike) => boolean,
+    timeoutMs = 1_000,
 ): Promise<EnvelopeLike> {
     const buffer = envelopeBuffers.get(ws);
     if (!buffer) {
@@ -689,7 +825,7 @@ async function waitForEnvelope(
     }
 
     let cursor = 0;
-    const timeoutAt = Date.now() + 1_000;
+    const timeoutAt = Date.now() + timeoutMs;
 
     while (Date.now() < timeoutAt) {
         while (cursor < buffer.length) {
@@ -789,6 +925,10 @@ class FakeProcessManager implements PiProcessManager {
 
     private messageHandler: (event: ProcessManagerEvent) => void = () => {};
     private lockByCwd = new Map<string, string>();
+
+    emitRpcEvent(cwd: string, payload: Record<string, unknown>): void {
+        this.messageHandler({ cwd, payload });
+    }
 
     setMessageHandler(handler: (event: ProcessManagerEvent) => void): void {
         this.messageHandler = handler;

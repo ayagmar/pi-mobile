@@ -100,8 +100,8 @@ export function createBridgeServer(
         const rpcEnvelope = JSON.stringify(createRpcEnvelope(event.payload));
 
         for (const [client, context] of clientContexts.entries()) {
-            if (context.cwd !== event.cwd) continue;
             if (client.readyState !== WsWebSocket.OPEN) continue;
+            if (!canReceiveRpcEvent(context, event.cwd, processManager)) continue;
 
             client.send(rpcEnvelope);
         }
@@ -621,6 +621,18 @@ function getRequestedCwd(payload: Record<string, unknown>, context: ClientConnec
     }
 
     return context.cwd;
+}
+
+function canReceiveRpcEvent(
+    context: ClientConnectionContext,
+    cwd: string,
+    processManager: PiProcessManager,
+): boolean {
+    if (!context.cwd || context.cwd !== cwd) {
+        return false;
+    }
+
+    return processManager.hasControl(context.clientId, cwd);
 }
 
 function asUtf8String(data: RawData): string {
