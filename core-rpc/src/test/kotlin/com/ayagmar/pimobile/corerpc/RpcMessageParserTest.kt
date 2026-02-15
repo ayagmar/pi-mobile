@@ -83,6 +83,58 @@ class RpcMessageParserTest {
     }
 
     @Test
+    fun `parse message lifecycle events`() {
+        val startLine =
+            """
+            {
+              "type":"message_start",
+              "message":{"role":"assistant","id":"msg-1"}
+            }
+            """.trimIndent()
+        val endLine =
+            """
+            {
+              "type":"message_end",
+              "message":{"role":"assistant","id":"msg-1"}
+            }
+            """.trimIndent()
+
+        val start = assertIs<MessageStartEvent>(parser.parse(startLine))
+        assertEquals("message_start", start.type)
+        assertEquals("assistant", start.message?.get("role")?.toString()?.trim('"'))
+
+        val end = assertIs<MessageEndEvent>(parser.parse(endLine))
+        assertEquals("message_end", end.type)
+        assertEquals("msg-1", end.message?.get("id")?.toString()?.trim('"'))
+    }
+
+    @Test
+    fun `parse turn lifecycle events`() {
+        val startLine =
+            """
+            {
+              "type":"turn_start"
+            }
+            """.trimIndent()
+        val endLine =
+            """
+            {
+              "type":"turn_end",
+              "message":{"role":"assistant"},
+              "toolResults":[{"toolName":"bash"}]
+            }
+            """.trimIndent()
+
+        val start = assertIs<TurnStartEvent>(parser.parse(startLine))
+        assertEquals("turn_start", start.type)
+
+        val end = assertIs<TurnEndEvent>(parser.parse(endLine))
+        assertEquals("turn_end", end.type)
+        assertNotNull(end.message)
+        assertEquals(1, end.toolResults?.size)
+    }
+
+    @Test
     fun `parse tool execution events`() {
         val startLine =
             """
@@ -123,6 +175,27 @@ class RpcMessageParserTest {
         val end = assertIs<ToolExecutionEndEvent>(parser.parse(endLine))
         assertEquals("call-1", end.toolCallId)
         assertFalse(end.isError)
+    }
+
+    @Test
+    fun `parse extension error event`() {
+        val line =
+            """
+            {
+              "type":"extension_error",
+              "extensionPath":"/tmp/extensions/weather",
+              "event":"onPrompt",
+              "error":"boom",
+              "stack":"stack-trace"
+            }
+            """.trimIndent()
+
+        val event = assertIs<ExtensionErrorEvent>(parser.parse(line))
+        assertEquals("extension_error", event.type)
+        assertEquals("/tmp/extensions/weather", event.extensionPath)
+        assertEquals("onPrompt", event.event)
+        assertEquals("boom", event.error)
+        assertEquals("stack-trace", event.stack)
     }
 
     @Test

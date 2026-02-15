@@ -27,6 +27,18 @@ data class MessageUpdateEvent(
 ) : RpcEvent
 
 @Serializable
+data class MessageStartEvent(
+    override val type: String,
+    val message: JsonObject? = null,
+) : RpcEvent
+
+@Serializable
+data class MessageEndEvent(
+    override val type: String,
+    val message: JsonObject? = null,
+) : RpcEvent
+
+@Serializable
 data class AssistantMessageEvent(
     val type: String,
     val contentIndex: Int? = null,
@@ -80,6 +92,19 @@ data class ExtensionUiRequestEvent(
     val widgetPlacement: String? = null,
     val text: String? = null,
     val timeout: Long? = null,
+) : RpcEvent
+
+@Serializable
+data class ExtensionErrorEvent(
+    override val type: String,
+    val extensionPath: String? = null,
+    val path: String? = null,
+    val event: String? = null,
+    val extensionEvent: String? = null,
+    val error: String? = null,
+    val message: String? = null,
+    val stack: String? = null,
+    val details: JsonObject? = null,
 ) : RpcEvent
 
 @Serializable
