@@ -3,6 +3,7 @@
 package com.ayagmar.pimobile.ui.chat
 
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -95,6 +96,7 @@ import com.ayagmar.pimobile.chat.ImageEncoder
 import com.ayagmar.pimobile.chat.PendingImage
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.SessionStats
+import com.ayagmar.pimobile.perf.StreamingFrameMetrics
 import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionTreeEntry
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
@@ -221,6 +223,17 @@ private fun ChatScreen(
     state: ChatUiState,
     callbacks: ChatCallbacks,
 ) {
+    StreamingFrameMetrics(
+        isStreaming = state.isStreaming,
+        onJankDetected = { droppedFrame ->
+            Log.d(
+                STREAMING_FRAME_LOG_TAG,
+                "jank severity=${droppedFrame.severity} " +
+                    "frame=${droppedFrame.frameTimeMs}ms dropped=${droppedFrame.expectedFrames}",
+            )
+        },
+    )
+
     ChatScreenContent(
         state = state,
         callbacks = callbacks,
@@ -1865,6 +1878,7 @@ private const val COLLAPSED_OUTPUT_LENGTH = 280
 private const val THINKING_COLLAPSE_THRESHOLD = 280
 private const val MAX_ARG_DISPLAY_LENGTH = 100
 private const val NOTIFICATION_AUTO_DISMISS_MS = 4000L
+private const val STREAMING_FRAME_LOG_TAG = "StreamingFrameMetrics"
 private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")
 
 @Suppress("LongParameterList", "LongMethod")

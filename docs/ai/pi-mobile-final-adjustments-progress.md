@@ -50,7 +50,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 6 | Q2 Add full tree filters (`all` included) | DONE | feat(tree): add all filter end-to-end (bridge + app) |  | ktlint✅ detekt✅ test✅ bridge✅ | Added `all` in bridge validator/indexer + chat tree filter chips |
 | 7 | Q3 Command palette built-in parity layer | DONE | feat(chat): add built-in command support states in palette |  | ktlint✅ detekt✅ test✅ bridge✅ | Built-ins now appear as supported/bridge-backed/unsupported with explicit behavior |
 | 8 | Q4 Global collapse/expand controls | DONE | feat(chat): add global collapse/expand for tools and reasoning |  | ktlint✅ detekt✅ test✅ bridge✅ | Added one-tap header controls with view-model actions for tools/reasoning expansion |
-| 9 | Q5 Wire frame metrics into live chat | TODO |  |  |  |  |
+| 9 | Q5 Wire frame metrics into live chat | DONE | feat(perf): enable streaming frame-jank logging in chat screen |  | ktlint✅ detekt✅ test✅ bridge✅ | Hooked `StreamingFrameMetrics` into ChatScreen with per-jank log output |
 | 10 | Q6 Transport preference setting parity | TODO |  |  |  |  |
 | 11 | Q7 Queue inspector UX for pending steer/follow-up | TODO |  |  |  |  |
 
@@ -231,15 +231,32 @@ Notes/blockers:
 - Added coverage for global expand/collapse behavior in ChatViewModel tests.
 ```
 
+### 2026-02-15
+
+```text
+Task: Q5
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Activated StreamingFrameMetrics in ChatScreen when streaming is active.
+- Added jank logs with severity/frame-time/dropped-frame estimate for live chat rendering.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 8
+- Backlog done: 9
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 18
+- Backlog remaining (not done): 17
 - Reference completed items (not counted in backlog): 6
 
 ---
