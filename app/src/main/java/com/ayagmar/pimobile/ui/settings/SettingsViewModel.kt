@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.TransportPreference
+import com.ayagmar.pimobile.ui.theme.ThemePreference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -39,7 +40,7 @@ class SettingsViewModel(
         sharedPreferences
             ?: requireNotNull(context) {
                 "SettingsViewModel requires a Context when sharedPreferences is not provided"
-            }.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            }.getSharedPreferences(SETTINGS_PREFS_NAME, Context.MODE_PRIVATE)
 
     init {
         val appVersion =
@@ -49,6 +50,10 @@ class SettingsViewModel(
         val transportPreference =
             TransportPreference.fromValue(
                 prefs.getString(KEY_TRANSPORT_PREFERENCE, null),
+            )
+        val themePreference =
+            ThemePreference.fromValue(
+                prefs.getString(KEY_THEME_PREFERENCE, null),
             )
         sessionController.setTransportPreference(transportPreference)
         val effectiveTransport = sessionController.getEffectiveTransportPreference()
@@ -61,6 +66,7 @@ class SettingsViewModel(
                 transportPreference = transportPreference,
                 effectiveTransportPreference = effectiveTransport,
                 transportRuntimeNote = transportRuntimeNote(transportPreference, effectiveTransport),
+                themePreference = themePreference,
             )
 
         viewModelScope.launch {
@@ -201,6 +207,13 @@ class SettingsViewModel(
             )
     }
 
+    fun setThemePreference(preference: ThemePreference) {
+        if (preference == uiState.themePreference) return
+
+        prefs.edit().putString(KEY_THEME_PREFERENCE, preference.value).apply()
+        uiState = uiState.copy(themePreference = preference)
+    }
+
     fun setSteeringMode(mode: String) {
         if (mode == uiState.steeringMode) return
 
@@ -261,7 +274,6 @@ class SettingsViewModel(
         const val MODE_ALL = "all"
         const val MODE_ONE_AT_A_TIME = "one-at-a-time"
 
-        private const val PREFS_NAME = "pi_mobile_settings"
         private const val KEY_AUTO_COMPACTION = "auto_compaction_enabled"
         private const val KEY_AUTO_RETRY = "auto_retry_enabled"
         private const val KEY_TRANSPORT_PREFERENCE = "transport_preference"
@@ -306,6 +318,7 @@ data class SettingsUiState(
     val transportPreference: TransportPreference = TransportPreference.AUTO,
     val effectiveTransportPreference: TransportPreference = TransportPreference.WEBSOCKET,
     val transportRuntimeNote: String = "",
+    val themePreference: ThemePreference = ThemePreference.SYSTEM,
     val steeringMode: String = SettingsViewModel.MODE_ALL,
     val followUpMode: String = SettingsViewModel.MODE_ALL,
     val isUpdatingSteeringMode: Boolean = false,

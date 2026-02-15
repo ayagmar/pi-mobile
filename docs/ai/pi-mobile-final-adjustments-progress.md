@@ -83,7 +83,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 21 | T1 Centralized theme architecture (PiMobileTheme) | TODO |  |  |  | Light/dark mode, color schemes |
+| 21 | T1 Centralized theme architecture (PiMobileTheme) | DONE | feat(theme): add PiMobileTheme with system/light/dark preference |  | ktlint✅ detekt✅ test✅ bridge✅ | Added `ui/theme` package, wrapped app in `PiMobileTheme`, introduced persisted theme preference + settings controls, and removed chat hardcoded tool colors in favor of theme roles |
 | 22 | T2 Component design system | TODO |  |  |  | Reusable components, spacing tokens |
 
 ---
@@ -446,15 +446,33 @@ Notes/blockers:
 - Kept targeted rule suppressions only where still justified.
 ```
 
+### 2026-02-15
+
+```text
+Task: T1
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Added `PiMobileTheme` with dedicated light/dark color schemes and system/light/dark resolution.
+- Wired app root to observe persisted theme preference from shared settings and apply theme dynamically.
+- Added theme preference controls in Settings and removed hardcoded chat tool colors in favor of theme color roles.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 20
+- Backlog done: 21
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 6
+- Backlog remaining (not done): 5
 - Reference completed items (not counted in backlog): 6
 
 ---

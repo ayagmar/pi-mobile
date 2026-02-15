@@ -937,17 +937,17 @@ private fun ToolArgumentsSection(
 /**
  * Get tool icon and color based on tool name.
  */
-@Suppress("MagicNumber")
+@Composable
 private fun getToolInfo(toolName: String): ToolDisplayInfo {
+    val colors = MaterialTheme.colorScheme
     return when (toolName) {
-        "read" -> ToolDisplayInfo(Icons.Default.Description, Color(0xFF2196F3)) // Blue
-        "write" -> ToolDisplayInfo(Icons.Default.Edit, Color(0xFF4CAF50)) // Green
-        "edit" -> ToolDisplayInfo(Icons.Default.Edit, Color(0xFFFFC107)) // Yellow/Amber
-        "bash" -> ToolDisplayInfo(Icons.Default.Terminal, Color(0xFF9C27B0)) // Purple
-        "grep", "rg" -> ToolDisplayInfo(Icons.Default.Search, Color(0xFFFF9800)) // Orange
-        "find" -> ToolDisplayInfo(Icons.Default.Search, Color(0xFFFF9800)) // Orange
-        "ls" -> ToolDisplayInfo(Icons.Default.Folder, Color(0xFF00BCD4)) // Cyan
-        else -> ToolDisplayInfo(Icons.Default.Terminal, Color(0xFF607D8B)) // Gray
+        "read" -> ToolDisplayInfo(Icons.Default.Description, colors.primary)
+        "write" -> ToolDisplayInfo(Icons.Default.Edit, colors.secondary)
+        "edit" -> ToolDisplayInfo(Icons.Default.Edit, colors.tertiary)
+        "bash" -> ToolDisplayInfo(Icons.Default.Terminal, colors.error)
+        "grep", "rg", "find" -> ToolDisplayInfo(Icons.Default.Search, colors.primary)
+        "ls" -> ToolDisplayInfo(Icons.Default.Folder, colors.secondary)
+        else -> ToolDisplayInfo(Icons.Default.Terminal, colors.outline)
     }
 }
 

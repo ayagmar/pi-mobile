@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.TransportPreference
+import com.ayagmar.pimobile.ui.theme.ThemePreference
 import kotlinx.coroutines.delay
 
 @Composable
@@ -93,6 +94,7 @@ private fun SettingsScreen(
             transportPreference = uiState.transportPreference,
             effectiveTransportPreference = uiState.effectiveTransportPreference,
             transportRuntimeNote = uiState.transportRuntimeNote,
+            themePreference = uiState.themePreference,
             steeringMode = uiState.steeringMode,
             followUpMode = uiState.followUpMode,
             isUpdatingSteeringMode = uiState.isUpdatingSteeringMode,
@@ -100,6 +102,7 @@ private fun SettingsScreen(
             onToggleAutoCompaction = viewModel::toggleAutoCompaction,
             onToggleAutoRetry = viewModel::toggleAutoRetry,
             onTransportPreferenceSelected = viewModel::setTransportPreference,
+            onThemePreferenceSelected = viewModel::setThemePreference,
             onSteeringModeSelected = viewModel::setSteeringMode,
             onFollowUpModeSelected = viewModel::setFollowUpMode,
         )
@@ -219,6 +222,7 @@ private fun AgentBehaviorCard(
     transportPreference: TransportPreference,
     effectiveTransportPreference: TransportPreference,
     transportRuntimeNote: String,
+    themePreference: ThemePreference,
     steeringMode: String,
     followUpMode: String,
     isUpdatingSteeringMode: Boolean,
@@ -226,6 +230,7 @@ private fun AgentBehaviorCard(
     onToggleAutoCompaction: () -> Unit,
     onToggleAutoRetry: () -> Unit,
     onTransportPreferenceSelected: (TransportPreference) -> Unit,
+    onThemePreferenceSelected: (ThemePreference) -> Unit,
     onSteeringModeSelected: (String) -> Unit,
     onFollowUpModeSelected: (String) -> Unit,
 ) {
@@ -260,6 +265,11 @@ private fun AgentBehaviorCard(
                 effectivePreference = effectiveTransportPreference,
                 runtimeNote = transportRuntimeNote,
                 onPreferenceSelected = onTransportPreferenceSelected,
+            )
+
+            ThemePreferenceRow(
+                selectedPreference = themePreference,
+                onPreferenceSelected = onThemePreferenceSelected,
             )
 
             ModeSelectorRow(
@@ -370,6 +380,48 @@ private fun TransportPreferenceRow(
 }
 
 @Composable
+private fun ThemePreferenceRow(
+    selectedPreference: ThemePreference,
+    onPreferenceSelected: (ThemePreference) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Theme",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = "Choose app appearance mode",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ThemeOptionButton(
+                label = "System",
+                selected = selectedPreference == ThemePreference.SYSTEM,
+                onClick = { onPreferenceSelected(ThemePreference.SYSTEM) },
+            )
+            ThemeOptionButton(
+                label = "Light",
+                selected = selectedPreference == ThemePreference.LIGHT,
+                onClick = { onPreferenceSelected(ThemePreference.LIGHT) },
+            )
+            ThemeOptionButton(
+                label = "Dark",
+                selected = selectedPreference == ThemePreference.DARK,
+                onClick = { onPreferenceSelected(ThemePreference.DARK) },
+            )
+        }
+    }
+}
+
+@Composable
 private fun ModeSelectorRow(
     title: String,
     description: String,
@@ -420,6 +472,18 @@ private fun TransportOptionButton(
     Button(
         onClick = onClick,
     ) {
+        val prefix = if (selected) "✓ " else ""
+        Text("$prefix$label")
+    }
+}
+
+@Composable
+private fun ThemeOptionButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Button(onClick = onClick) {
         val prefix = if (selected) "✓ " else ""
         Text("$prefix$label")
     }

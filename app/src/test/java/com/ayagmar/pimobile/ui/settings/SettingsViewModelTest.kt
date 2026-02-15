@@ -18,6 +18,7 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import com.ayagmar.pimobile.sessions.TransportPreference
+import com.ayagmar.pimobile.ui.theme.ThemePreference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -114,6 +115,18 @@ class SettingsViewModelTest {
             assertEquals(TransportPreference.WEBSOCKET, viewModel.uiState.effectiveTransportPreference)
             assertTrue(viewModel.uiState.transportRuntimeNote.contains("fallback"))
             assertEquals(TransportPreference.SSE, controller.lastTransportPreference)
+        }
+
+    @Test
+    fun setThemePreferenceUpdatesState() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = createViewModel(controller)
+
+            dispatcher.scheduler.advanceUntilIdle()
+            viewModel.setThemePreference(ThemePreference.DARK)
+
+            assertEquals(ThemePreference.DARK, viewModel.uiState.themePreference)
         }
 
     private fun createViewModel(controller: FakeSessionController): SettingsViewModel {
