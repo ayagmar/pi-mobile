@@ -12,12 +12,12 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 |------|--------|--------|--------------|-------|
 | **1.1** Reasoning/Thinking Block Display | `DONE` | a5b5611 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Parse `thinking_delta` events, display with toggle |
 | **1.2** Slash Commands Palette | `DONE` | 51da6e4 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Implement `get_commands`, add command palette UI |
-| **1.3** Auto-Compaction/Retry Event Handling | `TODO` | - | - | Show banners for compaction/retry events |
+| **1.3** Auto-Compaction/Retry Event Handling | `DONE` | b7affd1 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Show banners for compaction/retry events |
 
 ### Phase 1 Completion Criteria
-- [ ] Thinking blocks visible and toggleable
-- [ ] Command palette functional with search
-- [ ] Compaction/retry events show notifications
+- [x] Thinking blocks visible and toggleable
+- [x] Command palette functional with search
+- [x] Compaction/retry events show notifications
 
 ---
 
@@ -115,22 +115,22 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 
 | Event | Status | Notes |
 |-------|--------|-------|
-| `message_update` | ✅ DONE | text_delta handled |
+| `message_update` | ✅ DONE | text_delta, thinking_delta handled |
 | `tool_execution_start` | ✅ DONE | - |
 | `tool_execution_update` | ✅ DONE | - |
 | `tool_execution_end` | ✅ DONE | - |
 | `extension_ui_request` | ✅ DONE | All dialog methods |
 | `agent_start` | ✅ DONE | - |
 | `agent_end` | ✅ DONE | - |
-| `thinking_delta` | ⬜ TODO | **CRITICAL**: Not handled |
+| `thinking_delta` | ✅ DONE | **Now implemented** |
+| `auto_compaction_start` | ✅ DONE | **Now implemented** |
+| `auto_compaction_end` | ✅ DONE | **Now implemented** |
+| `auto_retry_start` | ✅ DONE | **Now implemented** |
+| `auto_retry_end` | ✅ DONE | **Now implemented** |
 | `message_start` | ⬜ TODO | Low priority |
 | `message_end` | ⬜ TODO | Low priority |
 | `turn_start` | ⬜ TODO | Low priority |
 | `turn_end` | ⬜ TODO | Low priority |
-| `auto_compaction_start` | ⬜ TODO | **HIGH**: Need for UX |
-| `auto_compaction_end` | ⬜ TODO | **HIGH**: Need for UX |
-| `auto_retry_start` | ⬜ TODO | **HIGH**: Need for UX |
-| `auto_retry_end` | ⬜ TODO | **HIGH**: Need for UX |
 | `extension_error` | ⬜ TODO | Medium priority |
 
 ---
