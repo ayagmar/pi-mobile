@@ -1,3 +1,5 @@
+@file:Suppress("TooManyFunctions")
+
 package com.ayagmar.pimobile.chat
 
 import androidx.lifecycle.ViewModel
@@ -46,6 +48,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.UUID
 
 @Suppress("TooManyFunctions", "LargeClass")
 class ChatViewModel(
@@ -154,20 +157,30 @@ class ChatViewModel(
     }
 
     fun steer(message: String) {
+        val trimmedMessage = message.trim()
+        if (trimmedMessage.isEmpty()) return
+
         viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
-            val result = sessionController.steer(message)
+            val queueItemId = maybeTrackStreamingQueueItem(PendingQueueType.STEER, trimmedMessage)
+            val result = sessionController.steer(trimmedMessage)
             if (result.isFailure) {
+                queueItemId?.let(::removePendingQueueItem)
                 _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
             }
         }
     }
 
     fun followUp(message: String) {
+        val trimmedMessage = message.trim()
+        if (trimmedMessage.isEmpty()) return
+
         viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
-            val result = sessionController.followUp(message)
+            val queueItemId = maybeTrackStreamingQueueItem(PendingQueueType.FOLLOW_UP, trimmedMessage)
+            val result = sessionController.followUp(trimmedMessage)
             if (result.isFailure) {
+                queueItemId?.let(::removePendingQueueItem)
                 _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
             }
         }
@@ -418,10 +431,46 @@ class ChatViewModel(
         viewModelScope.launch {
             sessionController.isStreaming.collect { isStreaming ->
                 _uiState.update { current ->
-                    current.copy(isStreaming = isStreaming)
+                    current.copy(
+                        isStreaming = isStreaming,
+                        pendingQueueItems = if (isStreaming) current.pendingQueueItems else emptyList(),
+                    )
                 }
             }
         }
+    }
+
+    private fun maybeTrackStreamingQueueItem(
+        type: PendingQueueType,
+        message: String,
+    ): String? {
+        val state = _uiState.value
+        if (!state.isStreaming) return null
+
+        val mode =
+            when (type) {
+                PendingQueueType.STEER -> state.steeringMode
+                PendingQueueType.FOLLOW_UP -> state.followUpMode
+            }
+
+        val itemId = UUID.randomUUID().toString()
+        val queueItem =
+            PendingQueueItem(
+                id = itemId,
+                type = type,
+                message = message,
+                mode = mode,
+            )
+
+        _uiState.update { current ->
+            current.copy(
+                pendingQueueItems =
+                    (current.pendingQueueItems + queueItem)
+                        .takeLast(MAX_PENDING_QUEUE_ITEMS),
+            )
+        }
+
+        return itemId
     }
 
     @Suppress("CyclomaticComplexMethod")
@@ -746,6 +795,21 @@ class ChatViewModel(
         }
     }
 
+    fun removePendingQueueItem(itemId: String) {
+        _uiState.update { state ->
+            state.copy(
+                pendingQueueItems =
+                    state.pendingQueueItems.filterNot { item ->
+                        item.id == itemId
+                    },
+            )
+        }
+    }
+
+    fun clearPendingQueueItems() {
+        _uiState.update { it.copy(pendingQueueItems = emptyList()) }
+    }
+
     fun loadOlderMessages() {
         if (visibleTimelineSize >= fullTimeline.size) {
             return
@@ -760,9 +824,12 @@ class ChatViewModel(
             val messagesResult = sessionController.getMessages()
             val stateResult = sessionController.getState()
 
-            val modelInfo = stateResult.getOrNull()?.data?.let { parseModelInfo(it) }
-            val thinkingLevel = stateResult.getOrNull()?.data?.stringField("thinkingLevel")
-            val isStreaming = stateResult.getOrNull()?.data?.booleanField("isStreaming") ?: false
+            val stateData = stateResult.getOrNull()?.data
+            val modelInfo = stateData?.let { parseModelInfo(it) }
+            val thinkingLevel = stateData?.stringField("thinkingLevel")
+            val isStreaming = stateData?.booleanField("isStreaming") ?: false
+            val steeringMode = stateData.deliveryModeField("steeringMode", "steering_mode")
+            val followUpMode = stateData.deliveryModeField("followUpMode", "follow_up_mode")
 
             _uiState.update { state ->
                 if (messagesResult.isFailure) {
@@ -777,6 +844,8 @@ class ChatViewModel(
                         currentModel = modelInfo,
                         thinkingLevel = thinkingLevel,
                         isStreaming = isStreaming,
+                        steeringMode = steeringMode,
+                        followUpMode = followUpMode,
                     )
                 } else {
                     // Record first messages rendered for resume timing
@@ -798,6 +867,8 @@ class ChatViewModel(
                         currentModel = modelInfo,
                         thinkingLevel = thinkingLevel,
                         isStreaming = isStreaming,
+                        steeringMode = steeringMode,
+                        followUpMode = followUpMode,
                     )
                 }
             }
@@ -1398,6 +1469,9 @@ class ChatViewModel(
         const val COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED = "builtin-bridge-backed"
         const val COMMAND_SOURCE_BUILTIN_UNSUPPORTED = "builtin-unsupported"
 
+        const val DELIVERY_MODE_ALL = "all"
+        const val DELIVERY_MODE_ONE_AT_A_TIME = "one-at-a-time"
+
         private const val BUILTIN_SETTINGS_COMMAND = "settings"
         private const val BUILTIN_TREE_COMMAND = "tree"
         private const val BUILTIN_STATS_COMMAND = "stats"
@@ -1448,6 +1522,7 @@ class ChatViewModel(
         private const val TIMELINE_PAGE_SIZE = 120
         private const val BASH_HISTORY_SIZE = 10
         private const val MAX_NOTIFICATIONS = 6
+        private const val MAX_PENDING_QUEUE_ITEMS = 20
         private const val LIFECYCLE_NOTIFICATION_WINDOW_MS = 5_000L
         private const val LIFECYCLE_DUPLICATE_WINDOW_MS = 1_200L
         private const val MAX_LIFECYCLE_NOTIFICATIONS_PER_WINDOW = 4
@@ -1476,6 +1551,9 @@ data class ChatUiState(
     val commands: List<SlashCommandInfo> = emptyList(),
     val commandsQuery: String = "",
     val isLoadingCommands: Boolean = false,
+    val steeringMode: String = ChatViewModel.DELIVERY_MODE_ALL,
+    val followUpMode: String = ChatViewModel.DELIVERY_MODE_ALL,
+    val pendingQueueItems: List<PendingQueueItem> = emptyList(),
     // Bash dialog state
     val isBashDialogVisible: Boolean = false,
     val bashCommand: String = "",
@@ -1512,6 +1590,18 @@ data class PendingImage(
     val sizeBytes: Long,
     val displayName: String?,
 )
+
+data class PendingQueueItem(
+    val id: String,
+    val type: PendingQueueType,
+    val message: String,
+    val mode: String,
+)
+
+enum class PendingQueueType {
+    STEER,
+    FOLLOW_UP,
+}
 
 data class ExtensionNotification(
     val message: String,
@@ -1721,6 +1811,19 @@ private fun JsonObject.stringField(fieldName: String): String? {
 
 private fun JsonObject.booleanField(fieldName: String): Boolean? {
     return this[fieldName]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
+}
+
+private fun JsonObject?.deliveryModeField(
+    camelCaseKey: String,
+    snakeCaseKey: String,
+): String {
+    val value =
+        this?.get(camelCaseKey)?.jsonPrimitive?.contentOrNull
+            ?: this?.get(snakeCaseKey)?.jsonPrimitive?.contentOrNull
+
+    return value?.takeIf {
+        it == ChatViewModel.DELIVERY_MODE_ALL || it == ChatViewModel.DELIVERY_MODE_ONE_AT_A_TIME
+    } ?: ChatViewModel.DELIVERY_MODE_ALL
 }
 
 private fun parseModelInfo(data: JsonObject?): ModelInfo? {

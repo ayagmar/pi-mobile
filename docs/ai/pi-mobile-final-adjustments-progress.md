@@ -52,7 +52,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 8 | Q4 Global collapse/expand controls | DONE | feat(chat): add global collapse/expand for tools and reasoning |  | ktlint✅ detekt✅ test✅ bridge✅ | Added one-tap header controls with view-model actions for tools/reasoning expansion |
 | 9 | Q5 Wire frame metrics into live chat | DONE | feat(perf): enable streaming frame-jank logging in chat screen |  | ktlint✅ detekt✅ test✅ bridge✅ | Hooked `StreamingFrameMetrics` into ChatScreen with per-jank log output |
 | 10 | Q6 Transport preference setting parity | DONE | feat(settings): add transport preference parity with websocket fallback |  | ktlint✅ detekt✅ test✅ bridge✅ | Added `auto`/`websocket`/`sse` preference UI, persistence, and runtime fallback to websocket with explicit notes |
-| 11 | Q7 Queue inspector UX for pending steer/follow-up | TODO |  |  |  |  |
+| 11 | Q7 Queue inspector UX for pending steer/follow-up | DONE | feat(chat): add streaming queue inspector for steer/follow-up |  | ktlint✅ detekt✅ test✅ bridge✅ | Added pending queue inspector card during streaming with per-item remove/clear actions and delivery-mode visibility |
 
 ---
 
@@ -266,23 +266,41 @@ Notes/blockers:
 - Added clear effective transport + fallback note in UI when SSE is requested.
 ```
 
+### 2026-02-15
+
+```text
+Task: Q7
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Added streaming queue inspector in chat for steer/follow-up submissions.
+- Queue inspector shows delivery modes (`all` / `one-at-a-time`) and supports remove/clear actions.
+- Queue state auto-resets when streaming ends and is covered by ChatViewModel tests.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 10
+- Backlog done: 11
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 16
+- Backlog remaining (not done): 15
 - Reference completed items (not counted in backlog): 6
 
 ---
 
 ## Quick checklist
 
-- [ ] Critical UX fixes complete
-- [ ] Quick wins complete
+- [x] Critical UX fixes complete
+- [x] Quick wins complete
 - [ ] Stability/security fixes complete
 - [ ] Maintainability improvements complete
 - [ ] Theming + Design System complete

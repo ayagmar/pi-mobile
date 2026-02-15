@@ -427,6 +427,60 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun streamingSteerAndFollowUpAreVisibleInPendingQueueInspectorState() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.setStreaming(true)
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.steer("Narrow scope")
+            viewModel.followUp("Generate edge-case tests")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val queueItems = viewModel.uiState.value.pendingQueueItems
+            assertEquals(2, queueItems.size)
+            assertEquals(PendingQueueType.STEER, queueItems[0].type)
+            assertEquals(PendingQueueType.FOLLOW_UP, queueItems[1].type)
+        }
+
+    @Test
+    fun pendingQueueCanBeRemovedClearedAndResetsWhenStreamingStops() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.setStreaming(true)
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.steer("First")
+            viewModel.followUp("Second")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val firstId = viewModel.uiState.value.pendingQueueItems.first().id
+            viewModel.removePendingQueueItem(firstId)
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals(1, viewModel.uiState.value.pendingQueueItems.size)
+
+            viewModel.clearPendingQueueItems()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.pendingQueueItems.isEmpty())
+
+            viewModel.steer("Third")
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals(1, viewModel.uiState.value.pendingQueueItems.size)
+
+            controller.setStreaming(false)
+            dispatcher.scheduler.advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.pendingQueueItems.isEmpty())
+        }
+
+    @Test
     fun initialHistoryLoadsWithWindowAndCanPageOlderMessages() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
@@ -552,9 +606,11 @@ private class FakeSessionController : SessionController {
     var sendPromptCallCount: Int = 0
     var messagesPayload: JsonObject? = null
 
+    private val streamingState = MutableStateFlow(false)
+
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = events
     override val connectionState: StateFlow<ConnectionState> = MutableStateFlow(ConnectionState.DISCONNECTED)
-    override val isStreaming: StateFlow<Boolean> = MutableStateFlow(false)
+    override val isStreaming: StateFlow<Boolean> = streamingState
 
     override fun setTransportPreference(preference: TransportPreference) {
         // no-op for tests
@@ -566,6 +622,10 @@ private class FakeSessionController : SessionController {
 
     suspend fun emitEvent(event: RpcIncomingMessage) {
         events.emit(event)
+    }
+
+    fun setStreaming(isStreaming: Boolean) {
+        streamingState.value = isStreaming
     }
 
     override suspend fun ensureConnected(

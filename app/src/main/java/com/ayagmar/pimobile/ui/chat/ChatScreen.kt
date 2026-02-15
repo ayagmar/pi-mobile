@@ -94,6 +94,8 @@ import com.ayagmar.pimobile.chat.ExtensionUiRequest
 import com.ayagmar.pimobile.chat.ExtensionWidget
 import com.ayagmar.pimobile.chat.ImageEncoder
 import com.ayagmar.pimobile.chat.PendingImage
+import com.ayagmar.pimobile.chat.PendingQueueItem
+import com.ayagmar.pimobile.chat.PendingQueueType
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.SessionStats
 import com.ayagmar.pimobile.perf.StreamingFrameMetrics
@@ -116,6 +118,8 @@ private data class ChatCallbacks(
     val onAbort: () -> Unit,
     val onSteer: (String) -> Unit,
     val onFollowUp: (String) -> Unit,
+    val onRemovePendingQueueItem: (String) -> Unit,
+    val onClearPendingQueueItems: () -> Unit,
     val onSetThinkingLevel: (String) -> Unit,
     val onFetchLastAssistantText: ((String?) -> Unit) -> Unit,
     val onAbortRetry: () -> Unit,
@@ -154,6 +158,7 @@ private data class ChatCallbacks(
     val onClearImages: () -> Unit,
 )
 
+@Suppress("LongMethod")
 @Composable
 fun ChatRoute() {
     val context = LocalContext.current
@@ -177,6 +182,8 @@ fun ChatRoute() {
                 onAbort = chatViewModel::abort,
                 onSteer = chatViewModel::steer,
                 onFollowUp = chatViewModel::followUp,
+                onRemovePendingQueueItem = chatViewModel::removePendingQueueItem,
+                onClearPendingQueueItems = chatViewModel::clearPendingQueueItems,
                 onSetThinkingLevel = chatViewModel::setThinkingLevel,
                 onFetchLastAssistantText = chatViewModel::fetchLastAssistantText,
                 onAbortRetry = chatViewModel::abortRetry,
@@ -1393,6 +1400,16 @@ private fun PromptControls(
             )
         }
 
+        if (state.isStreaming && state.pendingQueueItems.isNotEmpty()) {
+            PendingQueueInspector(
+                pendingItems = state.pendingQueueItems,
+                steeringMode = state.steeringMode,
+                followUpMode = state.followUpMode,
+                onRemoveItem = callbacks.onRemovePendingQueueItem,
+                onClear = callbacks.onClearPendingQueueItems,
+            )
+        }
+
         PromptInputRow(
             inputText = state.inputText,
             isStreaming = state.isStreaming,
@@ -1483,6 +1500,98 @@ private fun StreamingControls(
                 Text("Follow Up")
             }
         }
+    }
+}
+
+@Composable
+private fun PendingQueueInspector(
+    pendingItems: List<PendingQueueItem>,
+    steeringMode: String,
+    followUpMode: String,
+    onRemoveItem: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Pending queue (${pendingItems.size})",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                TextButton(onClick = onClear) {
+                    Text("Clear")
+                }
+            }
+
+            Text(
+                text = "Steer: ${deliveryModeLabel(steeringMode)} · Follow-up: ${deliveryModeLabel(followUpMode)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            pendingItems.forEach { item ->
+                PendingQueueItemRow(
+                    item = item,
+                    onRemove = { onRemoveItem(item.id) },
+                )
+            }
+
+            Text(
+                text = "Items shown here were sent while streaming; clearing only removes local inspector entries.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PendingQueueItemRow(
+    item: PendingQueueItem,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            val typeLabel =
+                when (item.type) {
+                    PendingQueueType.STEER -> "Steer"
+                    PendingQueueType.FOLLOW_UP -> "Follow-up"
+                }
+            Text(
+                text = "$typeLabel · ${deliveryModeLabel(item.mode)}",
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Text(
+                text = item.message,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+            )
+        }
+
+        TextButton(onClick = onRemove) {
+            Text("Remove")
+        }
+    }
+}
+
+private fun deliveryModeLabel(mode: String): String {
+    return when (mode) {
+        ChatViewModel.DELIVERY_MODE_ONE_AT_A_TIME -> "one-at-a-time"
+        else -> "all"
     }
 }
 
