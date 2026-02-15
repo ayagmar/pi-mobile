@@ -322,8 +322,14 @@ class ChatViewModel(
     private fun observeConnection() {
         viewModelScope.launch {
             sessionController.connectionState.collect { state ->
+                val previousState = _uiState.value.connectionState
+                val timelineEmpty = _uiState.value.timeline.isEmpty()
                 _uiState.update { current ->
                     current.copy(connectionState = state)
+                }
+                // Reload messages when connection becomes active and timeline is empty
+                if (state == ConnectionState.CONNECTED && previousState != ConnectionState.CONNECTED && timelineEmpty) {
+                    loadInitialMessages()
                 }
             }
         }
