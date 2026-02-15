@@ -20,8 +20,25 @@ export interface SessionIndexGroup {
     sessions: SessionIndexEntry[];
 }
 
+export interface SessionTreeEntry {
+    entryId: string;
+    parentId: string | null;
+    entryType: string;
+    role?: string;
+    timestamp?: string;
+    preview: string;
+}
+
+export interface SessionTreeSnapshot {
+    sessionPath: string;
+    rootIds: string[];
+    currentLeafId?: string;
+    entries: SessionTreeEntry[];
+}
+
 export interface SessionIndexer {
     listSessions(): Promise<SessionIndexGroup[]>;
+    getSessionTree(sessionPath: string): Promise<SessionTreeSnapshot>;
 }
 
 export interface SessionIndexerOptions {
@@ -57,6 +74,10 @@ export function createSessionIndexer(options: SessionIndexerOptions): SessionInd
             groupedSessions.sort((a, b) => a.cwd.localeCompare(b.cwd));
 
             return groupedSessions;
+        },
+
+        async getSessionTree(sessionPath: string): Promise<SessionTreeSnapshot> {
+            return parseSessionTreeFile(sessionPath, options.logger);
         },
     };
 }
@@ -168,6 +189,88 @@ async function parseSessionFile(sessionPath: string, logger: Logger): Promise<Se
         messageCount,
         lastModel,
     };
+}
+
+async function parseSessionTreeFile(sessionPath: string, logger: Logger): Promise<SessionTreeSnapshot> {
+    let fileContent: string;
+
+    try {
+        fileContent = await fs.readFile(sessionPath, "utf-8");
+    } catch (error: unknown) {
+        logger.warn({ sessionPath, error }, "Failed to read session tree file");
+        throw new Error(`Failed to read session file: ${sessionPath}`);
+    }
+
+    const lines = fileContent
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+    if (lines.length === 0) {
+        throw new Error("Session file is empty");
+    }
+
+    const header = tryParseJson(lines[0]);
+    if (!header || header.type !== "session") {
+        throw new Error("Invalid session header");
+    }
+
+    const entries: SessionTreeEntry[] = [];
+
+    for (const line of lines.slice(1)) {
+        const entry = tryParseJson(line);
+        if (!entry) continue;
+
+        const entryId = typeof entry.id === "string" ? entry.id : undefined;
+        if (!entryId) continue;
+
+        const parentId = typeof entry.parentId === "string" ? entry.parentId : null;
+        const entryType = typeof entry.type === "string" ? entry.type : "unknown";
+        const timestamp = getValidIsoTimestamp(entry.timestamp);
+
+        const messageRecord = isRecord(entry.message) ? entry.message : undefined;
+        const role = typeof messageRecord?.role === "string" ? messageRecord.role : undefined;
+        const preview = extractEntryPreview(entry, messageRecord);
+
+        entries.push({
+            entryId,
+            parentId,
+            entryType,
+            role,
+            timestamp,
+            preview,
+        });
+    }
+
+    const rootIds = entries.filter((entry) => entry.parentId === null).map((entry) => entry.entryId);
+    const currentLeafId = entries.length > 0 ? entries[entries.length - 1].entryId : undefined;
+
+    return {
+        sessionPath,
+        rootIds,
+        currentLeafId,
+        entries,
+    };
+}
+
+function extractEntryPreview(
+    entry: Record<string, unknown>,
+    messageRecord?: Record<string, unknown>,
+): string {
+    if (entry.type === "session_info" && typeof entry.name === "string") {
+        return normalizePreview(entry.name) ?? "session info";
+    }
+
+    if (messageRecord) {
+        const fromContent = extractUserPreview(messageRecord.content);
+        if (fromContent) return fromContent;
+
+        if (typeof messageRecord.content === "string") {
+            return normalizePreview(messageRecord.content) ?? "message";
+        }
+    }
+
+    return "entry";
 }
 
 function extractUserPreview(content: unknown): string | undefined {

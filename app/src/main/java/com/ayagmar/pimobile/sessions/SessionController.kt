@@ -51,6 +51,8 @@ interface SessionController {
 
     suspend fun getForkMessages(): Result<List<ForkableMessage>>
 
+    suspend fun getSessionTree(sessionPath: String? = null): Result<SessionTreeSnapshot>
+
     suspend fun cycleModel(): Result<ModelInfo?>
 
     suspend fun cycleThinkingLevel(): Result<String?>
@@ -98,6 +100,22 @@ data class ForkableMessage(
     val entryId: String,
     val preview: String,
     val timestamp: Long?,
+)
+
+data class SessionTreeSnapshot(
+    val sessionPath: String,
+    val rootIds: List<String>,
+    val currentLeafId: String?,
+    val entries: List<SessionTreeEntry>,
+)
+
+data class SessionTreeEntry(
+    val entryId: String,
+    val parentId: String?,
+    val entryType: String,
+    val role: String?,
+    val timestamp: String?,
+    val preview: String,
 )
 
 /**

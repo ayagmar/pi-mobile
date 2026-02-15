@@ -330,6 +330,48 @@ async function handleBridgeControlMessage(
         return;
     }
 
+    if (messageType === "bridge_get_session_tree") {
+        const sessionPath = typeof payload.sessionPath === "string" ? payload.sessionPath : undefined;
+        if (!sessionPath) {
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "invalid_session_path",
+                        "sessionPath must be a non-empty string",
+                    ),
+                ),
+            );
+            return;
+        }
+
+        try {
+            const tree = await sessionIndexer.getSessionTree(sessionPath);
+            client.send(
+                JSON.stringify(
+                    createBridgeEnvelope({
+                        type: "bridge_session_tree",
+                        sessionPath: tree.sessionPath,
+                        rootIds: tree.rootIds,
+                        currentLeafId: tree.currentLeafId ?? null,
+                        entries: tree.entries,
+                    }),
+                ),
+            );
+        } catch (error: unknown) {
+            logger.error({ error, sessionPath }, "Failed to build session tree");
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "session_tree_failed",
+                        "Failed to build session tree",
+                    ),
+                ),
+            );
+        }
+
+        return;
+    }
+
     if (messageType === "bridge_set_cwd") {
         const cwd = payload.cwd;
         if (typeof cwd !== "string" || cwd.trim().length === 0) {

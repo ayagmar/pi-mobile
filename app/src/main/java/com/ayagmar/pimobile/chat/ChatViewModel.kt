@@ -25,6 +25,7 @@ import com.ayagmar.pimobile.di.AppServices
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionController
+import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -772,6 +773,62 @@ class ChatViewModel(
         }
     }
 
+    fun showTreeSheet() {
+        _uiState.update { it.copy(isTreeSheetVisible = true) }
+        loadSessionTree()
+    }
+
+    fun hideTreeSheet() {
+        _uiState.update { it.copy(isTreeSheetVisible = false) }
+    }
+
+    fun forkFromTreeEntry(entryId: String) {
+        viewModelScope.launch {
+            val result = sessionController.forkSessionFromEntryId(entryId)
+            if (result.isSuccess) {
+                hideTreeSheet()
+                loadInitialMessages()
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    private fun loadSessionTree() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingTree = true) }
+
+            val stateResponse = sessionController.getState().getOrNull()
+            val sessionPath = stateResponse?.data?.stringField("sessionFile")
+
+            if (sessionPath.isNullOrBlank()) {
+                _uiState.update {
+                    it.copy(
+                        isLoadingTree = false,
+                        treeErrorMessage = "No active session path available",
+                    )
+                }
+                return@launch
+            }
+
+            val result = sessionController.getSessionTree(sessionPath)
+            _uiState.update { state ->
+                if (result.isSuccess) {
+                    state.copy(
+                        sessionTree = result.getOrNull(),
+                        isLoadingTree = false,
+                        treeErrorMessage = null,
+                    )
+                } else {
+                    state.copy(
+                        isLoadingTree = false,
+                        treeErrorMessage = result.exceptionOrNull()?.message ?: "Failed to load session tree",
+                    )
+                }
+            }
+        }
+    }
+
     private fun handleToolStart(event: ToolExecutionStartEvent) {
         val arguments = extractToolArguments(event.args)
         val editDiff = if (event.toolName == "edit") extractEditDiff(event.args) else null
@@ -945,6 +1002,11 @@ data class ChatUiState(
     val availableModels: List<AvailableModel> = emptyList(),
     val modelsQuery: String = "",
     val isLoadingModels: Boolean = false,
+    // Session tree state
+    val isTreeSheetVisible: Boolean = false,
+    val sessionTree: SessionTreeSnapshot? = null,
+    val isLoadingTree: Boolean = false,
+    val treeErrorMessage: String? = null,
     // Image attachments
     val pendingImages: List<PendingImage> = emptyList(),
 )

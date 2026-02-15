@@ -61,10 +61,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.util.UUID
 
 @Suppress("TooManyFunctions")
@@ -227,6 +229,24 @@ class RpcSessionController(
                     ).requireSuccess("Failed to load fork messages")
 
                 parseForkableMessages(response.data)
+            }
+        }
+    }
+
+    override suspend fun getSessionTree(sessionPath: String?): Result<SessionTreeSnapshot> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val bridgePayload =
+                    buildJsonObject {
+                        put("type", BRIDGE_GET_SESSION_TREE_TYPE)
+                        if (!sessionPath.isNullOrBlank()) {
+                            put("sessionPath", sessionPath)
+                        }
+                    }
+
+                val bridgeResponse = connection.requestBridge(bridgePayload, BRIDGE_SESSION_TREE_TYPE)
+                parseSessionTreeSnapshot(bridgeResponse.payload)
             }
         }
     }
@@ -656,6 +676,8 @@ class RpcSessionController(
         private const val SET_AUTO_RETRY_COMMAND = "set_auto_retry"
         private const val SET_STEERING_MODE_COMMAND = "set_steering_mode"
         private const val SET_FOLLOW_UP_MODE_COMMAND = "set_follow_up_mode"
+        private const val BRIDGE_GET_SESSION_TREE_TYPE = "bridge_get_session_tree"
+        private const val BRIDGE_SESSION_TREE_TYPE = "bridge_session_tree"
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
         private const val BASH_TIMEOUT_MS = 60_000L
@@ -712,6 +734,39 @@ private fun parseForkableMessages(data: JsonObject?): List<ForkableMessage> {
             timestamp = timestamp,
         )
     }
+}
+
+private fun parseSessionTreeSnapshot(payload: JsonObject): SessionTreeSnapshot {
+    val sessionPath = payload.stringField("sessionPath") ?: error("Session tree response missing sessionPath")
+    val rootIds =
+        runCatching {
+            payload["rootIds"]?.jsonArray?.mapNotNull { element ->
+                element.jsonPrimitive.contentOrNull
+            }
+        }.getOrNull() ?: emptyList()
+
+    val entries =
+        runCatching {
+            payload["entries"]?.jsonArray?.mapNotNull { element ->
+                val entryObject = element.jsonObject
+                val entryId = entryObject.stringField("entryId") ?: return@mapNotNull null
+                SessionTreeEntry(
+                    entryId = entryId,
+                    parentId = entryObject.stringField("parentId"),
+                    entryType = entryObject.stringField("entryType") ?: "entry",
+                    role = entryObject.stringField("role"),
+                    timestamp = entryObject.stringField("timestamp"),
+                    preview = entryObject.stringField("preview") ?: "entry",
+                )
+            }
+        }.getOrNull() ?: emptyList()
+
+    return SessionTreeSnapshot(
+        sessionPath = sessionPath,
+        rootIds = rootIds,
+        currentLeafId = payload.stringField("currentLeafId"),
+        entries = entries,
+    )
 }
 
 private fun JsonObject?.stringField(fieldName: String): String? {

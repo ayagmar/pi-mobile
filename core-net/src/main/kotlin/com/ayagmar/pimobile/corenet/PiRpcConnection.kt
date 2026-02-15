@@ -34,6 +34,7 @@ import kotlinx.serialization.json.put
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
+@Suppress("TooManyFunctions")
 class PiRpcConnection(
     private val transport: SocketTransport = WebSocketTransport(),
     private val parser: RpcMessageParser = RpcMessageParser(),
@@ -107,6 +108,34 @@ class PiRpcConnection(
         val payload = encodeRpcCommand(json = json, command = command)
         val envelope = encodeEnvelope(json = json, channel = RPC_CHANNEL, payload = payload)
         transport.send(envelope)
+    }
+
+    suspend fun requestBridge(
+        payload: JsonObject,
+        expectedType: String,
+    ): BridgeMessage {
+        val config = activeConfig ?: error("Connection is not active")
+
+        transport.send(
+            encodeEnvelope(
+                json = json,
+                channel = BRIDGE_CHANNEL,
+                payload = payload,
+            ),
+        )
+
+        val errorChannel = bridgeChannel(bridgeChannels, BRIDGE_ERROR_TYPE)
+
+        return withTimeout(config.requestTimeoutMs) {
+            select {
+                bridgeChannel(bridgeChannels, expectedType).onReceive { message ->
+                    message
+                }
+                errorChannel.onReceive { message ->
+                    throw IllegalStateException(parseBridgeErrorMessage(message))
+                }
+            }
+        }
     }
 
     suspend fun requestState(): RpcResponse {

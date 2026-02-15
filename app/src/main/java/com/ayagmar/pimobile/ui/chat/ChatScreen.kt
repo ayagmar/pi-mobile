@@ -92,6 +92,8 @@ import com.ayagmar.pimobile.chat.PendingImage
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.SessionStats
 import com.ayagmar.pimobile.sessions.ModelInfo
+import com.ayagmar.pimobile.sessions.SessionTreeEntry
+import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 
 private data class ChatCallbacks(
@@ -129,6 +131,10 @@ private data class ChatCallbacks(
     val onHideModelPicker: () -> Unit,
     val onModelsQueryChanged: (String) -> Unit,
     val onSelectModel: (AvailableModel) -> Unit,
+    // Tree navigation callbacks
+    val onShowTreeSheet: () -> Unit,
+    val onHideTreeSheet: () -> Unit,
+    val onForkFromTreeEntry: (String) -> Unit,
     // Image attachment callbacks
     val onAddImage: (PendingImage) -> Unit,
     val onRemoveImage: (Int) -> Unit,
@@ -177,6 +183,9 @@ fun ChatRoute() {
                 onHideModelPicker = chatViewModel::hideModelPicker,
                 onModelsQueryChanged = chatViewModel::onModelsQueryChanged,
                 onSelectModel = chatViewModel::selectModel,
+                onShowTreeSheet = chatViewModel::showTreeSheet,
+                onHideTreeSheet = chatViewModel::hideTreeSheet,
+                onForkFromTreeEntry = chatViewModel::forkFromTreeEntry,
                 onAddImage = chatViewModel::addImage,
                 onRemoveImage = chatViewModel::removeImage,
                 onClearImages = chatViewModel::clearImages,
@@ -189,6 +198,7 @@ fun ChatRoute() {
     )
 }
 
+@Suppress("LongMethod")
 @Composable
 private fun ChatScreen(
     state: ChatUiState,
@@ -253,6 +263,15 @@ private fun ChatScreen(
         onQueryChange = callbacks.onModelsQueryChanged,
         onSelectModel = callbacks.onSelectModel,
         onDismiss = callbacks.onHideModelPicker,
+    )
+
+    TreeNavigationSheet(
+        isVisible = state.isTreeSheetVisible,
+        tree = state.sessionTree,
+        isLoading = state.isLoadingTree,
+        errorMessage = state.treeErrorMessage,
+        onForkFromEntry = callbacks.onForkFromTreeEntry,
+        onDismiss = callbacks.onHideTreeSheet,
     )
 }
 
@@ -327,6 +346,10 @@ private fun ChatHeader(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(onClick = callbacks.onShowTreeSheet) {
+                Text("Tree")
+            }
+
             // Stats button
             IconButton(onClick = callbacks.onShowStatsSheet) {
                 Icon(
@@ -2081,4 +2104,185 @@ private fun ModelItem(
     }
 }
 
+@Suppress("LongParameterList", "LongMethod")
+@Composable
+private fun TreeNavigationSheet(
+    isVisible: Boolean,
+    tree: SessionTreeSnapshot?,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onForkFromEntry: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (!isVisible) return
+
+    val entries = tree?.entries.orEmpty()
+    val depthByEntry = remember(entries) { computeDepthMap(entries) }
+    val childCountByEntry = remember(entries) { computeChildCountMap(entries) }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Session tree") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
+                tree?.sessionPath?.let { sessionPath ->
+                    Text(
+                        text = "Session: ${truncatePath(sessionPath)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
+
+                when {
+                    isLoading -> {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+
+                    errorMessage != null -> {
+                        Text(
+                            text = errorMessage,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+
+                    entries.isEmpty() -> {
+                        Text(
+                            text = "No tree data available",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+
+                    else -> {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            items(entries) { entry ->
+                                TreeEntryRow(
+                                    entry = entry,
+                                    depth = depthByEntry[entry.entryId] ?: 0,
+                                    childCount = childCountByEntry[entry.entryId] ?: 0,
+                                    isCurrent = tree?.currentLeafId == entry.entryId,
+                                    onForkFromEntry = onForkFromEntry,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+@Suppress("MagicNumber")
+@Composable
+private fun TreeEntryRow(
+    entry: SessionTreeEntry,
+    depth: Int,
+    childCount: Int,
+    isCurrent: Boolean,
+    onForkFromEntry: (String) -> Unit,
+) {
+    val indent = (depth * 12).dp
+
+    Card(modifier = Modifier.fillMaxWidth().padding(start = indent)) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val label =
+                    buildString {
+                        append(entry.entryType)
+                        entry.role?.let { append(" • $it") }
+                    }
+                Text(label, style = MaterialTheme.typography.labelMedium)
+
+                if (isCurrent) {
+                    Text(
+                        text = "current",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            Text(
+                text = entry.preview,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val branchLabel = if (childCount > 1) "branch point ($childCount)" else ""
+                Text(
+                    text = branchLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+
+                TextButton(onClick = { onForkFromEntry(entry.entryId) }) {
+                    Text("Fork here")
+                }
+            }
+        }
+    }
+}
+
+@Suppress("ReturnCount")
+private fun computeDepthMap(entries: List<SessionTreeEntry>): Map<String, Int> {
+    val byId = entries.associateBy { it.entryId }
+    val memo = mutableMapOf<String, Int>()
+
+    fun depth(entryId: String): Int {
+        memo[entryId]?.let { return it }
+        val entry = byId[entryId] ?: return 0
+        val parentId = entry.parentId ?: return 0.also { memo[entryId] = it }
+        val value = depth(parentId) + 1
+        memo[entryId] = value
+        return value
+    }
+
+    entries.forEach { entry -> depth(entry.entryId) }
+    return memo
+}
+
+private fun computeChildCountMap(entries: List<SessionTreeEntry>): Map<String, Int> {
+    return entries
+        .groupingBy { it.parentId }
+        .eachCount()
+        .mapNotNull { (parentId, count) ->
+            parentId?.let { it to count }
+        }.toMap()
+}
+
 private const val SESSION_PATH_DISPLAY_LENGTH = 40
+
+private fun truncatePath(path: String): String {
+    if (path.length <= SESSION_PATH_DISPLAY_LENGTH) {
+        return path
+    }
+    val head = SESSION_PATH_DISPLAY_LENGTH / 2
+    val tail = SESSION_PATH_DISPLAY_LENGTH - head - 1
+    return "${path.take(head)}…${path.takeLast(tail)}"
+}

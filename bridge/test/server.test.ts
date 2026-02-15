@@ -11,7 +11,7 @@ import type {
 import type { PiRpcForwarder } from "../src/rpc-forwarder.js";
 import type { BridgeServer } from "../src/server.js";
 import { createBridgeServer } from "../src/server.js";
-import type { SessionIndexGroup, SessionIndexer } from "../src/session-indexer.js";
+import type { SessionIndexGroup, SessionIndexer, SessionTreeSnapshot } from "../src/session-indexer.js";
 
 describe("bridge websocket server", () => {
     let bridgeServer: BridgeServer | undefined;
@@ -572,11 +572,23 @@ function isEnvelopeLike(value: unknown): value is EnvelopeLike {
 class FakeSessionIndexer implements SessionIndexer {
     listCalls = 0;
 
-    constructor(private readonly groups: SessionIndexGroup[]) {}
+    constructor(
+        private readonly groups: SessionIndexGroup[],
+        private readonly tree: SessionTreeSnapshot = {
+            sessionPath: "/tmp/test-session.jsonl",
+            rootIds: [],
+            entries: [],
+        },
+    ) {}
 
     async listSessions(): Promise<SessionIndexGroup[]> {
         this.listCalls += 1;
         return this.groups;
+    }
+
+    async getSessionTree(sessionPath: string): Promise<SessionTreeSnapshot> {
+        void sessionPath;
+        return this.tree;
     }
 }
 
