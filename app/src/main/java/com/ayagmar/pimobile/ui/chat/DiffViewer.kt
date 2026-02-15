@@ -1,4 +1,4 @@
-@file:Suppress("TooManyFunctions", "MagicNumber", "CyclomaticComplexMethod", "ReturnCount")
+@file:Suppress("TooManyFunctions", "MagicNumber")
 
 package com.ayagmar.pimobile.ui.chat
 
@@ -30,10 +30,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ayagmar.pimobile.chat.EditDiffInfo
+import com.github.difflib.DiffUtils
+import com.github.difflib.patch.AbstractDelta
+import com.github.difflib.patch.DeltaType
 
 private const val COLLAPSED_DIFF_LINES = 120
 private const val CONTEXT_LINES = 3
-private const val MAX_LCS_CELLS = 2_000_000
 
 private val ADDED_BACKGROUND = Color(0xFFE8F5E9)
 private val REMOVED_BACKGROUND = Color(0xFFFFEBEE)
@@ -43,84 +45,11 @@ private val GUTTER_TEXT = Color(0xFF64748B)
 private val COMMENT_TEXT = Color(0xFF6A737D)
 private val STRING_TEXT = Color(0xFF0B7285)
 private val NUMBER_TEXT = Color(0xFFB45309)
-private val KEYWORD_TEXT = Color(0xFF7C3AED)
-
-private val KOTLIN_KEYWORDS =
-    setOf(
-        "class",
-        "data",
-        "fun",
-        "val",
-        "var",
-        "if",
-        "else",
-        "when",
-        "for",
-        "while",
-        "return",
-        "object",
-        "interface",
-        "sealed",
-        "private",
-        "public",
-        "internal",
-        "suspend",
-        "override",
-        "import",
-        "package",
-        "null",
-        "true",
-        "false",
-    )
-
-private val JS_TS_KEYWORDS =
-    setOf(
-        "function",
-        "const",
-        "let",
-        "var",
-        "if",
-        "else",
-        "for",
-        "while",
-        "return",
-        "class",
-        "interface",
-        "type",
-        "extends",
-        "implements",
-        "import",
-        "export",
-        "from",
-        "async",
-        "await",
-        "null",
-        "true",
-        "false",
-    )
-
-private val JSON_KEYWORDS = setOf("true", "false", "null")
 
 private enum class SyntaxLanguage {
-    KOTLIN,
-    JAVASCRIPT,
-    JSON,
+    CODE,
     MARKDOWN,
     PLAIN,
-}
-
-private sealed interface LineEdit {
-    data class Unchanged(
-        val content: String,
-    ) : LineEdit
-
-    data class Added(
-        val content: String,
-    ) : LineEdit
-
-    data class Removed(
-        val content: String,
-    ) : LineEdit
 }
 
 private data class HighlightSpan(
@@ -129,9 +58,6 @@ private data class HighlightSpan(
     val style: SpanStyle,
 )
 
-/**
- * Displays a unified diff view for file edits.
- */
 @Composable
 fun DiffViewer(
     diffInfo: EditDiffInfo,
@@ -166,10 +92,7 @@ fun DiffViewer(
                         .padding(horizontal = 8.dp),
             ) {
                 items(displayLines) { line ->
-                    DiffLineItem(
-                        line = line,
-                        syntaxLanguage = syntaxLanguage,
-                    )
+                    DiffLineItem(line = line, syntaxLanguage = syntaxLanguage)
                 }
             }
 
@@ -298,21 +221,18 @@ private fun buildHighlightedDiffLine(
 
     val content = line.content
     val baseStyle = SpanStyle(color = baseContentColor, fontFamily = FontFamily.Monospace)
-    val highlighted =
-        buildAnnotatedString {
-            append(prefix)
-            append(" ")
-            append(content)
-            addStyle(baseStyle, start = 0, end = length)
 
-            val offset = 2
-            val spans = computeHighlightSpans(content, syntaxLanguage)
-            spans.forEach { span ->
-                addStyle(span.style, start = span.start + offset, end = span.end + offset)
-            }
+    return buildAnnotatedString {
+        append(prefix)
+        append(" ")
+        append(content)
+        addStyle(baseStyle, start = 0, end = length)
+
+        val offset = 2
+        computeHighlightSpans(content, syntaxLanguage).forEach { span ->
+            addStyle(span.style, start = span.start + offset, end = span.end + offset)
         }
-
-    return highlighted
+    }
 }
 
 private fun computeHighlightSpans(
@@ -320,27 +240,19 @@ private fun computeHighlightSpans(
     language: SyntaxLanguage,
 ): List<HighlightSpan> {
     val spans = mutableListOf<HighlightSpan>()
+    val commentRange = commentRange(content, language)
 
-    val commentStart =
-        when (language) {
-            SyntaxLanguage.KOTLIN,
-            SyntaxLanguage.JAVASCRIPT,
-            -> content.indexOf("//")
-            SyntaxLanguage.MARKDOWN ->
-                if (content.trimStart().startsWith("#")) {
-                    0
-                } else {
-                    -1
-                }
-            else -> -1
-        }
-
-    if (commentStart >= 0) {
-        spans += HighlightSpan(commentStart, content.length, SpanStyle(color = COMMENT_TEXT))
+    commentRange?.let { range ->
+        spans +=
+            HighlightSpan(
+                start = range.first,
+                end = range.last + 1,
+                style = SpanStyle(color = COMMENT_TEXT),
+            )
     }
 
     STRING_REGEX.findAll(content).forEach { match ->
-        if (!isInsideComment(match.range.first, commentStart)) {
+        if (!isInComment(match.range.first, commentRange)) {
             spans +=
                 HighlightSpan(
                     start = match.range.first,
@@ -351,7 +263,7 @@ private fun computeHighlightSpans(
     }
 
     NUMBER_REGEX.findAll(content).forEach { match ->
-        if (!isInsideComment(match.range.first, commentStart)) {
+        if (!isInComment(match.range.first, commentRange)) {
             spans +=
                 HighlightSpan(
                     start = match.range.first,
@@ -361,41 +273,42 @@ private fun computeHighlightSpans(
         }
     }
 
-    val keywords =
-        when (language) {
-            SyntaxLanguage.KOTLIN -> KOTLIN_KEYWORDS
-            SyntaxLanguage.JAVASCRIPT -> JS_TS_KEYWORDS
-            SyntaxLanguage.JSON -> JSON_KEYWORDS
-            else -> emptySet()
-        }
-
-    if (keywords.isNotEmpty()) {
-        KEYWORD_REGEX.findAll(content).forEach { match ->
-            if (match.value in keywords && !isInsideComment(match.range.first, commentStart)) {
-                spans +=
-                    HighlightSpan(
-                        start = match.range.first,
-                        end = match.range.last + 1,
-                        style = SpanStyle(color = KEYWORD_TEXT),
-                    )
-            }
-        }
-    }
-
     return spans
 }
 
-private fun isInsideComment(
+private fun commentRange(
+    content: String,
+    language: SyntaxLanguage,
+): IntRange? {
+    return when (language) {
+        SyntaxLanguage.CODE -> {
+            val start = content.indexOf("//")
+            if (start >= 0) start until content.length else null
+        }
+        SyntaxLanguage.MARKDOWN -> {
+            if (content.trimStart().startsWith("#")) {
+                0 until content.length
+            } else {
+                null
+            }
+        }
+        SyntaxLanguage.PLAIN -> null
+    }
+}
+
+private fun isInComment(
     index: Int,
-    commentStart: Int,
-): Boolean = commentStart >= 0 && index >= commentStart
+    commentRange: IntRange?,
+): Boolean {
+    return commentRange != null && index in commentRange
+}
 
 private fun detectSyntaxLanguage(path: String): SyntaxLanguage {
     val extension = path.substringAfterLast('.', missingDelimiterValue = "").lowercase()
     return when (extension) {
-        "kt", "kts", "java" -> SyntaxLanguage.KOTLIN
-        "ts", "tsx", "js", "jsx" -> SyntaxLanguage.JAVASCRIPT
-        "json", "jsonl" -> SyntaxLanguage.JSON
+        "kt", "kts", "java", "ts", "tsx", "js", "jsx", "go", "py", "rb", "swift", "cs", "cpp", "c" -> {
+            SyntaxLanguage.CODE
+        }
         "md", "markdown" -> SyntaxLanguage.MARKDOWN
         else -> SyntaxLanguage.PLAIN
     }
@@ -421,241 +334,219 @@ enum class DiffLineType {
 internal fun computeDiffLines(diffInfo: EditDiffInfo): List<DiffLine> {
     val oldLines = splitLines(diffInfo.oldString)
     val newLines = splitLines(diffInfo.newString)
-    val edits = computeLineEdits(oldLines = oldLines, newLines = newLines)
-    val numberedDiff = toNumberedDiffLines(edits)
-    return collapseToContextHunks(numberedDiff, contextLines = CONTEXT_LINES)
+    val completeDiff = buildCompleteDiff(oldLines = oldLines, newLines = newLines)
+    return collapseToContextHunks(completeDiff, contextLines = CONTEXT_LINES)
 }
 
 private fun splitLines(text: String): List<String> {
-    if (text.isEmpty()) {
-        return emptyList()
+    return if (text.isEmpty()) {
+        emptyList()
+    } else {
+        text.split('\n')
     }
-    return text.split('\n')
 }
 
-private fun computeLineEdits(
+private data class DiffCursor(
+    var oldIndex: Int = 0,
+    var newIndex: Int = 0,
+)
+
+private fun buildCompleteDiff(
     oldLines: List<String>,
     newLines: List<String>,
-): List<LineEdit> {
-    if (oldLines.isEmpty() && newLines.isEmpty()) {
-        return emptyList()
-    }
-
-    val lcsCells = oldLines.size * newLines.size
-    if (lcsCells > MAX_LCS_CELLS) {
-        return computeFallbackEdits(oldLines, newLines)
-    }
-
-    val lcs = Array(oldLines.size + 1) { IntArray(newLines.size + 1) }
-
-    for (oldIndex in oldLines.size - 1 downTo 0) {
-        for (newIndex in newLines.size - 1 downTo 0) {
-            lcs[oldIndex][newIndex] =
-                if (oldLines[oldIndex] == newLines[newIndex]) {
-                    lcs[oldIndex + 1][newIndex + 1] + 1
-                } else {
-                    maxOf(lcs[oldIndex + 1][newIndex], lcs[oldIndex][newIndex + 1])
-                }
-        }
-    }
-
-    val edits = mutableListOf<LineEdit>()
-    var oldIndex = 0
-    var newIndex = 0
-
-    while (oldIndex < oldLines.size && newIndex < newLines.size) {
-        when {
-            oldLines[oldIndex] == newLines[newIndex] -> {
-                edits += LineEdit.Unchanged(oldLines[oldIndex])
-                oldIndex += 1
-                newIndex += 1
-            }
-            lcs[oldIndex + 1][newIndex] >= lcs[oldIndex][newIndex + 1] -> {
-                edits += LineEdit.Removed(oldLines[oldIndex])
-                oldIndex += 1
-            }
-            else -> {
-                edits += LineEdit.Added(newLines[newIndex])
-                newIndex += 1
-            }
-        }
-    }
-
-    while (oldIndex < oldLines.size) {
-        edits += LineEdit.Removed(oldLines[oldIndex])
-        oldIndex += 1
-    }
-
-    while (newIndex < newLines.size) {
-        edits += LineEdit.Added(newLines[newIndex])
-        newIndex += 1
-    }
-
-    return edits
-}
-
-private fun computeFallbackEdits(
-    oldLines: List<String>,
-    newLines: List<String>,
-): List<LineEdit> {
-    val prefixLength = findCommonPrefixLength(oldLines, newLines)
-    val suffixLength = findCommonSuffixLength(oldLines, newLines, prefixLength)
-
-    val edits = mutableListOf<LineEdit>()
-    for (index in 0 until prefixLength) {
-        edits += LineEdit.Unchanged(oldLines[index])
-    }
-
-    val oldChangedEnd = oldLines.size - suffixLength
-    val newChangedEnd = newLines.size - suffixLength
-
-    for (index in prefixLength until oldChangedEnd) {
-        edits += LineEdit.Removed(oldLines[index])
-    }
-
-    for (index in prefixLength until newChangedEnd) {
-        edits += LineEdit.Added(newLines[index])
-    }
-
-    for (index in oldChangedEnd until oldLines.size) {
-        edits += LineEdit.Unchanged(oldLines[index])
-    }
-
-    return edits
-}
-
-private fun findCommonPrefixLength(
-    oldLines: List<String>,
-    newLines: List<String>,
-): Int {
-    var index = 0
-    while (index < oldLines.size && index < newLines.size && oldLines[index] == newLines[index]) {
-        index += 1
-    }
-    return index
-}
-
-private fun findCommonSuffixLength(
-    oldLines: List<String>,
-    newLines: List<String>,
-    prefixLength: Int,
-): Int {
-    var offset = 0
-    while (
-        offset < oldLines.size - prefixLength &&
-        offset < newLines.size - prefixLength &&
-        oldLines[oldLines.size - 1 - offset] == newLines[newLines.size - 1 - offset]
-    ) {
-        offset += 1
-    }
-    return offset
-}
-
-private fun toNumberedDiffLines(edits: List<LineEdit>): List<DiffLine> {
+): List<DiffLine> {
+    val deltas = sortedDeltas(oldLines, newLines)
     val diffLines = mutableListOf<DiffLine>()
-    var oldLineNumber = 1
-    var newLineNumber = 1
+    val cursor = DiffCursor()
 
-    edits.forEach { edit ->
-        when (edit) {
-            is LineEdit.Unchanged -> {
-                diffLines +=
-                    DiffLine(
-                        type = DiffLineType.CONTEXT,
-                        content = edit.content,
-                        oldLineNumber = oldLineNumber,
-                        newLineNumber = newLineNumber,
-                    )
-                oldLineNumber += 1
-                newLineNumber += 1
-            }
-            is LineEdit.Removed -> {
-                diffLines +=
-                    DiffLine(
-                        type = DiffLineType.REMOVED,
-                        content = edit.content,
-                        oldLineNumber = oldLineNumber,
-                    )
-                oldLineNumber += 1
-            }
-            is LineEdit.Added -> {
-                diffLines +=
-                    DiffLine(
-                        type = DiffLineType.ADDED,
-                        content = edit.content,
-                        newLineNumber = newLineNumber,
-                    )
-                newLineNumber += 1
-            }
-        }
+    deltas.forEach { delta ->
+        appendContextUntil(
+            lines = diffLines,
+            oldLines = oldLines,
+            targetOldIndex = delta.source.position,
+            cursor = cursor,
+        )
+        appendDeltaLines(lines = diffLines, delta = delta, cursor = cursor)
     }
+
+    appendRemainingLines(lines = diffLines, oldLines = oldLines, newLines = newLines, cursor = cursor)
 
     return diffLines
+}
+
+private fun sortedDeltas(
+    oldLines: List<String>,
+    newLines: List<String>,
+): List<AbstractDelta<String>> {
+    return DiffUtils
+        .diff(oldLines, newLines)
+        .deltas
+        .sortedWith(compareBy<AbstractDelta<String>> { it.source.position }.thenBy { it.target.position })
+}
+
+private fun appendContextUntil(
+    lines: MutableList<DiffLine>,
+    oldLines: List<String>,
+    targetOldIndex: Int,
+    cursor: DiffCursor,
+) {
+    while (cursor.oldIndex < targetOldIndex) {
+        lines +=
+            DiffLine(
+                type = DiffLineType.CONTEXT,
+                content = oldLines[cursor.oldIndex],
+                oldLineNumber = cursor.oldIndex + 1,
+                newLineNumber = cursor.newIndex + 1,
+            )
+        cursor.oldIndex += 1
+        cursor.newIndex += 1
+    }
+}
+
+private fun appendDeltaLines(
+    lines: MutableList<DiffLine>,
+    delta: AbstractDelta<String>,
+    cursor: DiffCursor,
+) {
+    when (delta.type) {
+        DeltaType.INSERT -> appendAddedLines(lines, delta.target.lines, cursor)
+        DeltaType.DELETE -> appendRemovedLines(lines, delta.source.lines, cursor)
+        DeltaType.CHANGE -> {
+            appendRemovedLines(lines, delta.source.lines, cursor)
+            appendAddedLines(lines, delta.target.lines, cursor)
+        }
+        DeltaType.EQUAL,
+        null,
+        -> Unit
+    }
+}
+
+private fun appendRemovedLines(
+    lines: MutableList<DiffLine>,
+    sourceLines: List<String>,
+    cursor: DiffCursor,
+) {
+    sourceLines.forEach { content ->
+        lines +=
+            DiffLine(
+                type = DiffLineType.REMOVED,
+                content = content,
+                oldLineNumber = cursor.oldIndex + 1,
+            )
+        cursor.oldIndex += 1
+    }
+}
+
+private fun appendAddedLines(
+    lines: MutableList<DiffLine>,
+    targetLines: List<String>,
+    cursor: DiffCursor,
+) {
+    targetLines.forEach { content ->
+        lines +=
+            DiffLine(
+                type = DiffLineType.ADDED,
+                content = content,
+                newLineNumber = cursor.newIndex + 1,
+            )
+        cursor.newIndex += 1
+    }
+}
+
+private fun appendRemainingLines(
+    lines: MutableList<DiffLine>,
+    oldLines: List<String>,
+    newLines: List<String>,
+    cursor: DiffCursor,
+) {
+    while (cursor.oldIndex < oldLines.size && cursor.newIndex < newLines.size) {
+        lines +=
+            DiffLine(
+                type = DiffLineType.CONTEXT,
+                content = oldLines[cursor.oldIndex],
+                oldLineNumber = cursor.oldIndex + 1,
+                newLineNumber = cursor.newIndex + 1,
+            )
+        cursor.oldIndex += 1
+        cursor.newIndex += 1
+    }
+
+    appendRemovedLines(lines, oldLines.drop(cursor.oldIndex), cursor)
+    appendAddedLines(lines, newLines.drop(cursor.newIndex), cursor)
 }
 
 private fun collapseToContextHunks(
     lines: List<DiffLine>,
     contextLines: Int,
 ): List<DiffLine> {
-    if (lines.isEmpty()) {
-        return emptyList()
-    }
+    if (lines.isEmpty()) return emptyList()
 
     val changedIndexes =
         lines.indices.filter { index ->
-            val type = lines[index].type
-            type == DiffLineType.ADDED || type == DiffLineType.REMOVED
+            lines[index].type == DiffLineType.ADDED || lines[index].type == DiffLineType.REMOVED
         }
 
-    if (changedIndexes.isEmpty()) {
-        return lines
+    val hasChanges = changedIndexes.isNotEmpty()
+    return if (hasChanges) {
+        buildCollapsedHunks(lines = lines, changedIndexes = changedIndexes, contextLines = contextLines)
+    } else {
+        lines
     }
+}
 
-    val ranges = mutableListOf<IntRange>()
-    changedIndexes.forEach { index ->
-        val start = maxOf(0, index - contextLines)
-        val end = minOf(lines.lastIndex, index + contextLines)
+private fun buildCollapsedHunks(
+    lines: List<DiffLine>,
+    changedIndexes: List<Int>,
+    contextLines: Int,
+): List<DiffLine> {
+    val mergedRanges = mutableListOf<IntRange>()
+    changedIndexes.forEach { changedIndex ->
+        val start = maxOf(0, changedIndex - contextLines)
+        val end = minOf(lines.lastIndex, changedIndex + contextLines)
 
-        val previous = ranges.lastOrNull()
+        val previous = mergedRanges.lastOrNull()
         if (previous == null || start > previous.last + 1) {
-            ranges += start..end
+            mergedRanges += start..end
         } else {
-            ranges[ranges.lastIndex] = previous.first..maxOf(previous.last, end)
+            mergedRanges[mergedRanges.lastIndex] = previous.first..maxOf(previous.last, end)
         }
     }
 
+    return materializeCollapsedRanges(lines = lines, mergedRanges = mergedRanges)
+}
+
+private fun materializeCollapsedRanges(
+    lines: List<DiffLine>,
+    mergedRanges: List<IntRange>,
+): List<DiffLine> {
     val result = mutableListOf<DiffLine>()
-    var currentIndex = 0
+    var nextStart = 0
 
-    ranges.forEach { range ->
-        if (range.first > currentIndex) {
-            val skippedCount = range.first - currentIndex
-            result +=
-                DiffLine(
-                    type = DiffLineType.SKIPPED,
-                    content = "… $skippedCount unchanged lines …",
-                )
+    mergedRanges.forEach { range ->
+        if (range.first > nextStart) {
+            result += skippedLine(range.first - nextStart)
         }
 
-        for (lineIndex in range) {
-            result += lines[lineIndex]
+        for (index in range) {
+            result += lines[index]
         }
 
-        currentIndex = range.last + 1
+        nextStart = range.last + 1
     }
 
-    if (currentIndex <= lines.lastIndex) {
-        val skippedCount = lines.size - currentIndex
-        result +=
-            DiffLine(
-                type = DiffLineType.SKIPPED,
-                content = "… $skippedCount unchanged lines …",
-            )
+    if (nextStart <= lines.lastIndex) {
+        result += skippedLine(lines.size - nextStart)
     }
 
     return result
 }
 
+private fun skippedLine(count: Int): DiffLine {
+    return DiffLine(
+        type = DiffLineType.SKIPPED,
+        content = "… $count unchanged lines …",
+    )
+}
+
 private val STRING_REGEX = Regex("\"([^\\\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'")
 private val NUMBER_REGEX = Regex("\\b\\d+(?:\\.\\d+)?\\b")
-private val KEYWORD_REGEX = Regex("\\b[A-Za-z_][A-Za-z0-9_]*\\b")

@@ -72,6 +72,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("io.github.java-diff-utils:java-diff-utils:4.15")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
