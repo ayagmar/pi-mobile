@@ -6,6 +6,12 @@ Scope focus from fresh audit: RPC compatibility, Kotlin quality, bridge security
 
 Execution checkpoint (2026-02-15): backlog tasks C1–C4, Q1–Q7, F1–F5, M1–M4, T1–T2, and H1–H4 are complete. Remaining tracked item: manual on-device smoke validation.
 
+Post-feedback UX/reliability follow-up (2026-02-15):
+1. R1 Resume reliability: ensure Chat timeline refreshes after session switch/new/fork responses even when Chat VM is already alive.
+2. R2 Sessions explorer usability: default to flat/all-session browsing, clearer view-mode labeling, faster grouped-mode expand/collapse.
+3. R3 Session grouping readability: show session counts per cwd and display real project cwd in flat cards.
+4. R4 Remove duplicate app chrome: drop platform action bar title (`pi-mobile`) by using NoActionBar app theme.
+
 > No milestones or estimates.
 > Benchmark-specific work is intentionally excluded for now.
 

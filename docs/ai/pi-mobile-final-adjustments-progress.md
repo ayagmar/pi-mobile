@@ -99,6 +99,17 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 ---
 
+## Post-feedback UX/reliability follow-up (2026-02-15)
+
+| Order | Task | Status | Commit message | Commit hash | Verification | Notes |
+|---|---|---|---|---|---|---|
+| R1 | Resume reliability (chat refresh after session switch) | DONE | pending |  | ktlint✅ detekt✅ test✅ bridge✅ | ChatViewModel now reloads history on successful `switch_session`/`new_session`/`fork` RPC responses to prevent stale timeline when resuming from Sessions tab |
+| R2 | Sessions explorer UX (flat-first + quick grouped controls) | DONE | pending |  | ktlint✅ detekt✅ test✅ bridge✅ | Sessions now default to flat browsing; mode toggle relabeled (`Flat`/`Grouped`); grouped mode adds one-tap expand/collapse-all |
+| R3 | Session grouping readability improvements | DONE | pending |  | ktlint✅ detekt✅ test✅ bridge✅ | CWD headers now include session counts; session cards gained compact metadata rows (`msgs`/model), single-line path ellipsis, and flat cards now show actual project `cwd` instead of storage directories |
+| R4 | Remove redundant top app bar (`pi-mobile`) | DONE | pending |  | ktlint✅ detekt✅ test✅ bridge✅ | App theme switched to `Theme.DeviceDefault.NoActionBar` to reclaim vertical space and remove duplicate chrome |
+
+---
+
 ## Verification template (paste per completed task)
 
 ```text
@@ -552,6 +563,25 @@ Notes/blockers:
 - Added a second bridge-internal extension (`pi-mobile-workflows`) and loaded it alongside `pi-mobile-tree` for RPC sessions.
 - Routed mobile `/stats` built-in command through an extension command (`/pi-mobile-open-stats`) that emits internal status action payloads.
 - Added ChatViewModel handling/tests for internal workflow status actions and hidden internal command filtering from command palette.
+```
+
+### 2026-02-15
+
+```text
+Task: R1/R2/R3/R4 (post-feedback UX/reliability follow-up)
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Fixed stale chat-on-resume behavior by reloading history on successful `switch_session` / `new_session` / `fork` RPC responses.
+- Improved Sessions UX: default flat browsing, clearer `Flat`/`Grouped` mode labels, and one-tap grouped expand/collapse-all.
+- Improved grouped readability with per-cwd session counts and showed real project `cwd` in flat cards.
+- Removed duplicate `pi-mobile` top chrome by switching app theme to `Theme.DeviceDefault.NoActionBar`.
 ```
 
 ---

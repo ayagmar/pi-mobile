@@ -129,6 +129,21 @@ class ChatViewModel(
         PerformanceMetrics.recordPromptSend()
         hasRecordedFirstToken = false
 
+        // Optimistically add user message to timeline
+        val optimisticUserItem =
+            ChatTimelineItem.User(
+                id = "user-${System.currentTimeMillis()}",
+                text =
+                    buildString {
+                        append(message)
+                        if (pendingImages.isNotEmpty()) {
+                            if (isNotEmpty()) append("\n\n")
+                            append("[${pendingImages.size} image(s) attached]")
+                        }
+                    },
+            )
+        upsertTimelineItem(optimisticUserItem)
+
         viewModelScope.launch {
             val imagePayloads =
                 pendingImages.mapNotNull { pending ->
@@ -558,29 +573,10 @@ class ChatViewModel(
                     is AutoCompactionEndEvent -> handleCompactionEnd(event)
                     is AutoRetryStartEvent -> handleRetryStart(event)
                     is AutoRetryEndEvent -> handleRetryEnd(event)
-                    is RpcResponse -> handleRpcResponse(event)
                     is AgentEndEvent -> flushAllPendingStreamUpdates(force = true)
                     else -> Unit
                 }
             }
-        }
-    }
-
-    private fun handleRpcResponse(response: RpcResponse) {
-        if (!response.success) {
-            return
-        }
-
-        val cancelled = response.data?.booleanField("cancelled") ?: false
-        if (cancelled) {
-            return
-        }
-
-        when (response.command) {
-            RPC_COMMAND_SWITCH_SESSION,
-            RPC_COMMAND_NEW_SESSION,
-            RPC_COMMAND_FORK,
-            -> loadInitialMessages()
         }
     }
 
@@ -729,8 +725,21 @@ class ChatViewModel(
     }
 
     private fun handleMessageEnd(event: MessageEndEvent) {
-        val role = event.message?.stringField("role") ?: "assistant"
+        val message = event.message
+        val role = message?.stringField("role") ?: "assistant"
         addLifecycleNotification("$role message completed")
+
+        // Add user messages to timeline
+        if (role == "user" && message != null) {
+            val text = extractUserText(message["content"])
+            val entryId = message.stringField("entryId") ?: System.currentTimeMillis().toString()
+            val userItem =
+                ChatTimelineItem.User(
+                    id = "user-$entryId",
+                    text = text,
+                )
+            upsertTimelineItem(userItem)
+        }
     }
 
     private fun handleTurnStart() {
@@ -1674,9 +1683,6 @@ class ChatViewModel(
         private const val BUILTIN_STATS_COMMAND = "stats"
         private const val BUILTIN_HOTKEYS_COMMAND = "hotkeys"
 
-        private const val RPC_COMMAND_SWITCH_SESSION = "switch_session"
-        private const val RPC_COMMAND_NEW_SESSION = "new_session"
-        private const val RPC_COMMAND_FORK = "fork"
         private const val INTERNAL_TREE_NAVIGATION_COMMAND = "pi-mobile-tree"
         private const val INTERNAL_STATS_WORKFLOW_COMMAND = "pi-mobile-open-stats"
         private const val INTERNAL_WORKFLOW_STATUS_KEY = "pi-mobile-workflow-action"

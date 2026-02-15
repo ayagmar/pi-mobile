@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -560,7 +561,14 @@ private fun ChatTimeline(
 
         items(items = timeline, key = { item -> item.id }) { item ->
             when (item) {
-                is ChatTimelineItem.User -> TimelineCard(title = "User", text = item.text)
+                is ChatTimelineItem.User -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        UserCard(text = item.text)
+                    }
+                }
                 is ChatTimelineItem.Assistant -> {
                     AssistantCard(
                         item = item,
@@ -583,30 +591,30 @@ private fun ChatTimeline(
 }
 
 @Composable
-private fun TimelineCard(
-    title: String,
+private fun UserCard(
     text: String,
+    modifier: Modifier = Modifier,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.widthIn(max = 340.dp),
         colors =
             CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
             ),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = title,
+                text = "You",
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
             Text(
                 text = text.ifBlank { "(empty)" },
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
         }
     }
