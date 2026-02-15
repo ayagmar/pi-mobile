@@ -5,7 +5,6 @@ import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,6 +58,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -77,6 +77,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -106,8 +108,6 @@ private data class ChatCallbacks(
     val onToggleThinkingExpansion: (String) -> Unit,
     val onToggleDiffExpansion: (String) -> Unit,
     val onToggleToolArgumentsExpansion: (String) -> Unit,
-    val onCollapseAllToolAndReasoning: () -> Unit,
-    val onExpandAllToolAndReasoning: () -> Unit,
     val onLoadOlderMessages: () -> Unit,
     val onInputTextChanged: (String) -> Unit,
     val onSendPrompt: () -> Unit,
@@ -117,7 +117,6 @@ private data class ChatCallbacks(
     val onRemovePendingQueueItem: (String) -> Unit,
     val onClearPendingQueueItems: () -> Unit,
     val onSetThinkingLevel: (String) -> Unit,
-    val onFetchLastAssistantText: ((String?) -> Unit) -> Unit,
     val onAbortRetry: () -> Unit,
     val onSendExtensionUiResponse: (String, String?, Boolean?, Boolean) -> Unit,
     val onDismissExtensionRequest: () -> Unit,
@@ -151,7 +150,6 @@ private data class ChatCallbacks(
     // Image attachment callbacks
     val onAddImage: (PendingImage) -> Unit,
     val onRemoveImage: (Int) -> Unit,
-    val onClearImages: () -> Unit,
 )
 
 @Suppress("LongMethod")
@@ -176,8 +174,6 @@ fun ChatRoute(sessionController: SessionController) {
                 onToggleThinkingExpansion = chatViewModel::toggleThinkingExpansion,
                 onToggleDiffExpansion = chatViewModel::toggleDiffExpansion,
                 onToggleToolArgumentsExpansion = chatViewModel::toggleToolArgumentsExpansion,
-                onCollapseAllToolAndReasoning = chatViewModel::collapseAllToolAndReasoning,
-                onExpandAllToolAndReasoning = chatViewModel::expandAllToolAndReasoning,
                 onLoadOlderMessages = chatViewModel::loadOlderMessages,
                 onInputTextChanged = chatViewModel::onInputTextChanged,
                 onSendPrompt = chatViewModel::sendPrompt,
@@ -187,7 +183,6 @@ fun ChatRoute(sessionController: SessionController) {
                 onRemovePendingQueueItem = chatViewModel::removePendingQueueItem,
                 onClearPendingQueueItems = chatViewModel::clearPendingQueueItems,
                 onSetThinkingLevel = chatViewModel::setThinkingLevel,
-                onFetchLastAssistantText = chatViewModel::fetchLastAssistantText,
                 onAbortRetry = chatViewModel::abortRetry,
                 onSendExtensionUiResponse = chatViewModel::sendExtensionUiResponse,
                 onDismissExtensionRequest = chatViewModel::dismissExtensionRequest,
@@ -216,7 +211,6 @@ fun ChatRoute(sessionController: SessionController) {
                 onTreeFilterChanged = chatViewModel::setTreeFilter,
                 onAddImage = chatViewModel::addImage,
                 onRemoveImage = chatViewModel::removeImage,
-                onClearImages = chatViewModel::clearImages,
             )
         }
 
@@ -436,7 +430,6 @@ private fun ChatHeader(
             thinkingLevel = state.thinkingLevel,
             onSetThinkingLevel = callbacks.onSetThinkingLevel,
             onShowModelPicker = callbacks.onShowModelPicker,
-            compact = true,
         )
 
         // Error message if any
@@ -499,8 +492,8 @@ private fun ChatTimeline(
 ) {
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
-    // Auto-scroll to bottom when new messages arrive or during streaming
-    LaunchedEffect(timeline.size, timeline.lastOrNull()?.id) {
+    // Auto-scroll only when a new tail item appears (avoid jumping to bottom when loading older history).
+    LaunchedEffect(timeline.lastOrNull()?.id) {
         if (timeline.isNotEmpty()) {
             listState.animateScrollToItem(timeline.size - 1)
         }
@@ -606,10 +599,9 @@ private fun AssistantCard(
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
 
-            Text(
-                text = item.text.ifBlank { "(empty)" },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            AssistantMessageContent(
+                text = item.text,
+                modifier = Modifier.fillMaxWidth(),
             )
 
             ThinkingBlock(
@@ -620,6 +612,170 @@ private fun AssistantCard(
                 onToggleThinkingExpansion = onToggleThinkingExpansion,
             )
         }
+    }
+}
+
+@Composable
+private fun AssistantMessageContent(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val blocks = remember(text) { parseAssistantMessageBlocks(text) }
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (blocks.isEmpty()) {
+            Text(
+                text = "(empty)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            return@Column
+        }
+
+        blocks.forEach { block ->
+            when (block) {
+                is AssistantMessageBlock.Paragraph -> {
+                    if (block.text.isNotBlank()) {
+                        Text(
+                            text = block.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+
+                is AssistantMessageBlock.Code -> {
+                    AssistantCodeBlock(
+                        code = block.code,
+                        language = block.language,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssistantCodeBlock(
+    code: String,
+    language: String?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val highlighted = highlightCodeBlock(code, language, colors)
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+    ) {
+        SelectionContainer {
+            Text(
+                text = highlighted,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(12.dp),
+            )
+        }
+    }
+}
+
+private sealed interface AssistantMessageBlock {
+    data class Paragraph(
+        val text: String,
+    ) : AssistantMessageBlock
+
+    data class Code(
+        val code: String,
+        val language: String?,
+    ) : AssistantMessageBlock
+}
+
+private fun parseAssistantMessageBlocks(text: String): List<AssistantMessageBlock> {
+    if (text.isBlank()) return emptyList()
+
+    val blocks = mutableListOf<AssistantMessageBlock>()
+    var cursor = 0
+
+    CODE_FENCE_REGEX.findAll(text).forEach { match ->
+        val matchStart = match.range.first
+        val matchEndExclusive = match.range.last + 1
+
+        if (matchStart > cursor) {
+            val paragraph = text.substring(cursor, matchStart).trim()
+            if (paragraph.isNotEmpty()) {
+                blocks += AssistantMessageBlock.Paragraph(paragraph)
+            }
+        }
+
+        val language = match.groupValues[1].takeIf { it.isNotBlank() }
+        val code = match.groupValues[2]
+        blocks += AssistantMessageBlock.Code(code = code.trimEnd(), language = language)
+        cursor = matchEndExclusive
+    }
+
+    if (cursor < text.length) {
+        val paragraph = text.substring(cursor).trim()
+        if (paragraph.isNotEmpty()) {
+            blocks += AssistantMessageBlock.Paragraph(paragraph)
+        }
+    }
+
+    return blocks
+}
+
+private fun highlightCodeBlock(
+    code: String,
+    language: String?,
+    colors: androidx.compose.material3.ColorScheme,
+): AnnotatedString {
+    val text = code.ifBlank { "(empty code block)" }
+    val commentPattern = commentRegexFor(language)
+    val keywordPattern = keywordRegexFor(language)
+
+    val commentStyle = SpanStyle(color = colors.outline)
+    val stringStyle = SpanStyle(color = colors.tertiary)
+    val numberStyle = SpanStyle(color = colors.secondary)
+    val keywordStyle = SpanStyle(color = colors.primary)
+
+    return buildAnnotatedString {
+        append(text)
+
+        applyStyle(STRING_REGEX, stringStyle, text)
+        applyStyle(NUMBER_REGEX, numberStyle, text)
+        applyStyle(keywordPattern, keywordStyle, text)
+        applyStyle(commentPattern, commentStyle, text)
+    }
+}
+
+private fun AnnotatedString.Builder.applyStyle(
+    regex: Regex,
+    style: SpanStyle,
+    text: String,
+) {
+    regex.findAll(text).forEach { match ->
+        addStyle(style, match.range.first, match.range.last + 1)
+    }
+}
+
+private fun keywordRegexFor(language: String?): Regex {
+    return when (language?.lowercase()) {
+        "kotlin", "kt" -> KOTLIN_KEYWORD_REGEX
+        "java" -> JAVA_KEYWORD_REGEX
+        "python", "py" -> PYTHON_KEYWORD_REGEX
+        "javascript", "js", "typescript", "ts", "tsx" -> JS_TS_KEYWORD_REGEX
+        "bash", "shell", "sh" -> BASH_KEYWORD_REGEX
+        else -> GENERIC_KEYWORD_REGEX
+    }
+}
+
+private fun commentRegexFor(language: String?): Regex {
+    return when (language?.lowercase()) {
+        "python", "py", "bash", "shell", "sh", "yaml", "yml" -> HASH_COMMENT_REGEX
+        else -> SLASH_COMMENT_REGEX
     }
 }
 
@@ -787,9 +943,17 @@ private fun ToolCard(
                         item.output
                     }
 
+                val inferredLanguage = inferLanguageFromToolContext(item)
+                val highlightedOutput =
+                    highlightCodeBlock(
+                        code = displayOutput.ifBlank { "(no output yet)" },
+                        language = inferredLanguage,
+                        colors = MaterialTheme.colorScheme,
+                    )
+
                 SelectionContainer {
                     Text(
-                        text = displayOutput.ifBlank { "(no output yet)" },
+                        text = highlightedOutput,
                         style = MaterialTheme.typography.bodyMedium,
                         fontFamily = FontFamily.Monospace,
                     )
@@ -926,6 +1090,12 @@ private data class ToolDisplayInfo(
     val icon: ImageVector,
     val color: Color,
 )
+
+private fun inferLanguageFromToolContext(item: ChatTimelineItem.Tool): String? {
+    val path = item.arguments["path"] ?: return null
+    val extension = path.substringAfterLast('.', missingDelimiterValue = "").lowercase()
+    return TOOL_OUTPUT_LANGUAGE_BY_EXTENSION[extension]
+}
 
 @Composable
 private fun PromptControls(
@@ -1243,7 +1413,7 @@ private fun ImageAttachmentStrip(
     ) {
         itemsIndexed(
             items = images,
-            key = { _, image -> image.uri },
+            key = { index, image -> "${image.uri}-$index" },
         ) { index, image ->
             ImageThumbnail(
                 image = image,
@@ -1376,25 +1546,21 @@ private fun SteerFollowUpDialog(
 }
 
 @Suppress("LongMethod", "LongParameterList")
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ModelThinkingControls(
     currentModel: ModelInfo?,
     thinkingLevel: String?,
     onSetThinkingLevel: (String) -> Unit,
     onShowModelPicker: () -> Unit,
-    compact: Boolean = false,
 ) {
     var showThinkingMenu by remember { mutableStateOf(false) }
 
     val modelText = currentModel?.name ?: "Select model"
-    val providerText = currentModel?.provider?.uppercase() ?: ""
     val thinkingText = thinkingLevel?.uppercase() ?: "OFF"
-    val buttonPadding = if (compact) 6.dp else 8.dp
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         OutlinedButton(
@@ -1403,7 +1569,7 @@ private fun ModelThinkingControls(
             contentPadding =
                 androidx.compose.foundation.layout.PaddingValues(
                     horizontal = 12.dp,
-                    vertical = buttonPadding,
+                    vertical = 6.dp,
                 ),
         ) {
             Row(
@@ -1415,21 +1581,11 @@ private fun ModelThinkingControls(
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                 )
-                Column {
-                    Text(
-                        text = modelText,
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                    )
-                    if (!compact && providerText.isNotEmpty()) {
-                        Text(
-                            text = providerText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline,
-                            maxLines = 1,
-                        )
-                    }
-                }
+                Text(
+                    text = modelText,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
             }
         }
 
@@ -1440,7 +1596,7 @@ private fun ModelThinkingControls(
                 contentPadding =
                     androidx.compose.foundation.layout.PaddingValues(
                         horizontal = 12.dp,
-                        vertical = buttonPadding,
+                        vertical = 6.dp,
                     ),
             ) {
                 Row(
@@ -1516,6 +1672,60 @@ private const val THINKING_COLLAPSE_THRESHOLD = 280
 private const val MAX_ARG_DISPLAY_LENGTH = 100
 private const val STREAMING_FRAME_LOG_TAG = "StreamingFrameMetrics"
 private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")
+private val CODE_FENCE_REGEX = Regex("```([\\w+-]*)\\n([\\s\\S]*?)```")
+private val STRING_REGEX = Regex("\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'")
+private val NUMBER_REGEX = Regex("\\b\\d+(?:\\.\\d+)?\\b")
+private val HASH_COMMENT_REGEX = Regex("#.*$", setOf(RegexOption.MULTILINE))
+private val SLASH_COMMENT_REGEX =
+    Regex(
+        "//.*$|/\\*.*?\\*/",
+        setOf(RegexOption.MULTILINE, RegexOption.DOT_MATCHES_ALL),
+    )
+private val KOTLIN_KEYWORD_REGEX =
+    Regex(
+        "\\b(class|object|interface|fun|val|var|when|if|else|return|suspend|data|sealed|" +
+            "private|public|override|import|package)\\b",
+    )
+private val JAVA_KEYWORD_REGEX =
+    Regex(
+        "\\b(class|interface|enum|public|private|protected|static|final|void|return|if|" +
+            "else|switch|case|new|import|package)\\b",
+    )
+private val PYTHON_KEYWORD_REGEX =
+    Regex(
+        "\\b(def|class|import|from|as|if|elif|else|for|while|return|try|except|with|lambda|pass|break|continue)\\b",
+    )
+private val JS_TS_KEYWORD_REGEX =
+    Regex(
+        "\\b(function|class|const|let|var|return|if|else|switch|case|import|from|export|async|await|interface|type)\\b",
+    )
+private val BASH_KEYWORD_REGEX = Regex("\\b(if|then|fi|for|do|done|case|esac|function|export|echo)\\b")
+private val GENERIC_KEYWORD_REGEX =
+    Regex("\\b(if|else|for|while|return|class|function|import|from|const|let|var|def|public|private)\\b")
+private val TOOL_OUTPUT_LANGUAGE_BY_EXTENSION =
+    mapOf(
+        "kt" to "kotlin",
+        "kts" to "kotlin",
+        "java" to "java",
+        "js" to "javascript",
+        "jsx" to "javascript",
+        "ts" to "typescript",
+        "tsx" to "typescript",
+        "py" to "python",
+        "json" to "json",
+        "jsonl" to "json",
+        "xml" to "xml",
+        "html" to "xml",
+        "svg" to "xml",
+        "sh" to "bash",
+        "bash" to "bash",
+        "sql" to "sql",
+        "yml" to "yaml",
+        "yaml" to "yaml",
+        "go" to "go",
+        "rs" to "rust",
+        "md" to "markdown",
+    )
 
 @Suppress("LongParameterList", "LongMethod")
 @Composable

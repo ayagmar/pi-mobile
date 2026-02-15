@@ -3,7 +3,6 @@ package com.ayagmar.pimobile.corenet
 import com.ayagmar.pimobile.corerpc.AbortRetryCommand
 import com.ayagmar.pimobile.corerpc.CycleModelCommand
 import com.ayagmar.pimobile.corerpc.CycleThinkingLevelCommand
-import com.ayagmar.pimobile.corerpc.GetLastAssistantTextCommand
 import com.ayagmar.pimobile.corerpc.NewSessionCommand
 import com.ayagmar.pimobile.corerpc.SetFollowUpModeCommand
 import com.ayagmar.pimobile.corerpc.SetSteeringModeCommand
@@ -71,13 +70,5 @@ class RpcCommandEncodingTest {
 
         assertEquals("abort_retry", encoded["type"]?.jsonPrimitive?.content)
         assertEquals("abort-retry-1", encoded["id"]?.jsonPrimitive?.content)
-    }
-
-    @Test
-    fun `encodes get last assistant text command`() {
-        val encoded = encodeRpcCommand(Json, GetLastAssistantTextCommand(id = "last-text-1"))
-
-        assertEquals("get_last_assistant_text", encoded["type"]?.jsonPrimitive?.content)
-        assertEquals("last-text-1", encoded["id"]?.jsonPrimitive?.content)
     }
 }

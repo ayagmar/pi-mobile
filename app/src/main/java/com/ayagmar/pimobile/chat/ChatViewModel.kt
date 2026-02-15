@@ -142,7 +142,13 @@ class ChatViewModel(
             _uiState.update { it.copy(inputText = "", pendingImages = emptyList(), errorMessage = null) }
             val result = sessionController.sendPrompt(message, imagePayloads)
             if (result.isFailure) {
-                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+                _uiState.update {
+                    it.copy(
+                        inputText = currentState.inputText,
+                        pendingImages = currentState.pendingImages,
+                        errorMessage = result.exceptionOrNull()?.message,
+                    )
+                }
             }
         }
     }
@@ -223,19 +229,6 @@ class ChatViewModel(
                 _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
             } else {
                 _uiState.update { it.copy(thinkingLevel = result.getOrNull() ?: level) }
-            }
-        }
-    }
-
-    fun fetchLastAssistantText(onResult: (String?) -> Unit) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(errorMessage = null) }
-            val result = sessionController.getLastAssistantText()
-            if (result.isFailure) {
-                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
-                onResult(null)
-            } else {
-                onResult(result.getOrNull())
             }
         }
     }
@@ -524,7 +517,7 @@ class ChatViewModel(
     private fun observeEvents() {
         // Observe session changes and reload timeline
         viewModelScope.launch {
-            sessionController.sessionChanged.collect { newSessionPath ->
+            sessionController.sessionChanged.collect {
                 // Reset state for new session
                 hasRecordedFirstToken = false
                 fullTimeline = emptyList()
@@ -538,7 +531,7 @@ class ChatViewModel(
             sessionController.rpcEvents.collect { event ->
                 when (event) {
                     is MessageUpdateEvent -> handleMessageUpdate(event)
-                    is MessageStartEvent -> handleMessageStart(event)
+                    is MessageStartEvent -> handleMessageStart()
                     is MessageEndEvent -> {
                         flushPendingAssistantUpdate(force = true)
                         handleMessageEnd(event)
@@ -546,7 +539,7 @@ class ChatViewModel(
                     is TurnStartEvent -> handleTurnStart()
                     is TurnEndEvent -> {
                         flushAllPendingStreamUpdates(force = true)
-                        handleTurnEnd(event)
+                        handleTurnEnd()
                     }
                     is ToolExecutionStartEvent -> {
                         flushPendingToolUpdate(event.toolCallId, force = true)
@@ -660,15 +653,7 @@ class ChatViewModel(
             return
         }
 
-        _uiState.update { state ->
-            val newStatuses = state.extensionStatuses.toMutableMap()
-            if (text == null) {
-                newStatuses.remove(key)
-            } else {
-                newStatuses[key] = text
-            }
-            state.copy(extensionStatuses = newStatuses)
-        }
+        // Ignore non-workflow status messages to avoid UI clutter/noise.
     }
 
     private fun handleInternalWorkflowStatus(payloadText: String) {
@@ -713,9 +698,7 @@ class ChatViewModel(
         }
     }
 
-    private fun handleMessageStart(
-        @Suppress("UNUSED_PARAMETER") event: MessageStartEvent,
-    ) {
+    private fun handleMessageStart() {
         // Silently track message start - no UI notification to reduce spam
     }
 
@@ -740,8 +723,7 @@ class ChatViewModel(
         // Silently track turn start - no UI notification to reduce spam
     }
 
-    @Suppress("UNUSED_PARAMETER")
-    private fun handleTurnEnd(event: TurnEndEvent) {
+    private fun handleTurnEnd() {
         // Silently track turn end - no UI notification to reduce spam
     }
 
@@ -1031,22 +1013,35 @@ class ChatViewModel(
         }
 
         val assistantEventType = event.assistantMessageEvent?.type
-        if (assistantEventType == "done" || assistantEventType == "error") {
-            flushPendingAssistantUpdate(force = true)
-            return
-        }
+        when (assistantEventType) {
+            "error" -> {
+                flushPendingAssistantUpdate(force = true)
+                val assistantEvent = event.assistantMessageEvent
+                val reason =
+                    assistantEvent?.partial?.stringField("reason")
+                        ?: event.message?.stringField("stopReason")
+                val message = if (reason.isNullOrBlank()) "Assistant run failed" else "Assistant run failed ($reason)"
+                addSystemNotification(message, "error")
+            }
 
-        val update = assembler.apply(event) ?: return
-        val isHighFrequencyDelta =
-            assistantEventType == "text_delta" ||
-                assistantEventType == "thinking_delta"
+            "done" -> flushPendingAssistantUpdate(force = true)
 
-        if (isHighFrequencyDelta) {
-            assistantUpdateThrottler.offer(update)?.let(::applyAssistantUpdate)
-                ?: scheduleAssistantUpdateFlush()
-        } else {
-            flushPendingAssistantUpdate(force = true)
-            applyAssistantUpdate(update)
+            else -> {
+                val update = assembler.apply(event)
+                if (update != null) {
+                    val isHighFrequencyDelta =
+                        assistantEventType == "text_delta" ||
+                            assistantEventType == "thinking_delta"
+
+                    if (isHighFrequencyDelta) {
+                        assistantUpdateThrottler.offer(update)?.let(::applyAssistantUpdate)
+                            ?: scheduleAssistantUpdateFlush()
+                    } else {
+                        flushPendingAssistantUpdate(force = true)
+                        applyAssistantUpdate(update)
+                    }
+                }
+            }
         }
     }
 
@@ -1074,45 +1069,6 @@ class ChatViewModel(
         _uiState.update { state ->
             ChatTimelineReducer.toggleToolArgumentsExpansion(state, itemId)
         }
-    }
-
-    fun collapseAllToolAndReasoning() {
-        fullTimeline =
-            fullTimeline.map { item ->
-                when (item) {
-                    is ChatTimelineItem.Tool -> item.copy(isCollapsed = true, isDiffExpanded = false)
-                    is ChatTimelineItem.Assistant -> item.copy(isThinkingExpanded = false)
-                    else -> item
-                }
-            }
-
-        publishVisibleTimeline()
-        _uiState.update { state -> state.copy(expandedToolArguments = emptySet()) }
-    }
-
-    fun expandAllToolAndReasoning() {
-        fullTimeline =
-            fullTimeline.map { item ->
-                when (item) {
-                    is ChatTimelineItem.Tool ->
-                        item.copy(
-                            isCollapsed = false,
-                            isDiffExpanded = item.editDiff != null,
-                        )
-
-                    is ChatTimelineItem.Assistant -> item.copy(isThinkingExpanded = !item.thinking.isNullOrBlank())
-                    else -> item
-                }
-            }
-
-        val expandedArgumentToolIds =
-            fullTimeline
-                .filterIsInstance<ChatTimelineItem.Tool>()
-                .filter { tool -> tool.arguments.isNotEmpty() }
-                .mapTo(mutableSetOf()) { tool -> tool.id }
-
-        publishVisibleTimeline()
-        _uiState.update { state -> state.copy(expandedToolArguments = expandedArgumentToolIds) }
     }
 
     // Bash dialog functions
@@ -1305,7 +1261,6 @@ class ChatViewModel(
             val result = sessionController.forkSessionFromEntryId(entryId)
             if (result.isSuccess) {
                 hideTreeSheet()
-                loadInitialMessages()
             } else {
                 _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
             }
@@ -1354,9 +1309,18 @@ class ChatViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingTree = true) }
 
-            val stateResponse = sessionController.getState().getOrNull()
-            val sessionPath = stateResponse?.data?.stringField("sessionFile")
+            val stateResult = sessionController.getState()
+            if (stateResult.isFailure) {
+                _uiState.update {
+                    it.copy(
+                        isLoadingTree = false,
+                        treeErrorMessage = stateResult.exceptionOrNull()?.message ?: "Failed to load session state",
+                    )
+                }
+                return@launch
+            }
 
+            val sessionPath = stateResult.getOrNull()?.data?.stringField("sessionFile")
             if (sessionPath.isNullOrBlank()) {
                 _uiState.update {
                     it.copy(
@@ -1614,10 +1578,6 @@ class ChatViewModel(
         }
     }
 
-    fun clearImages() {
-        _uiState.update { it.copy(pendingImages = emptyList()) }
-    }
-
     override fun onCleared() {
         initialLoadJob?.cancel()
         assistantUpdateFlushJob?.cancel()
@@ -1718,7 +1678,6 @@ data class ChatUiState(
     val thinkingLevel: String? = null,
     val activeExtensionRequest: ExtensionUiRequest? = null,
     val notifications: List<ExtensionNotification> = emptyList(),
-    val extensionStatuses: Map<String, String> = emptyMap(),
     val extensionWidgets: Map<String, ExtensionWidget> = emptyMap(),
     val extensionTitle: String? = null,
     val isCommandPaletteVisible: Boolean = false,

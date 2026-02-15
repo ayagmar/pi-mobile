@@ -454,10 +454,10 @@ Manual smoke checklist (UI/protocol tasks):
 
 ## Definition of done
 
-- [ ] Critical UX fixes complete
-- [ ] Quick wins complete
-- [ ] Stability/security fixes complete
-- [ ] Maintainability improvements complete
-- [ ] Theming + Design System complete
-- [ ] Heavy hitters complete or explicitly documented as protocol-limited
-- [ ] Final verification loop green
+- [x] Critical UX fixes complete
+- [x] Quick wins complete
+- [x] Stability/security fixes complete
+- [x] Maintainability improvements complete
+- [x] Theming + Design System complete
+- [x] Heavy hitters complete or explicitly documented as protocol-limited
+- [x] Final verification loop green

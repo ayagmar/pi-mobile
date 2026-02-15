@@ -120,12 +120,6 @@ data class AbortRetryCommand(
 ) : RpcCommand
 
 @Serializable
-data class GetLastAssistantTextCommand(
-    override val id: String? = null,
-    override val type: String = "get_last_assistant_text",
-) : RpcCommand
-
-@Serializable
 data class ExtensionUiResponseCommand(
     override val id: String? = null,
     override val type: String = "extension_ui_response",

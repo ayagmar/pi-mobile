@@ -23,7 +23,6 @@ import com.ayagmar.pimobile.corerpc.ForkCommand
 import com.ayagmar.pimobile.corerpc.GetAvailableModelsCommand
 import com.ayagmar.pimobile.corerpc.GetCommandsCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
-import com.ayagmar.pimobile.corerpc.GetLastAssistantTextCommand
 import com.ayagmar.pimobile.corerpc.GetSessionStatsCommand
 import com.ayagmar.pimobile.corerpc.ImagePayload
 import com.ayagmar.pimobile.corerpc.NewSessionCommand
@@ -347,7 +346,25 @@ class RpcSessionController(
                         images = images,
                         streamingBehavior = if (isCurrentlyStreaming) "steer" else null,
                     )
-                connection.sendCommand(command)
+
+                val shouldMarkStreaming = !isCurrentlyStreaming
+                if (shouldMarkStreaming) {
+                    _isStreaming.value = true
+                }
+
+                runCatching {
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = command,
+                        expectedCommand = PROMPT_COMMAND,
+                    ).requireSuccess("Failed to send prompt")
+                    Unit
+                }.onFailure {
+                    if (shouldMarkStreaming) {
+                        _isStreaming.value = false
+                    }
+                }.getOrThrow()
             }
         }
     }
@@ -356,8 +373,13 @@ class RpcSessionController(
         return mutex.withLock {
             runCatching {
                 val connection = ensureActiveConnection()
-                val command = AbortCommand(id = UUID.randomUUID().toString())
-                connection.sendCommand(command)
+                sendAndAwaitResponse(
+                    connection = connection,
+                    requestTimeoutMs = requestTimeoutMs,
+                    command = AbortCommand(id = UUID.randomUUID().toString()),
+                    expectedCommand = ABORT_COMMAND,
+                ).requireSuccess("Failed to abort")
+                Unit
             }
         }
     }
@@ -366,12 +388,17 @@ class RpcSessionController(
         return mutex.withLock {
             runCatching {
                 val connection = ensureActiveConnection()
-                val command =
-                    SteerCommand(
-                        id = UUID.randomUUID().toString(),
-                        message = message,
-                    )
-                connection.sendCommand(command)
+                sendAndAwaitResponse(
+                    connection = connection,
+                    requestTimeoutMs = requestTimeoutMs,
+                    command =
+                        SteerCommand(
+                            id = UUID.randomUUID().toString(),
+                            message = message,
+                        ),
+                    expectedCommand = STEER_COMMAND,
+                ).requireSuccess("Failed to steer")
+                Unit
             }
         }
     }
@@ -380,12 +407,17 @@ class RpcSessionController(
         return mutex.withLock {
             runCatching {
                 val connection = ensureActiveConnection()
-                val command =
-                    FollowUpCommand(
-                        id = UUID.randomUUID().toString(),
-                        message = message,
-                    )
-                connection.sendCommand(command)
+                sendAndAwaitResponse(
+                    connection = connection,
+                    requestTimeoutMs = requestTimeoutMs,
+                    command =
+                        FollowUpCommand(
+                            id = UUID.randomUUID().toString(),
+                            message = message,
+                        ),
+                    expectedCommand = FOLLOW_UP_COMMAND,
+                ).requireSuccess("Failed to queue follow-up")
+                Unit
             }
         }
     }
@@ -437,23 +469,6 @@ class RpcSessionController(
                     ).requireSuccess("Failed to set thinking level")
 
                 response.data?.stringField("level") ?: level
-            }
-        }
-    }
-
-    override suspend fun getLastAssistantText(): Result<String?> {
-        return mutex.withLock {
-            runCatching {
-                val connection = ensureActiveConnection()
-                val response =
-                    sendAndAwaitResponse(
-                        connection = connection,
-                        requestTimeoutMs = requestTimeoutMs,
-                        command = GetLastAssistantTextCommand(id = UUID.randomUUID().toString()),
-                        expectedCommand = GET_LAST_ASSISTANT_TEXT_COMMAND,
-                    ).requireSuccess("Failed to get last assistant text")
-
-                parseLastAssistantText(response.data)
             }
         }
     }
@@ -876,6 +891,10 @@ class RpcSessionController(
 
     companion object {
         private const val AUTHORIZATION_HEADER = "Authorization"
+        private const val PROMPT_COMMAND = "prompt"
+        private const val ABORT_COMMAND = "abort"
+        private const val STEER_COMMAND = "steer"
+        private const val FOLLOW_UP_COMMAND = "follow_up"
         private const val SWITCH_SESSION_COMMAND = "switch_session"
         private const val SET_SESSION_NAME_COMMAND = "set_session_name"
         private const val COMPACT_COMMAND = "compact"
@@ -885,7 +904,6 @@ class RpcSessionController(
         private const val CYCLE_MODEL_COMMAND = "cycle_model"
         private const val CYCLE_THINKING_COMMAND = "cycle_thinking_level"
         private const val SET_THINKING_LEVEL_COMMAND = "set_thinking_level"
-        private const val GET_LAST_ASSISTANT_TEXT_COMMAND = "get_last_assistant_text"
         private const val ABORT_RETRY_COMMAND = "abort_retry"
         private const val NEW_SESSION_COMMAND = "new_session"
         private const val GET_COMMANDS_COMMAND = "get_commands"
@@ -1025,10 +1043,6 @@ private fun parseModelInfo(data: JsonObject?): ModelInfo? {
         provider = model.stringField("provider") ?: "unknown",
         thinkingLevel = data.stringField("thinkingLevel") ?: "off",
     )
-}
-
-private fun parseLastAssistantText(data: JsonObject?): String? {
-    return data?.stringField("text")
 }
 
 private fun parseSlashCommands(data: JsonObject?): List<SlashCommandInfo> {

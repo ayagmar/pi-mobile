@@ -617,3 +617,18 @@ Notes/blockers:
 4. **Auto-scroll works** — ✅ Fixed in commit 88d1324
 5. **ANSI codes stripped** — ✅ Fixed in commit 61061b2
 6. **Navigate back to Sessions** — ✅ Fixed in commit 2cc0480
+
+---
+
+## Fresh-eyes review pass (current)
+
+| Task | Status | Notes | Verification |
+|---|---|---|---|
+| Deep architecture/code review across chat/session/transport flows | DONE | Re-read `rpc.md` + extension event model and traced end-to-end session switching, prompt dispatch, and UI rendering paths. | ktlint✅ detekt✅ test✅ bridge✅ |
+| Prompt error surfacing for unsupported/non-subscribed models | DONE | `RpcSessionController.sendPrompt()` now awaits `prompt` response and propagates `success=false` errors to UI; input/images are restored on failure in `ChatViewModel.sendPrompt()`. | ktlint✅ detekt✅ test✅ bridge✅ |
+| Streaming controls responsiveness | DONE | Controller now marks streaming optimistically at prompt dispatch (and reverts on failure), so Abort/Steer/Follow-up controls appear earlier. | ktlint✅ detekt✅ test✅ bridge✅ |
+| Lifecycle toast/banner spam reduction | DONE | Removed noisy lifecycle notifications (`Turn started`, `message completed`) and deleted dead lifecycle throttling state/helpers. | ktlint✅ detekt✅ test✅ bridge✅ |
+| Chat header UX correction | DONE | Restored Tree + Bash quick actions while keeping simplified header layout and reduced clutter. | ktlint✅ detekt✅ test✅ bridge✅ |
+| Chat/tool syntax highlighting | DONE | Added fenced code-block parsing + lightweight token highlighting for assistant messages and inferred-language highlighting for tool output based on file extension. | ktlint✅ detekt✅ test✅ bridge✅ |
+| Dead API/command cleanup | DONE | Removed unused `get_last_assistant_text` command plumbing from `SessionController`, `RpcSessionController`, `RpcCommand`, command encoding, and tests. | ktlint✅ detekt✅ test✅ bridge✅ |
+| Dead UI callback/feature cleanup | DONE | Removed unused chat callbacks and orphaned global expansion UI path/tests that were no longer reachable from UI. | ktlint✅ detekt✅ test✅ bridge✅ |

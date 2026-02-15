@@ -14,7 +14,6 @@ import com.ayagmar.pimobile.corerpc.ForkCommand
 import com.ayagmar.pimobile.corerpc.GetAvailableModelsCommand
 import com.ayagmar.pimobile.corerpc.GetCommandsCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
-import com.ayagmar.pimobile.corerpc.GetLastAssistantTextCommand
 import com.ayagmar.pimobile.corerpc.GetMessagesCommand
 import com.ayagmar.pimobile.corerpc.GetSessionStatsCommand
 import com.ayagmar.pimobile.corerpc.GetStateCommand
@@ -51,7 +50,6 @@ private val rpcCommandEncoders: Map<Class<out RpcCommand>, RpcCommandEncoder> =
         SwitchSessionCommand::class.java to typedEncoder(SwitchSessionCommand.serializer()),
         SetSessionNameCommand::class.java to typedEncoder(SetSessionNameCommand.serializer()),
         GetForkMessagesCommand::class.java to typedEncoder(GetForkMessagesCommand.serializer()),
-        GetLastAssistantTextCommand::class.java to typedEncoder(GetLastAssistantTextCommand.serializer()),
         ForkCommand::class.java to typedEncoder(ForkCommand.serializer()),
         ExportHtmlCommand::class.java to typedEncoder(ExportHtmlCommand.serializer()),
         CompactCommand::class.java to typedEncoder(CompactCommand.serializer()),
