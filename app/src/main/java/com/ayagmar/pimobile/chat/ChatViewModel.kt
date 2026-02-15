@@ -129,21 +129,6 @@ class ChatViewModel(
         PerformanceMetrics.recordPromptSend()
         hasRecordedFirstToken = false
 
-        // Optimistically add user message to timeline
-        val optimisticUserItem =
-            ChatTimelineItem.User(
-                id = "user-${System.currentTimeMillis()}",
-                text =
-                    buildString {
-                        append(message)
-                        if (pendingImages.isNotEmpty()) {
-                            if (isNotEmpty()) append("\n\n")
-                            append("[${pendingImages.size} image(s) attached]")
-                        }
-                    },
-            )
-        upsertTimelineItem(optimisticUserItem)
-
         viewModelScope.launch {
             val imagePayloads =
                 pendingImages.mapNotNull { pending ->
@@ -540,6 +525,18 @@ class ChatViewModel(
 
     @Suppress("CyclomaticComplexMethod")
     private fun observeEvents() {
+        // Observe session changes and reload timeline
+        viewModelScope.launch {
+            sessionController.sessionChanged.collect { newSessionPath ->
+                // Reset state for new session
+                hasRecordedFirstToken = false
+                fullTimeline = emptyList()
+                visibleTimelineSize = 0
+                resetHistoryWindow()
+                loadInitialMessages()
+            }
+        }
+
         viewModelScope.launch {
             sessionController.rpcEvents.collect { event ->
                 when (event) {

@@ -26,6 +26,7 @@ import kotlinx.serialization.json.JsonObject
 class FakeSessionController : SessionController {
     private val events = MutableSharedFlow<RpcIncomingMessage>(extraBufferCapacity = 16)
     private val streamingState = MutableStateFlow(false)
+    private val _sessionChanged = MutableSharedFlow<String?>(extraBufferCapacity = 16)
 
     var availableCommands: List<SlashCommandInfo> = emptyList()
     var getCommandsCallCount: Int = 0
@@ -53,6 +54,7 @@ class FakeSessionController : SessionController {
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = events
     override val connectionState: StateFlow<ConnectionState> = MutableStateFlow(ConnectionState.DISCONNECTED)
     override val isStreaming: StateFlow<Boolean> = streamingState
+    override val sessionChanged: SharedFlow<String?> = _sessionChanged
 
     suspend fun emitEvent(event: RpcIncomingMessage) {
         events.emit(event)

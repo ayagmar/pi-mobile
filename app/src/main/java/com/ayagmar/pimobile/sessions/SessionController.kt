@@ -21,6 +21,12 @@ interface SessionController {
     val connectionState: StateFlow<ConnectionState>
     val isStreaming: StateFlow<Boolean>
 
+    /**
+     * Emits the new session path whenever the session changes (switch, new, fork).
+     * ChatViewModel observes this to reload the timeline.
+     */
+    val sessionChanged: SharedFlow<String?>
+
     fun setTransportPreference(preference: TransportPreference)
 
     fun getTransportPreference(): TransportPreference

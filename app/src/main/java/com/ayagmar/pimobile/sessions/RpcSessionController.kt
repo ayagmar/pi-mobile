@@ -82,6 +82,7 @@ class RpcSessionController(
     private val _rpcEvents = MutableSharedFlow<RpcIncomingMessage>(extraBufferCapacity = EVENT_BUFFER_CAPACITY)
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     private val _isStreaming = MutableStateFlow(false)
+    private val _sessionChanged = MutableSharedFlow<String?>(extraBufferCapacity = 16)
 
     private var activeConnection: PiRpcConnection? = null
     private var activeContext: ActiveConnectionContext? = null
@@ -95,6 +96,7 @@ class RpcSessionController(
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = _rpcEvents
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
     override val isStreaming: StateFlow<Boolean> = _isStreaming.asStateFlow()
+    override val sessionChanged: SharedFlow<String?> = _sessionChanged
 
     override fun setTransportPreference(preference: TransportPreference) {
         transportPreference = preference
@@ -159,7 +161,9 @@ class RpcSessionController(
                     ).requireSuccess("Failed to resume selected session")
                 }
 
-                refreshCurrentSessionPath(connection)
+                val newPath = refreshCurrentSessionPath(connection)
+                _sessionChanged.emit(newPath)
+                newPath
             }
         }
     }
@@ -323,7 +327,9 @@ class RpcSessionController(
             "Fork was cancelled"
         }
 
-        return refreshCurrentSessionPath(connection)
+        val newPath = refreshCurrentSessionPath(connection)
+        _sessionChanged.emit(newPath)
+        return newPath
     }
 
     override suspend fun sendPrompt(
@@ -498,6 +504,9 @@ class RpcSessionController(
                     command = NewSessionCommand(id = UUID.randomUUID().toString()),
                     expectedCommand = NEW_SESSION_COMMAND,
                 ).requireSuccess("Failed to create new session")
+
+                val newPath = refreshCurrentSessionPath(connection)
+                _sessionChanged.emit(newPath)
                 Unit
             }
         }
