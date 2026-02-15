@@ -1,3 +1,15 @@
 <resources>
     <string name="app_name">pi-mobile</string>
+    <string name="diff_viewer_copy">Copy</string>
+    <string name="diff_viewer_collapse">Collapse</string>
+
+    <plurals name="diff_viewer_expand_more_lines">
+        <item quantity="one">Expand (%1$d more line)</item>
+        <item quantity="other">Expand (%1$d more lines)</item>
+    </plurals>
+
+    <plurals name="diff_viewer_hidden_unchanged_lines">
+        <item quantity="one">… %1$d unchanged line …</item>
+        <item quantity="other">… %1$d unchanged lines …</item>
+    </plurals>
 </resources>

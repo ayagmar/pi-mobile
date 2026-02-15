@@ -18,38 +18,101 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.ayagmar.pimobile.R
 import com.ayagmar.pimobile.chat.EditDiffInfo
 import com.github.difflib.DiffUtils
 import com.github.difflib.patch.AbstractDelta
 import com.github.difflib.patch.DeltaType
+import io.noties.prism4j.AbsVisitor
+import io.noties.prism4j.Prism4j
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-private const val COLLAPSED_DIFF_LINES = 120
-private const val CONTEXT_LINES = 3
+private const val DEFAULT_COLLAPSED_DIFF_LINES = 120
+private const val DEFAULT_CONTEXT_LINES = 3
 
-private val ADDED_BACKGROUND = Color(0xFFE8F5E9)
-private val REMOVED_BACKGROUND = Color(0xFFFFEBEE)
-private val ADDED_TEXT = Color(0xFF2E7D32)
-private val REMOVED_TEXT = Color(0xFFC62828)
-private val GUTTER_TEXT = Color(0xFF64748B)
-private val COMMENT_TEXT = Color(0xFF6A737D)
-private val STRING_TEXT = Color(0xFF0B7285)
-private val NUMBER_TEXT = Color(0xFFB45309)
+@Immutable
+data class DiffViewerStyle(
+    val collapsedDiffLines: Int = DEFAULT_COLLAPSED_DIFF_LINES,
+    val contextLines: Int = DEFAULT_CONTEXT_LINES,
+    val gutterWidth: Dp = 44.dp,
+    val lineRowHorizontalPadding: Dp = 4.dp,
+    val lineRowVerticalPadding: Dp = 2.dp,
+    val contentHorizontalPadding: Dp = 8.dp,
+    val headerHorizontalPadding: Dp = 12.dp,
+    val headerVerticalPadding: Dp = 8.dp,
+    val skippedLineHorizontalPadding: Dp = 8.dp,
+    val skippedLineVerticalPadding: Dp = 4.dp,
+)
 
-private enum class SyntaxLanguage {
-    CODE,
-    MARKDOWN,
-    PLAIN,
+@Immutable
+data class DiffViewerColors(
+    val addedBackground: Color,
+    val removedBackground: Color,
+    val addedText: Color,
+    val removedText: Color,
+    val gutterText: Color,
+    val commentText: Color,
+    val stringText: Color,
+    val numberText: Color,
+    val keywordText: Color,
+)
+
+@Composable
+private fun rememberDiffViewerColors(): DiffViewerColors {
+    val colors = MaterialTheme.colorScheme
+    return remember(colors) {
+        DiffViewerColors(
+            addedBackground = colors.primaryContainer.copy(alpha = 0.32f),
+            removedBackground = colors.errorContainer.copy(alpha = 0.32f),
+            addedText = colors.primary,
+            removedText = colors.error,
+            gutterText = colors.onSurfaceVariant,
+            commentText = colors.onSurfaceVariant,
+            stringText = colors.tertiary,
+            numberText = colors.secondary,
+            keywordText = colors.primary,
+        )
+    }
+}
+
+private enum class SyntaxLanguage(
+    val prismGrammarName: String?,
+) {
+    KOTLIN("kotlin"),
+    JAVA("java"),
+    JAVASCRIPT("javascript"),
+    JSON("json"),
+    MARKDOWN("markdown"),
+    MARKUP("markup"),
+    MAKEFILE("makefile"),
+    PYTHON("python"),
+    GO("go"),
+    SWIFT("swift"),
+    C("c"),
+    CPP("cpp"),
+    CSHARP("csharp"),
+    CSS("css"),
+    SQL("sql"),
+    YAML("yaml"),
+    PLAIN(null),
 }
 
 private data class HighlightSpan(
@@ -64,13 +127,21 @@ fun DiffViewer(
     isCollapsed: Boolean,
     onToggleCollapse: () -> Unit,
     modifier: Modifier = Modifier,
+    style: DiffViewerStyle = DiffViewerStyle(),
 ) {
     val clipboardManager = LocalClipboardManager.current
     val syntaxLanguage = remember(diffInfo.path) { detectSyntaxLanguage(diffInfo.path) }
-    val diffLines = remember(diffInfo) { computeDiffLines(diffInfo) }
+    val diffColors = rememberDiffViewerColors()
+    val diffLines by
+        produceState(initialValue = emptyList(), diffInfo, style.contextLines) {
+            value =
+                withContext(Dispatchers.Default) {
+                    computeDiffLines(diffInfo, style.contextLines)
+                }
+        }
     val displayLines =
-        if (isCollapsed && diffLines.size > COLLAPSED_DIFF_LINES) {
-            diffLines.take(COLLAPSED_DIFF_LINES)
+        if (isCollapsed && diffLines.size > style.collapsedDiffLines) {
+            diffLines.take(style.collapsedDiffLines)
         } else {
             diffLines
         }
@@ -83,33 +154,78 @@ fun DiffViewer(
             DiffHeader(
                 path = diffInfo.path,
                 onCopyPath = { clipboardManager.setText(AnnotatedString(diffInfo.path)) },
+                style = style,
             )
 
-            LazyColumn(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp),
-            ) {
-                items(displayLines) { line ->
-                    DiffLineItem(line = line, syntaxLanguage = syntaxLanguage)
-                }
-            }
+            DiffLinesList(
+                lines = displayLines,
+                syntaxLanguage = syntaxLanguage,
+                style = style,
+                colors = diffColors,
+            )
 
-            if (diffLines.size > COLLAPSED_DIFF_LINES) {
-                TextButton(
-                    onClick = onToggleCollapse,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                ) {
-                    val buttonText =
-                        if (isCollapsed) {
-                            "Expand (${diffLines.size - COLLAPSED_DIFF_LINES} more lines)"
-                        } else {
-                            "Collapse"
-                        }
-                    Text(buttonText)
+            DiffCollapseToggle(
+                totalLines = diffLines.size,
+                isCollapsed = isCollapsed,
+                style = style,
+                onToggleCollapse = onToggleCollapse,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DiffLinesList(
+    lines: List<DiffLine>,
+    syntaxLanguage: SyntaxLanguage,
+    style: DiffViewerStyle,
+    colors: DiffViewerColors,
+) {
+    LazyColumn(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = style.contentHorizontalPadding),
+    ) {
+        items(lines) { line ->
+            DiffLineItem(
+                line = line,
+                syntaxLanguage = syntaxLanguage,
+                style = style,
+                colors = colors,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DiffCollapseToggle(
+    totalLines: Int,
+    isCollapsed: Boolean,
+    style: DiffViewerStyle,
+    onToggleCollapse: () -> Unit,
+) {
+    if (totalLines <= style.collapsedDiffLines) return
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        TextButton(
+            onClick = onToggleCollapse,
+        ) {
+            val remainingLines = totalLines - style.collapsedDiffLines
+            val buttonText =
+                if (isCollapsed) {
+                    pluralStringResource(
+                        id = R.plurals.diff_viewer_expand_more_lines,
+                        count = remainingLines,
+                        remainingLines,
+                    )
+                } else {
+                    stringResource(id = R.string.diff_viewer_collapse)
                 }
-            }
+            Text(buttonText)
         }
     }
 }
@@ -118,13 +234,17 @@ fun DiffViewer(
 private fun DiffHeader(
     path: String,
     onCopyPath: () -> Unit,
+    style: DiffViewerStyle,
 ) {
     Row(
         modifier =
             Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(
+                    horizontal = style.headerHorizontalPadding,
+                    vertical = style.headerVerticalPadding,
+                ),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -135,7 +255,7 @@ private fun DiffHeader(
             modifier = Modifier.weight(1f),
         )
         TextButton(onClick = onCopyPath) {
-            Text("Copy")
+            Text(stringResource(id = R.string.diff_viewer_copy))
         }
     }
 }
@@ -144,21 +264,18 @@ private fun DiffHeader(
 private fun DiffLineItem(
     line: DiffLine,
     syntaxLanguage: SyntaxLanguage,
+    style: DiffViewerStyle,
+    colors: DiffViewerColors,
 ) {
     if (line.type == DiffLineType.SKIPPED) {
-        Text(
-            text = line.content,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        )
+        SkippedDiffLine(line = line, style = style)
         return
     }
 
     val backgroundColor =
         when (line.type) {
-            DiffLineType.ADDED -> ADDED_BACKGROUND
-            DiffLineType.REMOVED -> REMOVED_BACKGROUND
+            DiffLineType.ADDED -> colors.addedBackground
+            DiffLineType.REMOVED -> colors.removedBackground
             DiffLineType.CONTEXT,
             DiffLineType.SKIPPED,
             -> Color.Transparent
@@ -166,8 +283,8 @@ private fun DiffLineItem(
 
     val contentColor =
         when (line.type) {
-            DiffLineType.ADDED -> ADDED_TEXT
-            DiffLineType.REMOVED -> REMOVED_TEXT
+            DiffLineType.ADDED -> colors.addedText
+            DiffLineType.REMOVED -> colors.removedText
             DiffLineType.CONTEXT,
             DiffLineType.SKIPPED,
             -> MaterialTheme.colorScheme.onSurface
@@ -178,15 +295,18 @@ private fun DiffLineItem(
             Modifier
                 .fillMaxWidth()
                 .background(backgroundColor)
-                .padding(horizontal = 4.dp, vertical = 2.dp),
+                .padding(
+                    horizontal = style.lineRowHorizontalPadding,
+                    vertical = style.lineRowVerticalPadding,
+                ),
         verticalAlignment = Alignment.Top,
     ) {
-        LineNumberCell(number = line.oldLineNumber)
-        LineNumberCell(number = line.newLineNumber)
+        LineNumberCell(number = line.oldLineNumber, style = style, colors = colors)
+        LineNumberCell(number = line.newLineNumber, style = style, colors = colors)
 
         SelectionContainer {
             Text(
-                text = buildHighlightedDiffLine(line, syntaxLanguage, contentColor),
+                text = buildHighlightedDiffLine(line, syntaxLanguage, contentColor, colors),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -195,14 +315,44 @@ private fun DiffLineItem(
 }
 
 @Composable
-private fun LineNumberCell(number: Int?) {
+private fun SkippedDiffLine(
+    line: DiffLine,
+    style: DiffViewerStyle,
+) {
+    val hiddenLines = line.hiddenUnchangedCount ?: 0
+    val skippedLabel =
+        pluralStringResource(
+            id = R.plurals.diff_viewer_hidden_unchanged_lines,
+            count = hiddenLines,
+            hiddenLines,
+        )
+    Text(
+        text = skippedLabel,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = style.skippedLineHorizontalPadding,
+                    vertical = style.skippedLineVerticalPadding,
+                ),
+    )
+}
+
+@Composable
+private fun LineNumberCell(
+    number: Int?,
+    style: DiffViewerStyle,
+    colors: DiffViewerColors,
+) {
     Text(
         text = number?.toString().orEmpty(),
         style = MaterialTheme.typography.bodySmall,
-        color = GUTTER_TEXT,
+        color = colors.gutterText,
         fontFamily = FontFamily.Monospace,
         textAlign = TextAlign.End,
-        modifier = Modifier.width(44.dp).padding(end = 6.dp),
+        modifier = Modifier.width(style.gutterWidth).padding(end = 6.dp),
     )
 }
 
@@ -210,6 +360,7 @@ private fun buildHighlightedDiffLine(
     line: DiffLine,
     syntaxLanguage: SyntaxLanguage,
     baseContentColor: Color,
+    colors: DiffViewerColors,
 ): AnnotatedString {
     val prefix =
         when (line.type) {
@@ -229,7 +380,7 @@ private fun buildHighlightedDiffLine(
         addStyle(baseStyle, start = 0, end = length)
 
         val offset = 2
-        computeHighlightSpans(content, syntaxLanguage).forEach { span ->
+        computeHighlightSpans(content, syntaxLanguage, colors).forEach { span ->
             addStyle(span.style, start = span.start + offset, end = span.end + offset)
         }
     }
@@ -238,80 +389,103 @@ private fun buildHighlightedDiffLine(
 private fun computeHighlightSpans(
     content: String,
     language: SyntaxLanguage,
+    colors: DiffViewerColors,
 ): List<HighlightSpan> {
-    val spans = mutableListOf<HighlightSpan>()
-    val commentRange = commentRange(content, language)
-
-    commentRange?.let { range ->
-        spans +=
-            HighlightSpan(
-                start = range.first,
-                end = range.last + 1,
-                style = SpanStyle(color = COMMENT_TEXT),
-            )
-    }
-
-    STRING_REGEX.findAll(content).forEach { match ->
-        if (!isInComment(match.range.first, commentRange)) {
-            spans +=
-                HighlightSpan(
-                    start = match.range.first,
-                    end = match.range.last + 1,
-                    style = SpanStyle(color = STRING_TEXT),
-                )
-        }
-    }
-
-    NUMBER_REGEX.findAll(content).forEach { match ->
-        if (!isInComment(match.range.first, commentRange)) {
-            spans +=
-                HighlightSpan(
-                    start = match.range.first,
-                    end = match.range.last + 1,
-                    style = SpanStyle(color = NUMBER_TEXT),
-                )
-        }
-    }
-
-    return spans
+    return PrismDiffHighlighter.highlight(
+        content = content,
+        language = language,
+        colors = colors,
+    )
 }
 
-private fun commentRange(
-    content: String,
-    language: SyntaxLanguage,
-): IntRange? {
-    return when (language) {
-        SyntaxLanguage.CODE -> {
-            val start = content.indexOf("//")
-            if (start >= 0) start until content.length else null
-        }
-        SyntaxLanguage.MARKDOWN -> {
-            if (content.trimStart().startsWith("#")) {
-                0 until content.length
-            } else {
-                null
+private object PrismDiffHighlighter {
+    private val prism4j by lazy {
+        Prism4j(DiffPrism4jGrammarLocator())
+    }
+
+    fun highlight(
+        content: String,
+        language: SyntaxLanguage,
+        colors: DiffViewerColors,
+    ): List<HighlightSpan> {
+        return language.prismGrammarName
+            ?.let { grammarName -> prism4j.grammar(grammarName) }
+            ?.let { grammar ->
+                runCatching {
+                    val visitor = PrismHighlightVisitor(colors)
+                    visitor.visit(prism4j.tokenize(content, grammar))
+                    visitor.spans
+                }.getOrDefault(emptyList())
             }
-        }
-        SyntaxLanguage.PLAIN -> null
+            ?: emptyList()
     }
 }
 
-private fun isInComment(
-    index: Int,
-    commentRange: IntRange?,
-): Boolean {
-    return commentRange != null && index in commentRange
+private class PrismHighlightVisitor(
+    private val colors: DiffViewerColors,
+) : AbsVisitor() {
+    private val mutableSpans = mutableListOf<HighlightSpan>()
+    private var cursor = 0
+
+    val spans: List<HighlightSpan>
+        get() = mutableSpans
+
+    override fun visitText(text: Prism4j.Text) {
+        cursor += text.literal().length
+    }
+
+    override fun visitSyntax(syntax: Prism4j.Syntax) {
+        val start = cursor
+        visit(syntax.children())
+        val end = cursor
+
+        if (end <= start) {
+            return
+        }
+
+        tokenStyle(
+            tokenType = syntax.type(),
+            alias = syntax.alias(),
+            colors = colors,
+        )?.let { style ->
+            mutableSpans +=
+                HighlightSpan(
+                    start = start,
+                    end = end,
+                    style = style,
+                )
+        }
+    }
+}
+
+private fun tokenStyle(
+    tokenType: String?,
+    alias: String?,
+    colors: DiffViewerColors,
+): SpanStyle? {
+    val tokenDescriptor = listOfNotNull(tokenType, alias).joinToString(separator = " ").lowercase()
+
+    return when {
+        tokenDescriptor.containsAny(COMMENT_TOKEN_MARKERS) -> SpanStyle(color = colors.commentText)
+        tokenDescriptor.containsAny(STRING_TOKEN_MARKERS) -> SpanStyle(color = colors.stringText)
+        tokenDescriptor.containsAny(NUMBER_TOKEN_MARKERS) -> SpanStyle(color = colors.numberText)
+        tokenDescriptor.containsAny(KEYWORD_TOKEN_MARKERS) -> SpanStyle(color = colors.keywordText)
+        else -> null
+    }
+}
+
+private fun String.containsAny(markers: Set<String>): Boolean {
+    return markers.any { marker -> contains(marker) }
 }
 
 private fun detectSyntaxLanguage(path: String): SyntaxLanguage {
-    val extension = path.substringAfterLast('.', missingDelimiterValue = "").lowercase()
-    return when (extension) {
-        "kt", "kts", "java", "ts", "tsx", "js", "jsx", "go", "py", "rb", "swift", "cs", "cpp", "c" -> {
-            SyntaxLanguage.CODE
-        }
-        "md", "markdown" -> SyntaxLanguage.MARKDOWN
-        else -> SyntaxLanguage.PLAIN
+    val lowerPath = path.lowercase()
+    if (lowerPath.endsWith("makefile")) {
+        return SyntaxLanguage.MAKEFILE
     }
+
+    val extension = path.substringAfterLast('.', missingDelimiterValue = "").lowercase()
+    return EXTENSION_LANGUAGE_MAP[extension] ?: SyntaxLanguage.PLAIN
 }
 
 /**
@@ -322,6 +496,7 @@ data class DiffLine(
     val content: String,
     val oldLineNumber: Int? = null,
     val newLineNumber: Int? = null,
+    val hiddenUnchangedCount: Int? = null,
 )
 
 enum class DiffLineType {
@@ -331,19 +506,29 @@ enum class DiffLineType {
     SKIPPED,
 }
 
-internal fun computeDiffLines(diffInfo: EditDiffInfo): List<DiffLine> {
+internal fun computeDiffLines(
+    diffInfo: EditDiffInfo,
+    contextLines: Int = DEFAULT_CONTEXT_LINES,
+): List<DiffLine> {
     val oldLines = splitLines(diffInfo.oldString)
     val newLines = splitLines(diffInfo.newString)
     val completeDiff = buildCompleteDiff(oldLines = oldLines, newLines = newLines)
-    return collapseToContextHunks(completeDiff, contextLines = CONTEXT_LINES)
+    return collapseToContextHunks(completeDiff, contextLines = contextLines)
 }
 
 private fun splitLines(text: String): List<String> {
-    return if (text.isEmpty()) {
+    val normalizedText = normalizeLineEndings(text)
+    return if (normalizedText.isEmpty()) {
         emptyList()
     } else {
-        text.split('\n')
+        normalizedText.split('\n', ignoreCase = false, limit = Int.MAX_VALUE)
     }
+}
+
+private fun normalizeLineEndings(text: String): String {
+    return text
+        .replace("\r\n", "\n")
+        .replace('\r', '\n')
 }
 
 private data class DiffCursor(
@@ -544,9 +729,45 @@ private fun materializeCollapsedRanges(
 private fun skippedLine(count: Int): DiffLine {
     return DiffLine(
         type = DiffLineType.SKIPPED,
-        content = "… $count unchanged lines …",
+        content = "",
+        hiddenUnchangedCount = count,
     )
 }
 
-private val STRING_REGEX = Regex("\"([^\\\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'")
-private val NUMBER_REGEX = Regex("\\b\\d+(?:\\.\\d+)?\\b")
+private val EXTENSION_LANGUAGE_MAP =
+    mapOf(
+        "kt" to SyntaxLanguage.KOTLIN,
+        "kts" to SyntaxLanguage.KOTLIN,
+        "java" to SyntaxLanguage.JAVA,
+        "js" to SyntaxLanguage.JAVASCRIPT,
+        "jsx" to SyntaxLanguage.JAVASCRIPT,
+        "ts" to SyntaxLanguage.JAVASCRIPT,
+        "tsx" to SyntaxLanguage.JAVASCRIPT,
+        "json" to SyntaxLanguage.JSON,
+        "jsonl" to SyntaxLanguage.JSON,
+        "md" to SyntaxLanguage.MARKDOWN,
+        "markdown" to SyntaxLanguage.MARKDOWN,
+        "html" to SyntaxLanguage.MARKUP,
+        "xml" to SyntaxLanguage.MARKUP,
+        "svg" to SyntaxLanguage.MARKUP,
+        "py" to SyntaxLanguage.PYTHON,
+        "go" to SyntaxLanguage.GO,
+        "swift" to SyntaxLanguage.SWIFT,
+        "cs" to SyntaxLanguage.CSHARP,
+        "cpp" to SyntaxLanguage.CPP,
+        "cc" to SyntaxLanguage.CPP,
+        "cxx" to SyntaxLanguage.CPP,
+        "c" to SyntaxLanguage.C,
+        "h" to SyntaxLanguage.C,
+        "css" to SyntaxLanguage.CSS,
+        "scss" to SyntaxLanguage.CSS,
+        "sass" to SyntaxLanguage.CSS,
+        "sql" to SyntaxLanguage.SQL,
+        "yml" to SyntaxLanguage.YAML,
+        "yaml" to SyntaxLanguage.YAML,
+    )
+
+private val COMMENT_TOKEN_MARKERS = setOf("comment", "prolog", "doctype", "cdata")
+private val STRING_TOKEN_MARKERS = setOf("string", "char", "attr-value", "url")
+private val NUMBER_TOKEN_MARKERS = setOf("number", "boolean", "constant")
+private val KEYWORD_TOKEN_MARKERS = setOf("keyword", "operator", "important", "atrule")

@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.kapt")
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
@@ -73,6 +74,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.github.java-diff-utils:java-diff-utils:4.15")
+    implementation("io.noties:prism4j:2.0.0")
+    compileOnly("io.noties:prism4j-bundler:2.0.0")
+    kapt("io.noties:prism4j-bundler:2.0.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

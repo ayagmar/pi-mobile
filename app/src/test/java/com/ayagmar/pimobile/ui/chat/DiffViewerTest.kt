@@ -73,4 +73,18 @@ class DiffViewerTest {
         assertEquals(listOf(1, 2), diffLines.map { it.oldLineNumber })
         assertEquals(listOf(1, 2), diffLines.map { it.newLineNumber })
     }
+
+    @Test
+    fun lineEndingNormalizationTreatsCrLfAndLfAsEquivalent() {
+        val diffLines =
+            computeDiffLines(
+                EditDiffInfo(
+                    path = "src/Main.kt",
+                    oldString = "first\r\nsecond\r\n",
+                    newString = "first\nsecond\n",
+                ),
+            )
+
+        assertTrue(diffLines.all { it.type == DiffLineType.CONTEXT })
+    }
 }
