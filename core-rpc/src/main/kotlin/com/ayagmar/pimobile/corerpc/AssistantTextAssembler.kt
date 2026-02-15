@@ -1,5 +1,3 @@
-@file:Suppress("TooManyFunctions")
-
 package com.ayagmar.pimobile.corerpc
 
 import kotlinx.serialization.json.JsonObject

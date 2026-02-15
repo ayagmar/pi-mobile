@@ -1,5 +1,3 @@
-@file:Suppress("TooManyFunctions")
-
 package com.ayagmar.pimobile.ui.sessions
 
 import androidx.compose.foundation.clickable

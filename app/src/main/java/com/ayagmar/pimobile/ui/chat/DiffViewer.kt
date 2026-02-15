@@ -1,4 +1,4 @@
-@file:Suppress("TooManyFunctions", "MagicNumber")
+@file:Suppress("MagicNumber")
 
 package com.ayagmar.pimobile.ui.chat
 

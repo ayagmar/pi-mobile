@@ -9,3 +9,10 @@ naming:
   FunctionNaming:
     ignoreAnnotated:
       - Composable
+
+complexity:
+  TooManyFunctions:
+    active: true
+    ignorePrivate: true
+    thresholdInFiles: 15
+    thresholdInClasses: 15

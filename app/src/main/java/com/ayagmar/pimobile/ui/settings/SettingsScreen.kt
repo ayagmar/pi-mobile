@@ -1,5 +1,3 @@
-@file:Suppress("TooManyFunctions")
-
 package com.ayagmar.pimobile.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement

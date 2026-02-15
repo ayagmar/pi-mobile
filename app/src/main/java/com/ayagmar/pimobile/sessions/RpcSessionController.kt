@@ -1,5 +1,3 @@
-@file:Suppress("TooManyFunctions")
-
 package com.ayagmar.pimobile.sessions
 
 import android.util.Log
