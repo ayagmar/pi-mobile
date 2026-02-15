@@ -71,6 +71,8 @@ interface SessionController {
         filter: String? = null,
     ): Result<SessionTreeSnapshot>
 
+    suspend fun navigateTreeToEntry(entryId: String): Result<TreeNavigationResult>
+
     suspend fun cycleModel(): Result<ModelInfo?>
 
     suspend fun cycleThinkingLevel(): Result<String?>
@@ -142,6 +144,13 @@ data class SessionTreeEntry(
     val preview: String,
     val label: String? = null,
     val isBookmarked: Boolean = false,
+)
+
+data class TreeNavigationResult(
+    val cancelled: Boolean,
+    val editorText: String?,
+    val currentLeafId: String?,
+    val sessionPath: String?,
 )
 
 /**

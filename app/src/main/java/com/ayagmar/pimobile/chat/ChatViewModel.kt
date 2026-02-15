@@ -375,13 +375,14 @@ class ChatViewModel(
     }
 
     private fun mergeRpcCommandsWithBuiltins(rpcCommands: List<SlashCommandInfo>): List<SlashCommandInfo> {
-        if (rpcCommands.isEmpty()) {
+        val visibleRpcCommands = rpcCommands.filterNot { it.name == INTERNAL_TREE_NAVIGATION_COMMAND }
+        if (visibleRpcCommands.isEmpty()) {
             return BUILTIN_COMMANDS
         }
 
-        val knownNames = rpcCommands.map { it.name.lowercase() }.toSet()
+        val knownNames = visibleRpcCommands.map { it.name.lowercase() }.toSet()
         val missingBuiltins = BUILTIN_COMMANDS.filterNot { it.name.lowercase() in knownNames }
-        return rpcCommands + missingBuiltins
+        return visibleRpcCommands + missingBuiltins
     }
 
     private fun String.extractBuiltinCommand(): String? {
@@ -1165,13 +1166,33 @@ class ChatViewModel(
 
     fun jumpAndContinueFromTreeEntry(entryId: String) {
         viewModelScope.launch {
-            val result = sessionController.forkSessionFromEntryId(entryId)
+            val result = sessionController.navigateTreeToEntry(entryId)
             if (result.isSuccess) {
-                val editorText = result.getOrNull()
+                val navigation = result.getOrNull() ?: return@launch
+                if (navigation.cancelled) {
+                    _uiState.update {
+                        it.copy(
+                            isTreeSheetVisible = false,
+                            errorMessage = "Tree navigation was cancelled",
+                        )
+                    }
+                    return@launch
+                }
+
                 _uiState.update { state ->
+                    val updatedTree =
+                        state.sessionTree?.let { snapshot ->
+                            if (navigation.sessionPath == null || navigation.sessionPath == snapshot.sessionPath) {
+                                snapshot.copy(currentLeafId = navigation.currentLeafId)
+                            } else {
+                                snapshot
+                            }
+                        }
+
                     state.copy(
                         isTreeSheetVisible = false,
-                        inputText = editorText.orEmpty(),
+                        inputText = navigation.editorText.orEmpty(),
+                        sessionTree = updatedTree,
                     )
                 }
                 loadInitialMessages()
@@ -1473,6 +1494,7 @@ class ChatViewModel(
         private const val BUILTIN_TREE_COMMAND = "tree"
         private const val BUILTIN_STATS_COMMAND = "stats"
         private const val BUILTIN_HOTKEYS_COMMAND = "hotkeys"
+        private const val INTERNAL_TREE_NAVIGATION_COMMAND = "pi-mobile-tree"
 
         private val BUILTIN_COMMANDS =
             listOf(

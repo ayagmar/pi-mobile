@@ -12,7 +12,7 @@ Pi runs on your laptop. This app lets you:
 - Open a built-in bash dialog (run/abort/history/copy output)
 - Inspect session stats and pick models from an advanced model picker
 - Attach images to prompts
-- Navigate session tree branches and fork from selected entries
+- Navigate session tree branches in-place (jump+continue) and fork from selected entries
 - Switch between projects (different working directories)
 - Handle extension dialogs (confirmations, inputs, selections)
 
@@ -73,7 +73,7 @@ Sessions are grouped by working directory (cwd). Each session is a JSONL file in
 ### Process Management
 
 The bridge manages one pi process per cwd:
-- First connection to a project spawns pi
+- First connection to a project spawns pi (with a small internal extension for tree in-place navigation parity)
 - Process stays alive with idle timeout
 - Reconnecting reuses the existing process
 - Crash restart with exponential backoff
@@ -103,7 +103,7 @@ App renders streaming text/tools
 - **Bash dialog**: execute shell commands with timeout/truncation handling and history.
 - **Session stats sheet**: token/cost/message counters and session path.
 - **Model picker**: provider-aware searchable model selection.
-- **Tree navigator**: inspect branch points and fork from chosen entries.
+- **Tree navigator**: inspect branch points, jump in-place, or fork from chosen entries.
 
 ## Troubleshooting
 

@@ -92,7 +92,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 23 | H1 True `/tree` parity (in-place navigate) | TODO |  |  |  |  |
+| 23 | H1 True `/tree` parity (in-place navigate) | DONE | feat(tree): add bridge-backed in-place tree navigation parity |  | ktlint✅ detekt✅ test✅ bridge✅ | Added bridge `bridge_navigate_tree` flow powered by internal Pi extension command (`ctx.navigateTree`), wired Chat jump action to in-place navigation (not fork), and propagated runtime current leaf to tree responses |
 | 24 | H2 Session parsing alignment with Pi internals | TODO |  |  |  |  |
 | 25 | H3 Incremental session history loading strategy | TODO |  |  |  |  |
 | 26 | H4 Extension-ize selected hardcoded workflows | TODO |  |  |  |  |
@@ -482,15 +482,33 @@ Notes/blockers:
 - Standardized key spacing to shared tokens (`PiSpacing`) in updated screen flows.
 ```
 
+### 2026-02-15
+
+```text
+Task: H1
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Added bridge `bridge_navigate_tree` API backed by an internal Pi extension command using `ctx.navigateTree(...)`.
+- Chat Jump now performs in-place tree navigation (same session) and updates editor text from navigation result, replacing prior fork fallback.
+- Bridge now tracks runtime current leaf from navigation results and overlays it into `bridge_get_session_tree` responses for active sessions.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 22
+- Backlog done: 23
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 4
+- Backlog remaining (not done): 3
 - Reference completed items (not counted in backlog): 6
 
 ---
@@ -501,7 +519,7 @@ Notes/blockers:
 - [x] Quick wins complete
 - [x] Stability/security fixes complete
 - [x] Maintainability improvements complete
-- [ ] Theming + Design System complete
+- [x] Theming + Design System complete
 - [ ] Heavy hitters complete (or documented protocol limits)
 - [ ] Final green run (`ktlintCheck`, `detekt`, `test`, bridge check)
 

@@ -1,5 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import http from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { Logger } from "pino";
 import { WebSocket as WsWebSocket, WebSocketServer, type RawData, type WebSocket } from "ws";
@@ -42,6 +44,33 @@ interface DisconnectedClientState {
     timer: NodeJS.Timeout;
 }
 
+interface TreeNavigationResultPayload {
+    cancelled: boolean;
+    editorText: string | null;
+    currentLeafId: string | null;
+    sessionPath: string | null;
+    error?: string;
+}
+
+interface PendingRpcEventWaiter {
+    cwd: string;
+    consume: boolean;
+    predicate: (payload: Record<string, unknown>) => boolean;
+    resolve: (payload: Record<string, unknown>) => void;
+    reject: (error: Error) => void;
+    timeoutHandle: NodeJS.Timeout;
+}
+
+const PI_MOBILE_TREE_EXTENSION_PATH = path.resolve(
+    fileURLToPath(new URL("./extensions/pi-mobile-tree.ts", import.meta.url)),
+);
+
+const TREE_NAVIGATION_COMMAND = "pi-mobile-tree";
+const TREE_NAVIGATION_STATUS_PREFIX = "pi_mobile_tree_result:";
+const BRIDGE_NAVIGATE_TREE_TYPE = "bridge_navigate_tree";
+const BRIDGE_TREE_NAVIGATION_RESULT_TYPE = "bridge_tree_navigation_result";
+const BRIDGE_INTERNAL_RPC_TIMEOUT_MS = 10_000;
+
 export function createBridgeServer(
     config: BridgeConfig,
     logger: Logger,
@@ -58,7 +87,7 @@ export function createBridgeServer(
                 return createPiRpcForwarder(
                     {
                         command: "pi",
-                        args: ["--mode", "rpc"],
+                        args: ["--mode", "rpc", "--extension", PI_MOBILE_TREE_EXTENSION_PATH],
                         cwd,
                     },
                     logger.child({ component: "rpc-forwarder", cwd }),
@@ -73,6 +102,57 @@ export function createBridgeServer(
 
     const clientContexts = new Map<WebSocket, ClientConnectionContext>();
     const disconnectedClients = new Map<string, DisconnectedClientState>();
+    const runtimeLeafBySessionPath = new Map<string, string | null>();
+    const pendingRpcWaiters = new Set<PendingRpcEventWaiter>();
+
+    const awaitRpcEvent = (
+        cwd: string,
+        predicate: (payload: Record<string, unknown>) => boolean,
+        options: { timeoutMs?: number; consume?: boolean } = {},
+    ): Promise<Record<string, unknown>> => {
+        const timeoutMs = options.timeoutMs ?? BRIDGE_INTERNAL_RPC_TIMEOUT_MS;
+        const consume = options.consume ?? false;
+
+        return new Promise<Record<string, unknown>>((resolve, reject) => {
+            const waiter: PendingRpcEventWaiter = {
+                cwd,
+                consume,
+                predicate,
+                resolve: (payload) => {
+                    clearTimeout(waiter.timeoutHandle);
+                    pendingRpcWaiters.delete(waiter);
+                    resolve(payload);
+                },
+                reject: (error) => {
+                    clearTimeout(waiter.timeoutHandle);
+                    pendingRpcWaiters.delete(waiter);
+                    reject(error);
+                },
+                timeoutHandle: setTimeout(() => {
+                    pendingRpcWaiters.delete(waiter);
+                    reject(new Error(`Timed out waiting for RPC event after ${timeoutMs}ms`));
+                }, timeoutMs),
+            };
+
+            pendingRpcWaiters.add(waiter);
+        });
+    };
+
+    const drainMatchingWaiters = (event: { cwd: string; payload: Record<string, unknown> }): boolean => {
+        let consumed = false;
+
+        for (const waiter of pendingRpcWaiters) {
+            if (waiter.cwd !== event.cwd) continue;
+            if (!waiter.predicate(event.payload)) continue;
+
+            waiter.resolve(event.payload);
+            if (waiter.consume) {
+                consumed = true;
+            }
+        }
+
+        return consumed;
+    };
 
     const server = http.createServer((request, response) => {
         if (request.url === "/health" && config.enableHealthEndpoint) {
@@ -114,6 +194,18 @@ export function createBridgeServer(
     }
 
     processManager.setMessageHandler((event) => {
+        const consumedByInternalWaiter = drainMatchingWaiters(event);
+
+        if (isSuccessfulRpcResponse(event.payload, "switch_session") ||
+            isSuccessfulRpcResponse(event.payload, "new_session") ||
+            isSuccessfulRpcResponse(event.payload, "fork")) {
+            runtimeLeafBySessionPath.clear();
+        }
+
+        if (consumedByInternalWaiter) {
+            return;
+        }
+
         const rpcEnvelope = JSON.stringify(createRpcEnvelope(event.payload));
 
         for (const [client, context] of clientContexts.entries()) {
@@ -180,7 +272,16 @@ export function createBridgeServer(
         );
 
         client.on("message", (data: RawData) => {
-            void handleClientMessage(client, data, logger, processManager, sessionIndexer, restored.context);
+            void handleClientMessage(
+                client,
+                data,
+                logger,
+                processManager,
+                sessionIndexer,
+                restored.context,
+                awaitRpcEvent,
+                runtimeLeafBySessionPath,
+            );
         });
 
         client.on("close", () => {
@@ -233,6 +334,12 @@ export function createBridgeServer(
             }
             disconnectedClients.clear();
 
+            for (const waiter of pendingRpcWaiters) {
+                waiter.reject(new Error("Bridge server stopped"));
+            }
+            pendingRpcWaiters.clear();
+            runtimeLeafBySessionPath.clear();
+
             await processManager.stop();
 
             await new Promise<void>((resolve, reject) => {
@@ -265,6 +372,12 @@ async function handleClientMessage(
     processManager: PiProcessManager,
     sessionIndexer: SessionIndexer,
     context: ClientConnectionContext,
+    awaitRpcEvent: (
+        cwd: string,
+        predicate: (payload: Record<string, unknown>) => boolean,
+        options?: { timeoutMs?: number; consume?: boolean },
+    ) => Promise<Record<string, unknown>>,
+    runtimeLeafBySessionPath: Map<string, string | null>,
 ): Promise<void> {
     const dataAsString = asUtf8String(data);
     const parsedEnvelope = parseBridgeEnvelope(dataAsString);
@@ -292,7 +405,16 @@ async function handleClientMessage(
     const envelope = parsedEnvelope.envelope;
 
     if (envelope.channel === "bridge") {
-        await handleBridgeControlMessage(client, context, envelope.payload, processManager, sessionIndexer, logger);
+        await handleBridgeControlMessage(
+            client,
+            context,
+            envelope.payload,
+            processManager,
+            sessionIndexer,
+            logger,
+            awaitRpcEvent,
+            runtimeLeafBySessionPath,
+        );
         return;
     }
 
@@ -306,6 +428,12 @@ async function handleBridgeControlMessage(
     processManager: PiProcessManager,
     sessionIndexer: SessionIndexer,
     logger: Logger,
+    awaitRpcEvent: (
+        cwd: string,
+        predicate: (payload: Record<string, unknown>) => boolean,
+        options?: { timeoutMs?: number; consume?: boolean },
+    ) => Promise<Record<string, unknown>>,
+    runtimeLeafBySessionPath: Map<string, string | null>,
 ): Promise<void> {
     const messageType = payload.type;
 
@@ -379,13 +507,15 @@ async function handleBridgeControlMessage(
 
         try {
             const tree = await sessionIndexer.getSessionTree(sessionPath, requestedFilter);
+            const runtimeLeafId = runtimeLeafBySessionPath.get(tree.sessionPath);
+
             client.send(
                 JSON.stringify(
                     createBridgeEnvelope({
                         type: "bridge_session_tree",
                         sessionPath: tree.sessionPath,
                         rootIds: tree.rootIds,
-                        currentLeafId: tree.currentLeafId ?? null,
+                        currentLeafId: runtimeLeafId ?? tree.currentLeafId ?? null,
                         entries: tree.entries,
                     }),
                 ),
@@ -397,6 +527,87 @@ async function handleBridgeControlMessage(
                     createBridgeErrorEnvelope(
                         "session_tree_failed",
                         "Failed to build session tree",
+                    ),
+                ),
+            );
+        }
+
+        return;
+    }
+
+    if (messageType === BRIDGE_NAVIGATE_TREE_TYPE) {
+        const cwd = getRequestedCwd(payload, context);
+        if (!cwd) {
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "missing_cwd_context",
+                        "Set cwd first via bridge_set_cwd or include cwd in bridge_navigate_tree",
+                    ),
+                ),
+            );
+            return;
+        }
+
+        if (!processManager.hasControl(context.clientId, cwd)) {
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "control_lock_required",
+                        "Acquire control first via bridge_acquire_control",
+                    ),
+                ),
+            );
+            return;
+        }
+
+        const entryId = typeof payload.entryId === "string" ? payload.entryId.trim() : "";
+        if (!entryId) {
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "invalid_tree_entry_id",
+                        "entryId must be a non-empty string",
+                    ),
+                ),
+            );
+            return;
+        }
+
+        try {
+            const navigationResult = await navigateTreeUsingCommand({
+                cwd,
+                entryId,
+                processManager,
+                awaitRpcEvent,
+            });
+
+            if (navigationResult.sessionPath) {
+                runtimeLeafBySessionPath.set(
+                    navigationResult.sessionPath,
+                    navigationResult.currentLeafId,
+                );
+            }
+
+            client.send(
+                JSON.stringify(
+                    createBridgeEnvelope({
+                        type: BRIDGE_TREE_NAVIGATION_RESULT_TYPE,
+                        cancelled: navigationResult.cancelled,
+                        editorText: navigationResult.editorText,
+                        currentLeafId: navigationResult.currentLeafId,
+                        sessionPath: navigationResult.sessionPath,
+                    }),
+                ),
+            );
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : "Failed to navigate tree";
+            logger.error({ error, cwd, entryId }, "Failed to navigate tree in active session");
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "tree_navigation_failed",
+                        message,
                     ),
                 ),
             );
@@ -509,6 +720,147 @@ async function handleBridgeControlMessage(
             ),
         ),
     );
+}
+
+async function navigateTreeUsingCommand(options: {
+    cwd: string;
+    entryId: string;
+    processManager: PiProcessManager;
+    awaitRpcEvent: (
+        cwd: string,
+        predicate: (payload: Record<string, unknown>) => boolean,
+        options?: { timeoutMs?: number; consume?: boolean },
+    ) => Promise<Record<string, unknown>>;
+}): Promise<TreeNavigationResultPayload> {
+    const { cwd, entryId, processManager, awaitRpcEvent } = options;
+
+    const getCommandsRequestId = randomUUID();
+    const getCommandsResponsePromise = awaitRpcEvent(
+        cwd,
+        (payload) => isRpcResponseForId(payload, getCommandsRequestId),
+        { consume: true },
+    );
+
+    processManager.sendRpc(cwd, {
+        id: getCommandsRequestId,
+        type: "get_commands",
+    });
+
+    const getCommandsResponse = await getCommandsResponsePromise;
+    ensureSuccessfulRpcResponse(getCommandsResponse, "get_commands");
+
+    if (!hasTreeNavigationCommand(getCommandsResponse, TREE_NAVIGATION_COMMAND)) {
+        throw new Error("Tree navigation command is unavailable in this runtime");
+    }
+
+    const navigationRequestId = randomUUID();
+    const operationId = randomUUID();
+    const statusKey = `${TREE_NAVIGATION_STATUS_PREFIX}${operationId}`;
+
+    const navigationResponsePromise = awaitRpcEvent(
+        cwd,
+        (payload) => isRpcResponseForId(payload, navigationRequestId),
+        { consume: true },
+    );
+
+    const statusResponsePromise = awaitRpcEvent(
+        cwd,
+        (payload) => isTreeNavigationStatusEvent(payload, statusKey),
+        { consume: true },
+    );
+
+    processManager.sendRpc(cwd, {
+        id: navigationRequestId,
+        type: "prompt",
+        message: `/${TREE_NAVIGATION_COMMAND} ${entryId} ${statusKey}`,
+    });
+
+    const navigationResponse = await navigationResponsePromise;
+    ensureSuccessfulRpcResponse(navigationResponse, "prompt");
+
+    const statusResponse = await statusResponsePromise;
+    return parseTreeNavigationResult(statusResponse);
+}
+
+function hasTreeNavigationCommand(responsePayload: Record<string, unknown>, commandName: string): boolean {
+    const data = asRecord(responsePayload.data);
+    const commands = Array.isArray(data?.commands) ? data.commands : [];
+
+    return commands.some((command) => {
+        const commandObject = asRecord(command);
+        return commandObject?.name === commandName;
+    });
+}
+
+function isTreeNavigationStatusEvent(payload: Record<string, unknown>, statusKey: string): boolean {
+    return payload.type === "extension_ui_request" && payload.method === "setStatus" &&
+        payload.statusKey === statusKey && typeof payload.statusText === "string";
+}
+
+function parseTreeNavigationResult(payload: Record<string, unknown>): TreeNavigationResultPayload {
+    const statusText = typeof payload.statusText === "string" ? payload.statusText : undefined;
+    if (!statusText) {
+        throw new Error("Tree navigation command did not return status text");
+    }
+
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(statusText);
+    } catch {
+        throw new Error("Tree navigation command returned invalid JSON payload");
+    }
+
+    const parsedObject = asRecord(parsed);
+    if (!parsedObject) {
+        throw new Error("Tree navigation command returned an invalid payload shape");
+    }
+
+    const cancelled = parsedObject.cancelled === true;
+    const editorText = typeof parsedObject.editorText === "string" ? parsedObject.editorText : null;
+    const currentLeafId = typeof parsedObject.currentLeafId === "string" ? parsedObject.currentLeafId : null;
+    const sessionPath = typeof parsedObject.sessionPath === "string" ? parsedObject.sessionPath : null;
+    const error = typeof parsedObject.error === "string" ? parsedObject.error : undefined;
+
+    if (error) {
+        throw new Error(error);
+    }
+
+    return {
+        cancelled,
+        editorText,
+        currentLeafId,
+        sessionPath,
+    };
+}
+
+function ensureSuccessfulRpcResponse(payload: Record<string, unknown>, expectedCommand: string): void {
+    const command = typeof payload.command === "string" ? payload.command : "unknown";
+    const success = payload.success === true;
+
+    if (command !== expectedCommand) {
+        throw new Error(`Unexpected RPC response command: ${command}`);
+    }
+
+    if (!success) {
+        const errorMessage = typeof payload.error === "string" ? payload.error : `RPC command ${command} failed`;
+        throw new Error(errorMessage);
+    }
+}
+
+function isRpcResponseForId(payload: Record<string, unknown>, expectedId: string): boolean {
+    return payload.type === "response" && payload.id === expectedId;
+}
+
+function isSuccessfulRpcResponse(payload: Record<string, unknown>, command: string): boolean {
+    return payload.type === "response" && payload.command === command && payload.success === true;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return undefined;
+    }
+
+    return value as Record<string, unknown>;
 }
 
 function handleRpcEnvelope(

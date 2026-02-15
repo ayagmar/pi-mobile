@@ -18,6 +18,7 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import com.ayagmar.pimobile.sessions.TransportPreference
+import com.ayagmar.pimobile.sessions.TreeNavigationResult
 import com.ayagmar.pimobile.ui.theme.ThemePreference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -203,6 +204,16 @@ private class FakeSessionController : SessionController {
         sessionPath: String?,
         filter: String?,
     ): Result<SessionTreeSnapshot> = Result.failure(IllegalStateException("Not used"))
+
+    override suspend fun navigateTreeToEntry(entryId: String): Result<TreeNavigationResult> =
+        Result.success(
+            TreeNavigationResult(
+                cancelled = false,
+                editorText = null,
+                currentLeafId = null,
+                sessionPath = null,
+            ),
+        )
 
     override suspend fun cycleModel(): Result<ModelInfo?> = Result.success(null)
 

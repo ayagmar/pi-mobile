@@ -281,6 +281,27 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun navigateTreeToEntry(entryId: String): Result<TreeNavigationResult> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val bridgePayload =
+                    buildJsonObject {
+                        put("type", BRIDGE_NAVIGATE_TREE_TYPE)
+                        put("entryId", entryId)
+                    }
+
+                val bridgeResponse =
+                    connection.requestBridge(
+                        payload = bridgePayload,
+                        expectedType = BRIDGE_TREE_NAVIGATION_RESULT_TYPE,
+                    )
+
+                parseTreeNavigationResult(bridgeResponse.payload)
+            }
+        }
+    }
+
     private suspend fun forkWithEntryId(
         connection: PiRpcConnection,
         entryId: String,
@@ -870,6 +891,8 @@ class RpcSessionController(
         private const val SET_FOLLOW_UP_MODE_COMMAND = "set_follow_up_mode"
         private const val BRIDGE_GET_SESSION_TREE_TYPE = "bridge_get_session_tree"
         private const val BRIDGE_SESSION_TREE_TYPE = "bridge_session_tree"
+        private const val BRIDGE_NAVIGATE_TREE_TYPE = "bridge_navigate_tree"
+        private const val BRIDGE_TREE_NAVIGATION_RESULT_TYPE = "bridge_tree_navigation_result"
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
         private const val BASH_TIMEOUT_MS = 60_000L
@@ -961,6 +984,15 @@ private fun parseSessionTreeSnapshot(payload: JsonObject): SessionTreeSnapshot {
         rootIds = rootIds,
         currentLeafId = payload.stringField("currentLeafId"),
         entries = entries,
+    )
+}
+
+private fun parseTreeNavigationResult(payload: JsonObject): TreeNavigationResult {
+    return TreeNavigationResult(
+        cancelled = payload.booleanField("cancelled") ?: false,
+        editorText = payload.stringField("editorText"),
+        currentLeafId = payload.stringField("currentLeafId"),
+        sessionPath = payload.stringField("sessionPath"),
     )
 }
 

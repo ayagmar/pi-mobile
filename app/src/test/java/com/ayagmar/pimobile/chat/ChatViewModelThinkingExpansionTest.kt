@@ -21,6 +21,7 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import com.ayagmar.pimobile.sessions.TransportPreference
+import com.ayagmar.pimobile.sessions.TreeNavigationResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -512,6 +513,30 @@ class ChatViewModelThinkingExpansionTest {
             assertEquals(0, fullWindow.hiddenHistoryCount)
         }
 
+    @Test
+    fun jumpAndContinueUsesInPlaceTreeNavigationResult() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.treeNavigationResult =
+                Result.success(
+                    TreeNavigationResult(
+                        cancelled = false,
+                        editorText = "retry this branch",
+                        currentLeafId = "entry-42",
+                        sessionPath = "/tmp/session.jsonl",
+                    ),
+                )
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.jumpAndContinueFromTreeEntry("entry-42")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals("entry-42", controller.lastNavigatedEntryId)
+            assertEquals("retry this branch", viewModel.uiState.value.inputText)
+        }
+
     private fun ChatViewModel.assistantItems(): List<ChatTimelineItem.Assistant> =
         uiState.value.timeline.filterIsInstance<ChatTimelineItem.Assistant>()
 
@@ -605,6 +630,16 @@ private class FakeSessionController : SessionController {
     var getCommandsCallCount: Int = 0
     var sendPromptCallCount: Int = 0
     var messagesPayload: JsonObject? = null
+    var treeNavigationResult: Result<TreeNavigationResult> =
+        Result.success(
+            TreeNavigationResult(
+                cancelled = false,
+                editorText = null,
+                currentLeafId = null,
+                sessionPath = null,
+            ),
+        )
+    var lastNavigatedEntryId: String? = null
 
     private val streamingState = MutableStateFlow(false)
 
@@ -689,6 +724,11 @@ private class FakeSessionController : SessionController {
         sessionPath: String?,
         filter: String?,
     ): Result<SessionTreeSnapshot> = Result.failure(IllegalStateException("Not used"))
+
+    override suspend fun navigateTreeToEntry(entryId: String): Result<TreeNavigationResult> {
+        lastNavigatedEntryId = entryId
+        return treeNavigationResult
+    }
 
     override suspend fun cycleModel(): Result<ModelInfo?> = Result.success(null)
 
