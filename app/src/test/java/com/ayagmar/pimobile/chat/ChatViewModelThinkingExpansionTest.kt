@@ -20,6 +20,7 @@ import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
+import com.ayagmar.pimobile.sessions.TransportPreference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -554,6 +555,14 @@ private class FakeSessionController : SessionController {
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = events
     override val connectionState: StateFlow<ConnectionState> = MutableStateFlow(ConnectionState.DISCONNECTED)
     override val isStreaming: StateFlow<Boolean> = MutableStateFlow(false)
+
+    override fun setTransportPreference(preference: TransportPreference) {
+        // no-op for tests
+    }
+
+    override fun getTransportPreference(): TransportPreference = TransportPreference.AUTO
+
+    override fun getEffectiveTransportPreference(): TransportPreference = TransportPreference.WEBSOCKET
 
     suspend fun emitEvent(event: RpcIncomingMessage) {
         events.emit(event)

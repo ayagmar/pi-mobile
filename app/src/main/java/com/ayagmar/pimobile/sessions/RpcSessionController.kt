@@ -2,6 +2,7 @@
 
 package com.ayagmar.pimobile.sessions
 
+import android.util.Log
 import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.corenet.PiRpcConnection
 import com.ayagmar.pimobile.corenet.PiRpcConnectionConfig
@@ -86,6 +87,7 @@ class RpcSessionController(
 
     private var activeConnection: PiRpcConnection? = null
     private var activeContext: ActiveConnectionContext? = null
+    private var transportPreference: TransportPreference = TransportPreference.AUTO
     private var clientId: String = UUID.randomUUID().toString()
     private var rpcEventsJob: Job? = null
     private var connectionStateJob: Job? = null
@@ -94,6 +96,16 @@ class RpcSessionController(
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = _rpcEvents
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
     override val isStreaming: StateFlow<Boolean> = _isStreaming.asStateFlow()
+
+    override fun setTransportPreference(preference: TransportPreference) {
+        transportPreference = preference
+    }
+
+    override fun getTransportPreference(): TransportPreference = transportPreference
+
+    override fun getEffectiveTransportPreference(): TransportPreference {
+        return resolveEffectiveTransport(transportPreference)
+    }
 
     override suspend fun ensureConnected(
         hostProfile: HostProfile,
@@ -690,11 +702,12 @@ class RpcSessionController(
         clearActiveConnection(resetContext = false)
 
         val nextConnection = connectionFactory()
+        val endpoint = resolveEndpointForTransport(hostProfile)
         val config =
             PiRpcConnectionConfig(
                 target =
                     WebSocketTarget(
-                        url = hostProfile.endpoint,
+                        url = endpoint,
                         headers = mapOf(AUTHORIZATION_HEADER to "Bearer $token"),
                         connectTimeoutMs = connectTimeoutMs,
                     ),
@@ -719,6 +732,33 @@ class RpcSessionController(
             )
         observeConnection(nextConnection)
         return nextConnection
+    }
+
+    private fun resolveEndpointForTransport(hostProfile: HostProfile): String {
+        val effectiveTransport = resolveEffectiveTransport(transportPreference)
+
+        if (transportPreference == TransportPreference.SSE && effectiveTransport == TransportPreference.WEBSOCKET) {
+            Log.i(
+                TRANSPORT_LOG_TAG,
+                "SSE transport requested but bridge currently supports WebSocket only; using WebSocket fallback",
+            )
+        }
+
+        return when (effectiveTransport) {
+            TransportPreference.WEBSOCKET,
+            TransportPreference.AUTO,
+            TransportPreference.SSE,
+            -> hostProfile.endpoint
+        }
+    }
+
+    private fun resolveEffectiveTransport(requested: TransportPreference): TransportPreference {
+        return when (requested) {
+            TransportPreference.AUTO,
+            TransportPreference.WEBSOCKET,
+            TransportPreference.SSE,
+            -> TransportPreference.WEBSOCKET
+        }
     }
 
     private suspend fun clearActiveConnection(resetContext: Boolean = true) {
@@ -823,6 +863,7 @@ class RpcSessionController(
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
         private const val BASH_TIMEOUT_MS = 60_000L
+        private const val TRANSPORT_LOG_TAG = "RpcTransport"
     }
 }
 

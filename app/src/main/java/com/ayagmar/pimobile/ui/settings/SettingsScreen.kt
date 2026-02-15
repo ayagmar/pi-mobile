@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ayagmar.pimobile.di.AppServices
+import com.ayagmar.pimobile.sessions.TransportPreference
 import kotlinx.coroutines.delay
 
 @Composable
@@ -91,12 +92,16 @@ private fun SettingsScreen(
         AgentBehaviorCard(
             autoCompactionEnabled = uiState.autoCompactionEnabled,
             autoRetryEnabled = uiState.autoRetryEnabled,
+            transportPreference = uiState.transportPreference,
+            effectiveTransportPreference = uiState.effectiveTransportPreference,
+            transportRuntimeNote = uiState.transportRuntimeNote,
             steeringMode = uiState.steeringMode,
             followUpMode = uiState.followUpMode,
             isUpdatingSteeringMode = uiState.isUpdatingSteeringMode,
             isUpdatingFollowUpMode = uiState.isUpdatingFollowUpMode,
             onToggleAutoCompaction = viewModel::toggleAutoCompaction,
             onToggleAutoRetry = viewModel::toggleAutoRetry,
+            onTransportPreferenceSelected = viewModel::setTransportPreference,
             onSteeringModeSelected = viewModel::setSteeringMode,
             onFollowUpModeSelected = viewModel::setFollowUpMode,
         )
@@ -213,12 +218,16 @@ private fun ConnectionMessages(
 private fun AgentBehaviorCard(
     autoCompactionEnabled: Boolean,
     autoRetryEnabled: Boolean,
+    transportPreference: TransportPreference,
+    effectiveTransportPreference: TransportPreference,
+    transportRuntimeNote: String,
     steeringMode: String,
     followUpMode: String,
     isUpdatingSteeringMode: Boolean,
     isUpdatingFollowUpMode: Boolean,
     onToggleAutoCompaction: () -> Unit,
     onToggleAutoRetry: () -> Unit,
+    onTransportPreferenceSelected: (TransportPreference) -> Unit,
     onSteeringModeSelected: (String) -> Unit,
     onFollowUpModeSelected: (String) -> Unit,
 ) {
@@ -246,6 +255,13 @@ private fun AgentBehaviorCard(
                 description = "Automatically retry failed requests with exponential backoff",
                 checked = autoRetryEnabled,
                 onToggle = onToggleAutoRetry,
+            )
+
+            TransportPreferenceRow(
+                selectedPreference = transportPreference,
+                effectivePreference = effectiveTransportPreference,
+                runtimeNote = transportRuntimeNote,
+                onPreferenceSelected = onTransportPreferenceSelected,
             )
 
             ModeSelectorRow(
@@ -298,6 +314,64 @@ private fun SettingsToggleRow(
 }
 
 @Composable
+private fun TransportPreferenceRow(
+    selectedPreference: TransportPreference,
+    effectivePreference: TransportPreference,
+    runtimeNote: String,
+    onPreferenceSelected: (TransportPreference) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Transport preference",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = "Preferred transport between the app and bridge runtime",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TransportOptionButton(
+                label = "Auto",
+                selected = selectedPreference == TransportPreference.AUTO,
+                onClick = { onPreferenceSelected(TransportPreference.AUTO) },
+            )
+            TransportOptionButton(
+                label = "WebSocket",
+                selected = selectedPreference == TransportPreference.WEBSOCKET,
+                onClick = { onPreferenceSelected(TransportPreference.WEBSOCKET) },
+            )
+            TransportOptionButton(
+                label = "SSE",
+                selected = selectedPreference == TransportPreference.SSE,
+                onClick = { onPreferenceSelected(TransportPreference.SSE) },
+            )
+        }
+
+        Text(
+            text = "Effective: ${effectivePreference.value}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+
+        if (runtimeNote.isNotBlank()) {
+            Text(
+                text = runtimeNote,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
 private fun ModeSelectorRow(
     title: String,
     description: String,
@@ -336,6 +410,20 @@ private fun ModeSelectorRow(
                 onClick = { onModeSelected(SettingsViewModel.MODE_ONE_AT_A_TIME) },
             )
         }
+    }
+}
+
+@Composable
+private fun TransportOptionButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+    ) {
+        val prefix = if (selected) "✓ " else ""
+        Text("$prefix$label")
     }
 }
 

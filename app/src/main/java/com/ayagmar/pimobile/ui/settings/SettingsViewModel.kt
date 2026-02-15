@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.sessions.SessionController
+import com.ayagmar.pimobile.sessions.TransportPreference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -45,11 +46,21 @@ class SettingsViewModel(
             appVersionOverride
                 ?: context.resolveAppVersion()
 
+        val transportPreference =
+            TransportPreference.fromValue(
+                prefs.getString(KEY_TRANSPORT_PREFERENCE, null),
+            )
+        sessionController.setTransportPreference(transportPreference)
+        val effectiveTransport = sessionController.getEffectiveTransportPreference()
+
         uiState =
             uiState.copy(
                 appVersion = appVersion,
                 autoCompactionEnabled = prefs.getBoolean(KEY_AUTO_COMPACTION, true),
                 autoRetryEnabled = prefs.getBoolean(KEY_AUTO_RETRY, true),
+                transportPreference = transportPreference,
+                effectiveTransportPreference = effectiveTransport,
+                transportRuntimeNote = transportRuntimeNote(transportPreference, effectiveTransport),
             )
 
         viewModelScope.launch {
@@ -175,6 +186,21 @@ class SettingsViewModel(
         }
     }
 
+    fun setTransportPreference(preference: TransportPreference) {
+        if (preference == uiState.transportPreference) return
+
+        sessionController.setTransportPreference(preference)
+        prefs.edit().putString(KEY_TRANSPORT_PREFERENCE, preference.value).apply()
+
+        val effectiveTransport = sessionController.getEffectiveTransportPreference()
+        uiState =
+            uiState.copy(
+                transportPreference = preference,
+                effectiveTransportPreference = effectiveTransport,
+                transportRuntimeNote = transportRuntimeNote(preference, effectiveTransport),
+            )
+    }
+
     fun setSteeringMode(mode: String) {
         if (mode == uiState.steeringMode) return
 
@@ -238,6 +264,7 @@ class SettingsViewModel(
         private const val PREFS_NAME = "pi_mobile_settings"
         private const val KEY_AUTO_COMPACTION = "auto_compaction_enabled"
         private const val KEY_AUTO_RETRY = "auto_retry_enabled"
+        private const val KEY_TRANSPORT_PREFERENCE = "transport_preference"
     }
 }
 
@@ -276,6 +303,9 @@ data class SettingsUiState(
     val errorMessage: String? = null,
     val autoCompactionEnabled: Boolean = true,
     val autoRetryEnabled: Boolean = true,
+    val transportPreference: TransportPreference = TransportPreference.AUTO,
+    val effectiveTransportPreference: TransportPreference = TransportPreference.WEBSOCKET,
+    val transportRuntimeNote: String = "",
     val steeringMode: String = SettingsViewModel.MODE_ALL,
     val followUpMode: String = SettingsViewModel.MODE_ALL,
     val isUpdatingSteeringMode: Boolean = false,
@@ -298,5 +328,21 @@ private fun JsonObject?.stateModeField(
 
     return value?.takeIf {
         it == SettingsViewModel.MODE_ALL || it == SettingsViewModel.MODE_ONE_AT_A_TIME
+    }
+}
+
+private fun transportRuntimeNote(
+    requested: TransportPreference,
+    effective: TransportPreference,
+): String {
+    return when {
+        requested == TransportPreference.SSE && effective != TransportPreference.SSE ->
+            "SSE is not supported by the bridge yet; using WebSocket fallback."
+
+        requested == TransportPreference.AUTO ->
+            "Auto currently resolves to ${effective.value} with the bridge transport layer."
+
+        else ->
+            "Using ${effective.value} transport."
     }
 }

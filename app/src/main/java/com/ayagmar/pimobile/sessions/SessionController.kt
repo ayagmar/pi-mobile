@@ -21,6 +21,12 @@ interface SessionController {
     val connectionState: StateFlow<ConnectionState>
     val isStreaming: StateFlow<Boolean>
 
+    fun setTransportPreference(preference: TransportPreference)
+
+    fun getTransportPreference(): TransportPreference
+
+    fun getEffectiveTransportPreference(): TransportPreference
+
     suspend fun ensureConnected(
         hostProfile: HostProfile,
         token: String,

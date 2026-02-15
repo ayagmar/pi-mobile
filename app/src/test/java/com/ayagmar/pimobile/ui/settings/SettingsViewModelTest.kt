@@ -17,6 +17,7 @@ import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
+import com.ayagmar.pimobile.sessions.TransportPreference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -99,6 +100,22 @@ class SettingsViewModelTest {
             collector.cancel()
         }
 
+    @Test
+    fun setTransportPreferenceUpdatesControllerAndState() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = createViewModel(controller)
+
+            dispatcher.scheduler.advanceUntilIdle()
+            viewModel.setTransportPreference(TransportPreference.SSE)
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(TransportPreference.SSE, viewModel.uiState.transportPreference)
+            assertEquals(TransportPreference.WEBSOCKET, viewModel.uiState.effectiveTransportPreference)
+            assertTrue(viewModel.uiState.transportRuntimeNote.contains("fallback"))
+            assertEquals(TransportPreference.SSE, controller.lastTransportPreference)
+        }
+
     private fun createViewModel(controller: FakeSessionController): SettingsViewModel {
         return SettingsViewModel(
             sessionController = controller,
@@ -118,6 +135,15 @@ private class FakeSessionController : SessionController {
     var newSessionResult: Result<Unit> = Result.success(Unit)
     var lastSteeringMode: String? = null
     var lastFollowUpMode: String? = null
+    var lastTransportPreference: TransportPreference = TransportPreference.AUTO
+
+    override fun setTransportPreference(preference: TransportPreference) {
+        lastTransportPreference = preference
+    }
+
+    override fun getTransportPreference(): TransportPreference = lastTransportPreference
+
+    override fun getEffectiveTransportPreference(): TransportPreference = TransportPreference.WEBSOCKET
 
     override suspend fun ensureConnected(
         hostProfile: HostProfile,
