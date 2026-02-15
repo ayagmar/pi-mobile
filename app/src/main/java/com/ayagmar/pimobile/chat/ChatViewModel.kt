@@ -1280,6 +1280,7 @@ class ChatViewModel(
 
     companion object {
         const val TREE_FILTER_DEFAULT = "default"
+        const val TREE_FILTER_ALL = "all"
         const val TREE_FILTER_NO_TOOLS = "no-tools"
         const val TREE_FILTER_USER_ONLY = "user-only"
         const val TREE_FILTER_LABELED_ONLY = "labeled-only"

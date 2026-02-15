@@ -31,7 +31,7 @@ export interface SessionTreeEntry {
     isBookmarked: boolean;
 }
 
-export type SessionTreeFilter = "default" | "no-tools" | "user-only" | "labeled-only";
+export type SessionTreeFilter = "default" | "all" | "no-tools" | "user-only" | "labeled-only";
 
 export interface SessionTreeSnapshot {
     sessionPath: string;
@@ -332,14 +332,14 @@ function applyTreeFilter(
     switch (filter) {
         case "default":
             return entries.filter((entry) => entry.entryType !== "label" && entry.entryType !== "custom");
+        case "all":
+            return entries;
         case "no-tools":
             return entries.filter((entry) => entry.role !== "toolResult");
         case "user-only":
             return entries.filter((entry) => entry.role === "user");
         case "labeled-only":
             return entries.filter((entry) => entry.isBookmarked || entry.entryType === "label");
-        default:
-            return entries;
     }
 }
 

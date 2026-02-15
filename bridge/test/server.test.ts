@@ -266,6 +266,35 @@ describe("bridge websocket server", () => {
         ws.close();
     });
 
+    it("accepts and forwards all tree filter to session indexer", async () => {
+        const fakeSessionIndexer = new FakeSessionIndexer();
+        const { baseUrl, server } = await startBridgeServer({ sessionIndexer: fakeSessionIndexer });
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const waitForTree = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_session_tree");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_get_session_tree",
+                    sessionPath: "/tmp/session-tree.jsonl",
+                    filter: "all",
+                },
+            }),
+        );
+
+        await waitForTree;
+        expect(fakeSessionIndexer.requestedFilter).toBe("all");
+
+        ws.close();
+    });
+
     it("returns bridge_error for invalid bridge_get_session_tree filter", async () => {
         const { baseUrl, server } = await startBridgeServer();
         bridgeServer = server;
@@ -744,8 +773,10 @@ class FakeSessionIndexer implements SessionIndexer {
         return this.groups;
     }
 
-    async getSessionTree(sessionPath: string, filter?: "default" | "no-tools" | "user-only" | "labeled-only"):
-        Promise<SessionTreeSnapshot> {
+    async getSessionTree(
+        sessionPath: string,
+        filter?: "default" | "all" | "no-tools" | "user-only" | "labeled-only",
+    ): Promise<SessionTreeSnapshot> {
         this.treeCalls += 1;
         this.requestedSessionPath = sessionPath;
         this.requestedFilter = filter;

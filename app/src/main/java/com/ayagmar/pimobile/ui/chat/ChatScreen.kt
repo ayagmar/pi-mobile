@@ -2593,6 +2593,7 @@ private fun computeChildCountMap(entries: List<SessionTreeEntry>): Map<String, I
 private val TREE_FILTER_OPTIONS =
     listOf(
         ChatViewModel.TREE_FILTER_DEFAULT to "default",
+        ChatViewModel.TREE_FILTER_ALL to "all",
         ChatViewModel.TREE_FILTER_NO_TOOLS to "no-tools",
         ChatViewModel.TREE_FILTER_USER_ONLY to "user-only",
         ChatViewModel.TREE_FILTER_LABELED_ONLY to "labeled-only",

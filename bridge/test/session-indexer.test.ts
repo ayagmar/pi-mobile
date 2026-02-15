@@ -94,6 +94,65 @@ describe("createSessionIndexer", () => {
         expect(tree.rootIds).toEqual(["m1"]);
     });
 
+    it("supports all filter and includes entries excluded by default", async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-tree-all-filter-"));
+
+        try {
+            const projectDir = path.join(tempRoot, "--tmp-project-all-filter--");
+            await fs.mkdir(projectDir, { recursive: true });
+
+            const sessionPath = path.join(projectDir, "2026-02-03T00-00-00-000Z_a1111111.jsonl");
+            await fs.writeFile(
+                sessionPath,
+                [
+                    JSON.stringify({
+                        type: "session",
+                        version: 3,
+                        id: "a1111111",
+                        timestamp: "2026-02-03T00:00:00.000Z",
+                        cwd: "/tmp/project-all-filter",
+                    }),
+                    JSON.stringify({
+                        type: "message",
+                        id: "m1",
+                        parentId: null,
+                        timestamp: "2026-02-03T00:00:01.000Z",
+                        message: { role: "user", content: "hello" },
+                    }),
+                    JSON.stringify({
+                        type: "label",
+                        id: "l1",
+                        parentId: "m1",
+                        timestamp: "2026-02-03T00:00:02.000Z",
+                        targetId: "m1",
+                        label: "checkpoint",
+                    }),
+                    JSON.stringify({
+                        type: "custom",
+                        id: "c1",
+                        parentId: "m1",
+                        timestamp: "2026-02-03T00:00:03.000Z",
+                        message: { role: "assistant", content: "custom event" },
+                    }),
+                ].join("\n"),
+                "utf-8",
+            );
+
+            const sessionIndexer = createSessionIndexer({
+                sessionsDirectory: tempRoot,
+                logger: createLogger("silent"),
+            });
+
+            const defaultTree = await sessionIndexer.getSessionTree(sessionPath, "default");
+            expect(defaultTree.entries.map((entry) => entry.entryId)).toEqual(["m1"]);
+
+            const allTree = await sessionIndexer.getSessionTree(sessionPath, "all");
+            expect(allTree.entries.map((entry) => entry.entryId)).toEqual(["m1", "l1", "c1"]);
+        } finally {
+            await fs.rm(tempRoot, { recursive: true, force: true });
+        }
+    });
+
     it("attaches labels to target entries and supports labeled-only filter", async () => {
         const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-tree-labels-"));
         const projectDir = path.join(tempRoot, "--tmp-project-labeled--");

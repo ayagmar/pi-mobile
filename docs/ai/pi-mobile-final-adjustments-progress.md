@@ -47,7 +47,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
 | 5 | Q1 Fix image-only prompt mismatch | DONE | fix(chat): allow image-only prompt flow and guard failed image encoding |  | ktlint✅ detekt✅ test✅ bridge✅ | ChatViewModel now allows empty text when image payloads exist |
-| 6 | Q2 Add full tree filters (`all` included) | TODO |  |  |  |  |
+| 6 | Q2 Add full tree filters (`all` included) | DONE | feat(tree): add all filter end-to-end (bridge + app) |  | ktlint✅ detekt✅ test✅ bridge✅ | Added `all` in bridge validator/indexer + chat tree filter chips |
 | 7 | Q3 Command palette built-in parity layer | TODO |  |  |  |  |
 | 8 | Q4 Global collapse/expand controls | TODO |  |  |  |  |
 | 9 | Q5 Wire frame metrics into live chat | TODO |  |  |  |  |
@@ -177,15 +177,33 @@ Notes/blockers:
 - Added guard for image-encoding failures to avoid sending empty prompt with no payload.
 ```
 
+### 2026-02-15
+
+```text
+Task: Q2
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Added `all` to bridge tree filter whitelist and session-indexer filter type.
+- `all` now returns full tree entries (including label/custom entries).
+- Added app-side tree filter option chip for `all`.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 5
+- Backlog done: 6
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 21
+- Backlog remaining (not done): 20
 - Reference completed items (not counted in backlog): 6
 
 ---

@@ -351,7 +351,7 @@ async function handleBridgeControlMessage(
                 JSON.stringify(
                     createBridgeErrorEnvelope(
                         "invalid_tree_filter",
-                        "filter must be one of: default, no-tools, user-only, labeled-only",
+                        "filter must be one of: default, all, no-tools, user-only, labeled-only",
                     ),
                 ),
             );
@@ -670,7 +670,8 @@ function getHeaderToken(request: http.IncomingMessage): string | undefined {
 }
 
 function isSessionTreeFilter(value: string): value is SessionTreeFilter {
-    return value === "default" || value === "no-tools" || value === "user-only" || value === "labeled-only";
+    return value === "default" || value === "all" || value === "no-tools" || value === "user-only" ||
+        value === "labeled-only";
 }
 
 function sanitizeClientId(clientIdRaw: string | undefined): string | undefined {
