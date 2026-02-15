@@ -26,6 +26,16 @@ Phone (this app)  <--Tailscale-->  Laptop (bridge)  <--local-->  pi --mode rpc
 
 The bridge is a small Node.js service that translates WebSocket to pi's stdin/stdout JSON protocol. The app connects to the bridge, not directly to pi.
 
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Codebase guide](docs/codebase.md)
+- [Custom extensions](docs/extensions.md)
+- [Bridge protocol reference](docs/bridge-protocol.md)
+- [Testing guide](docs/testing.md)
+
+> Note: `docs/ai/` contains planning/progress artifacts used during development. User-facing and maintenance docs live in the top-level `docs/` files above.
+
 ## Setup
 
 ### 1. Laptop Setup
