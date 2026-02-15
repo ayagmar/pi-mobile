@@ -1,3 +1,5 @@
+@file:Suppress("TooManyFunctions")
+
 package com.ayagmar.pimobile.ui.sessions
 
 import androidx.compose.foundation.clickable
@@ -79,6 +81,7 @@ fun SessionsRoute(onNavigateToChat: () -> Unit = {}) {
                 onHostSelected = sessionsViewModel::onHostSelected,
                 onSearchChanged = sessionsViewModel::onSearchQueryChanged,
                 onCwdToggle = sessionsViewModel::onCwdToggle,
+                onToggleFlatView = sessionsViewModel::toggleFlatView,
                 onRefreshClick = sessionsViewModel::refreshSessions,
                 onNewSession = sessionsViewModel::newSession,
                 onResumeClick = sessionsViewModel::resumeSession,
@@ -96,6 +99,7 @@ private data class SessionsScreenCallbacks(
     val onHostSelected: (String) -> Unit,
     val onSearchChanged: (String) -> Unit,
     val onCwdToggle: (String) -> Unit,
+    val onToggleFlatView: () -> Unit,
     val onRefreshClick: () -> Unit,
     val onNewSession: () -> Unit,
     val onResumeClick: (SessionRecord) -> Unit,
@@ -142,7 +146,9 @@ private fun SessionsScreen(
     ) {
         SessionsHeader(
             isRefreshing = state.isRefreshing,
+            isFlatView = state.isFlatView,
             onRefreshClick = callbacks.onRefreshClick,
+            onToggleFlatView = callbacks.onToggleFlatView,
             onNewSession = callbacks.onNewSession,
         )
 
@@ -225,7 +231,9 @@ private fun SessionsDialogs(
 @Composable
 private fun SessionsHeader(
     isRefreshing: Boolean,
+    isFlatView: Boolean,
     onRefreshClick: () -> Unit,
+    onToggleFlatView: () -> Unit,
     onNewSession: () -> Unit,
 ) {
     Row(
@@ -238,8 +246,12 @@ private fun SessionsHeader(
             style = MaterialTheme.typography.headlineSmall,
         )
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            TextButton(onClick = onToggleFlatView) {
+                Text(if (isFlatView) "Tree" else "All")
+            }
             TextButton(onClick = onRefreshClick, enabled = !isRefreshing) {
                 Text(if (isRefreshing) "Refreshing" else "Refresh")
             }
@@ -303,17 +315,27 @@ private fun SessionsContent(
         }
 
         else -> {
-            SessionsList(
-                groups = state.groups,
-                activeSessionPath = state.activeSessionPath,
-                isBusy = state.isResuming || state.isPerformingAction,
-                callbacks =
-                    SessionsListCallbacks(
-                        onCwdToggle = callbacks.onCwdToggle,
-                        onResumeClick = callbacks.onResumeClick,
-                        actions = activeSessionActions,
-                    ),
-            )
+            if (state.isFlatView) {
+                FlatSessionsList(
+                    groups = state.groups,
+                    activeSessionPath = state.activeSessionPath,
+                    isBusy = state.isResuming || state.isPerformingAction,
+                    onResumeClick = callbacks.onResumeClick,
+                    actions = activeSessionActions,
+                )
+            } else {
+                SessionsList(
+                    groups = state.groups,
+                    activeSessionPath = state.activeSessionPath,
+                    isBusy = state.isResuming || state.isPerformingAction,
+                    callbacks =
+                        SessionsListCallbacks(
+                            onCwdToggle = callbacks.onCwdToggle,
+                            onResumeClick = callbacks.onResumeClick,
+                            actions = activeSessionActions,
+                        ),
+                )
+            }
         }
     }
 }
@@ -373,6 +395,37 @@ private fun SessionsList(
 }
 
 @Composable
+private fun FlatSessionsList(
+    groups: List<CwdSessionGroupUiState>,
+    activeSessionPath: String?,
+    isBusy: Boolean,
+    onResumeClick: (SessionRecord) -> Unit,
+    actions: ActiveSessionActionCallbacks,
+) {
+    // Flatten all sessions and sort by updatedAt (most recent first)
+    val allSessions =
+        remember(groups) {
+            groups.flatMap { it.sessions }.sortedByDescending { it.updatedAt }
+        }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(items = allSessions, key = { session -> session.sessionPath }) { session ->
+            SessionCard(
+                session = session,
+                isActive = activeSessionPath == session.sessionPath,
+                isBusy = isBusy,
+                onResumeClick = { onResumeClick(session) },
+                actions = actions,
+                showCwd = true,
+            )
+        }
+    }
+}
+
+@Composable
 private fun CwdHeader(
     group: CwdSessionGroupUiState,
     onToggle: () -> Unit,
@@ -394,12 +447,14 @@ private fun CwdHeader(
 }
 
 @Composable
+@Suppress("LongParameterList")
 private fun SessionCard(
     session: SessionRecord,
     isActive: Boolean,
     isBusy: Boolean,
     onResumeClick: () -> Unit,
     actions: ActiveSessionActionCallbacks,
+    showCwd: Boolean = false,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -410,6 +465,17 @@ private fun SessionCard(
                 text = session.displayTitle,
                 style = MaterialTheme.typography.titleMedium,
             )
+
+            if (showCwd) {
+                val cwd = session.sessionPath.substringBeforeLast("/", "")
+                if (cwd.isNotEmpty()) {
+                    Text(
+                        text = cwd,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
 
             Text(
                 text = session.sessionPath,

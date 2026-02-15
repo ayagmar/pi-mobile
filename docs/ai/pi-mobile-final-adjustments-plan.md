@@ -156,7 +156,22 @@ Manual smoke checklist (UI/protocol tasks):
 
 ---
 
-## 2) Stability + security fixes
+### Q7 — Queue inspector UX for pending steer/follow-up
+**Why:** queue behavior exists but users cannot inspect/manage pending items clearly.
+
+**Primary files:**
+- `app/src/main/java/com/ayagmar/pimobile/chat/ChatViewModel.kt`
+- `app/src/main/java/com/ayagmar/pimobile/ui/chat/ChatScreen.kt`
+- `app/src/main/java/com/ayagmar/pimobile/ui/settings/SettingsScreen.kt` (if mode hints/actions added)
+
+**Acceptance:**
+- pending queue is visible while streaming
+- queued items can be cancelled/cleared as protocol allows
+- UX reflects steering/follow-up mode behavior (`all` vs `one-at-a-time`)
+
+---
+
+## 3) Stability + security fixes
 
 ### F1 — Bridge event isolation and lock correctness
 **Why:** outbound RPC events are currently fanned out by `cwd`; tighten to active controller/session ownership.
@@ -228,40 +243,6 @@ Manual smoke checklist (UI/protocol tasks):
 
 ---
 
-## 3) Theming + Design System
-
-### T1 — Centralized theme architecture (PiMobileTheme)
-**Why:** Colors are scattered and hardcoded; no dark/light mode support.
-
-**Primary files:**
-- `app/src/main/java/com/ayagmar/pimobile/ui/theme/` (create)
-- `app/src/main/java/com/ayagmar/pimobile/ui/PiMobileApp.kt`
-- All screen files for color replacement
-
-**Acceptance:**
-- `PiMobileTheme` with `lightColorScheme()` and `darkColorScheme()`
-- All hardcoded colors replaced with theme references
-- Settings toggle for light/dark/system-default
-- Color roles documented (primary, secondary, tertiary, surface, etc.)
-
----
-
-### T2 — Component design system
-**Why:** Inconsistent card styles, button sizes, spacing across screens.
-
-**Primary files:**
-- `app/src/main/java/com/ayagmar/pimobile/ui/components/` (create)
-- `app/src/main/java/com/ayagmar/pimobile/ui/chat/ChatScreen.kt`
-- `app/src/main/java/com/ayagmar/pimobile/ui/sessions/SessionsScreen.kt`
-- `app/src/main/java/com/ayagmar/pimobile/ui/settings/SettingsScreen.kt`
-
-**Acceptance:**
-- Reusable `PiCard`, `PiButton`, `PiTextField`, `PiTopBar` components
-- Consistent spacing tokens (4.dp, 8.dp, 16.dp, 24.dp)
-- Typography scale defined and applied
-
----
-
 ## 4) Medium maintainability improvements
 
 ### M1 — Replace service locator with explicit DI
@@ -282,12 +263,12 @@ Manual smoke checklist (UI/protocol tasks):
 - `ChatScreen.kt` (~2600+ lines) → extract: timeline, header, input, dialogs into separate files
 - `RpcSessionController` (~1000+ lines) → extract: connection mgmt, RPC routing, lifecycle
 
-**Acceptance:**
-- Each class < 500 lines
-- Single responsibility per component
-- All existing tests still pass
-- No `@file:Suppress("TooManyFunctions")` needed
-- Clear public API boundaries documented
+**Acceptance (non-rigid):**
+- class sizes and responsibilities are substantially reduced (no hard fixed LOC cap)
+- detekt complexity signals improve (e.g. `LargeClass`, `LongMethod`, `TooManyFunctions` count reduced)
+- suppressions are reduced or narrowed with justification
+- all existing tests pass
+- clear public API boundaries documented
 
 ---
 
@@ -313,11 +294,47 @@ Manual smoke checklist (UI/protocol tasks):
 - affected Kotlin sources
 
 **Acceptance:**
-- fewer broad suppressions, all checks green
+- fewer broad suppressions
+- complexity-oriented rules enforced pragmatically (without blocking healthy modularization)
+- all checks green
 
 ---
 
-## 5) Heavy hitters (last)
+## 5) Theming + Design System (after architecture cleanup)
+
+### T1 — Centralized theme architecture (PiMobileTheme)
+**Why:** Colors are scattered and hardcoded; no dark/light mode support.
+
+**Primary files:**
+- `app/src/main/java/com/ayagmar/pimobile/ui/theme/` (create)
+- `app/src/main/java/com/ayagmar/pimobile/ui/PiMobileApp.kt`
+- all screen files for color replacement
+
+**Acceptance:**
+- `PiMobileTheme` with `lightColorScheme()` and `darkColorScheme()`
+- all hardcoded colors replaced with theme references
+- settings toggle for light/dark/system-default
+- color roles documented (primary, secondary, tertiary, surface, etc.)
+
+---
+
+### T2 — Component design system
+**Why:** Inconsistent card styles, button sizes, spacing across screens.
+
+**Primary files:**
+- `app/src/main/java/com/ayagmar/pimobile/ui/components/` (create)
+- `app/src/main/java/com/ayagmar/pimobile/ui/chat/ChatScreen.kt`
+- `app/src/main/java/com/ayagmar/pimobile/ui/sessions/SessionsScreen.kt`
+- `app/src/main/java/com/ayagmar/pimobile/ui/settings/SettingsScreen.kt`
+
+**Acceptance:**
+- reusable `PiCard`, `PiButton`, `PiTextField`, `PiTopBar` components
+- consistent spacing tokens (4.dp, 8.dp, 16.dp, 24.dp)
+- typography scale defined and applied
+
+---
+
+## 6) Heavy hitters (last)
 
 ### H1 — True `/tree` parity (in-place navigate, not fork fallback)
 **Why:** current Jump+Continue calls fork semantics.
@@ -386,28 +403,31 @@ Manual smoke checklist (UI/protocol tasks):
 7. Q4 global collapse/expand controls
 8. Q5 live frame metrics wiring
 9. Q6 transport preference setting parity
-10. F1 bridge event isolation + lock correctness
-11. F2 reconnect/resync hardening
-12. F3 bridge auth/exposure hardening
-13. F4 Android network security tightening
-14. F5 bridge session index scalability
-15. T1 Centralized theme architecture (PiMobileTheme)
-16. T2 Component design system
-17. M1 replace service locator with DI
-18. M2 split god classes (architecture hygiene)
-19. M3 unify streaming/backpressure runtime pipeline
-20. M4 tighten static analysis rules
-21. H1 true `/tree` parity
-22. H2 session parsing alignment with Pi internals
-23. H3 incremental history loading strategy
-24. H4 extension-ize selected workflows
+10. Q7 queue inspector UX for pending steer/follow-up
+11. F1 bridge event isolation + lock correctness
+12. F2 reconnect/resync hardening
+13. F3 bridge auth/exposure hardening
+14. F4 Android network security tightening
+15. F5 bridge session index scalability
+16. M1 replace service locator with DI
+17. M2 split god classes (architecture hygiene)
+18. M3 unify streaming/backpressure runtime pipeline
+19. M4 tighten static analysis rules
+20. T1 Centralized theme architecture (PiMobileTheme)
+21. T2 Component design system
+22. H1 true `/tree` parity
+23. H2 session parsing alignment with Pi internals
+24. H3 incremental history loading strategy
+25. H4 extension-ize selected workflows
 
 ---
 
 ## Definition of done
 
+- [ ] Critical UX fixes complete
 - [ ] Quick wins complete
 - [ ] Stability/security fixes complete
 - [ ] Maintainability improvements complete
+- [ ] Theming + Design System complete
 - [ ] Heavy hitters complete or explicitly documented as protocol-limited
 - [ ] Final verification loop green

@@ -117,6 +117,12 @@ class SessionsViewModel(
         }
     }
 
+    fun toggleFlatView() {
+        _uiState.update { current ->
+            current.copy(isFlatView = !current.isFlatView)
+        }
+    }
+
     fun refreshSessions() {
         val hostId = _uiState.value.selectedHostId ?: return
 
@@ -126,35 +132,66 @@ class SessionsViewModel(
     }
 
     fun newSession() {
+        val hostId = _uiState.value.selectedHostId ?: return
+        val selectedHost = _uiState.value.hosts.firstOrNull { host -> host.id == hostId } ?: return
+
         viewModelScope.launch(Dispatchers.IO) {
-            _uiState.update { current ->
-                current.copy(
-                    isResuming = true,
-                    errorMessage = null,
-                )
-            }
-
-            val result = sessionController.newSession()
-
-            if (result.isSuccess) {
-                emitMessage("New session created")
-                _navigateToChat.trySend(Unit)
+            val token = tokenStore.getToken(hostId)
+            if (token.isNullOrBlank()) {
+                emitError("No token configured for host ${selectedHost.name}")
+                return@launch
             }
 
             _uiState.update { current ->
-                if (result.isSuccess) {
-                    current.copy(
-                        isResuming = false,
-                        errorMessage = null,
-                    )
-                } else {
-                    current.copy(
-                        isResuming = false,
-                        errorMessage = result.exceptionOrNull()?.message ?: "Failed to create new session",
-                    )
-                }
+                current.copy(isResuming = true, isPerformingAction = false, errorMessage = null)
+            }
+
+            // Connect first, then create new session
+            val connectResult = connectForNewSession(selectedHost, token)
+
+            if (connectResult.isSuccess) {
+                completeNewSession(connectResult.getOrNull())
+            } else {
+                emitError(connectResult.exceptionOrNull()?.message ?: "Failed to connect for new session")
             }
         }
+    }
+
+    private suspend fun connectForNewSession(
+        host: HostProfile,
+        token: String,
+    ): Result<String?> =
+        runCatching {
+            // Use first group's CWD or a reasonable default
+            val cwd = _uiState.value.groups.firstOrNull()?.cwd ?: "/home/user"
+            val newSessionRecord =
+                SessionRecord(
+                    sessionPath = "",
+                    cwd = cwd,
+                    displayName = null,
+                    firstUserMessagePreview = null,
+                    updatedAt = "",
+                    createdAt = "",
+                )
+            sessionController.resume(hostProfile = host, token = token, session = newSessionRecord)
+                .getOrThrow()
+        }
+
+    private suspend fun completeNewSession(sessionPath: String?) {
+        val newSessionResult = sessionController.newSession()
+        if (newSessionResult.isSuccess) {
+            emitMessage("New session created")
+            _navigateToChat.trySend(Unit)
+            _uiState.update { current ->
+                current.copy(isResuming = false, activeSessionPath = sessionPath, errorMessage = null)
+            }
+        } else {
+            emitError(newSessionResult.exceptionOrNull()?.message ?: "Failed to create new session")
+        }
+    }
+
+    private fun emitError(message: String) {
+        _uiState.update { current -> current.copy(isResuming = false, errorMessage = message) }
     }
 
     fun resumeSession(session: SessionRecord) {
@@ -610,6 +647,7 @@ data class SessionsUiState(
     val forkCandidates: List<ForkableMessage> = emptyList(),
     val activeSessionPath: String? = null,
     val errorMessage: String? = null,
+    val isFlatView: Boolean = false,
 )
 
 data class CwdSessionGroupUiState(
