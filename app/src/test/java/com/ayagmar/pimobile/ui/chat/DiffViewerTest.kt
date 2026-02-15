@@ -1,0 +1,76 @@
+package com.ayagmar.pimobile.ui.chat
+
+import com.ayagmar.pimobile.chat.EditDiffInfo
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class DiffViewerTest {
+    @Test
+    fun multiHunkDiffIncludesSkippedSectionBetweenSeparatedChanges() {
+        val oldLines = (1..14).map { "line-$it" }
+        val newLines =
+            oldLines
+                .toMutableList()
+                .also {
+                    it[2] = "line-3-updated"
+                    it[11] = "line-12-updated"
+                }
+
+        val diffLines =
+            computeDiffLines(
+                EditDiffInfo(
+                    path = "src/Test.kt",
+                    oldString = oldLines.joinToString("\n"),
+                    newString = newLines.joinToString("\n"),
+                ),
+            )
+
+        assertTrue(diffLines.any { it.type == DiffLineType.REMOVED && it.content == "line-3" })
+        assertTrue(diffLines.any { it.type == DiffLineType.ADDED && it.content == "line-3-updated" })
+        assertTrue(diffLines.any { it.type == DiffLineType.REMOVED && it.content == "line-12" })
+        assertTrue(diffLines.any { it.type == DiffLineType.ADDED && it.content == "line-12-updated" })
+        assertTrue(diffLines.any { it.type == DiffLineType.SKIPPED })
+    }
+
+    @Test
+    fun diffLinesExposeAccurateOldAndNewLineNumbers() {
+        val diffLines =
+            computeDiffLines(
+                EditDiffInfo(
+                    path = "src/Main.kt",
+                    oldString = "one\ntwo\nthree",
+                    newString = "one\nTWO\nthree\nfour",
+                ),
+            )
+
+        val removed = diffLines.first { it.type == DiffLineType.REMOVED }
+        assertEquals("two", removed.content)
+        assertEquals(2, removed.oldLineNumber)
+        assertEquals(null, removed.newLineNumber)
+
+        val replacement = diffLines.first { it.type == DiffLineType.ADDED && it.content == "TWO" }
+        assertEquals(null, replacement.oldLineNumber)
+        assertEquals(2, replacement.newLineNumber)
+
+        val appended = diffLines.first { it.type == DiffLineType.ADDED && it.content == "four" }
+        assertEquals(4, appended.newLineNumber)
+    }
+
+    @Test
+    fun identicalInputProducesOnlyContextLines() {
+        val diffLines =
+            computeDiffLines(
+                EditDiffInfo(
+                    path = "README.md",
+                    oldString = "alpha\nbeta",
+                    newString = "alpha\nbeta",
+                ),
+            )
+
+        assertEquals(2, diffLines.size)
+        assertTrue(diffLines.all { it.type == DiffLineType.CONTEXT })
+        assertEquals(listOf(1, 2), diffLines.map { it.oldLineNumber })
+        assertEquals(listOf(1, 2), diffLines.map { it.newLineNumber })
+    }
+}
