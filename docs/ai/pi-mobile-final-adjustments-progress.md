@@ -63,7 +63,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 12 | F1 Bridge event isolation + lock correctness | DONE | fix(bridge): isolate rpc events to control owner per cwd |  | ktlint✅ detekt✅ test✅ bridge✅ | RPC forwarder events now require active control ownership before fan-out; added tests for shared-cwd isolation and post-release send rejection |
 | 13 | F2 Reconnect/resync race hardening | DONE | fix(core-net): harden reconnect resync epochs and pending requests |  | ktlint✅ detekt✅ test✅ bridge✅ | Added reconnect epoch gating, cancelled pending request responses on reconnect/disconnect, and synced streaming flag from resync snapshots |
 | 14 | F3 Bridge auth + exposure hardening | DONE | fix(bridge): harden token auth and exposure defaults |  | ktlint✅ detekt✅ test✅ bridge✅ | Added constant-time token hash compare, health endpoint exposure toggle, non-loopback bind warnings, and README security guidance |
-| 15 | F4 Android network security tightening | TODO |  |  |  |  |
+| 15 | F4 Android network security tightening | DONE | fix(android): tighten cleartext policy to tailscale hostnames |  | ktlint✅ detekt✅ test✅ bridge✅ | Scoped cleartext to `localhost` + `*.ts.net`, set `usesCleartextTraffic=false`, and documented MagicDNS/Tailnet assumptions |
 | 16 | F5 Bridge session index scalability | TODO |  |  |  |  |
 
 ---
@@ -338,15 +338,33 @@ Notes/blockers:
 - Added non-loopback host exposure warnings and documented hardened bridge configuration in README.
 ```
 
+### 2026-02-15
+
+```text
+Task: F4
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Tightened debug/release network security configs to disable global cleartext and allow only `localhost` + `*.ts.net`.
+- Explicitly set `usesCleartextTraffic=false` in AndroidManifest.
+- Updated README connect/security guidance to prefer Tailnet MagicDNS hostnames and document scoped cleartext assumptions.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 14
+- Backlog done: 15
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 12
+- Backlog remaining (not done): 11
 - Reference completed items (not counted in backlog): 6
 
 ---
