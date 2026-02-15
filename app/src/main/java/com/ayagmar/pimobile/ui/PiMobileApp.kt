@@ -84,6 +84,9 @@ fun piMobileApp() {
                         navController.navigate("chat") {
                             launchSingleTop = true
                             restoreState = true
+                            popUpTo(navController.graph.startDestinationId) {
+                                saveState = true
+                            }
                         }
                     },
                 )

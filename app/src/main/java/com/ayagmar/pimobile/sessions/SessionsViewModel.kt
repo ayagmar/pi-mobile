@@ -17,7 +17,9 @@ import com.ayagmar.pimobile.hosts.SharedPreferencesHostProfileStore
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -37,10 +40,10 @@ class SessionsViewModel(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SessionsUiState(isLoading = true))
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 16)
-    private val _navigateToChat = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val _navigateToChat = Channel<Unit>(Channel.BUFFERED)
     val uiState: StateFlow<SessionsUiState> = _uiState.asStateFlow()
     val messages: SharedFlow<String> = _messages.asSharedFlow()
-    val navigateToChat: SharedFlow<Unit> = _navigateToChat.asSharedFlow()
+    val navigateToChat: Flow<Unit> = _navigateToChat.receiveAsFlow()
 
     private val collapsedCwds = linkedSetOf<String>()
     private var observeJob: Job? = null
@@ -160,7 +163,7 @@ class SessionsViewModel(
 
             if (resumeResult.isSuccess) {
                 emitMessage("Resumed ${session.summaryTitle()}")
-                _navigateToChat.tryEmit(Unit)
+                _navigateToChat.trySend(Unit)
             }
 
             _uiState.update { current ->
@@ -429,20 +432,35 @@ class SessionsViewModel(
                 return@launch
             }
 
-            val selectedHostId = hosts.first().id
+            val current = _uiState.value
+            val hostIds = hosts.map { it.id }.toSet()
 
-            _uiState.update { current ->
-                current.copy(
-                    isLoading = true,
+            // Preserve existing host selection if still valid; otherwise pick first
+            val selectedHostId =
+                if (current.selectedHostId != null && current.selectedHostId in hostIds) {
+                    current.selectedHostId
+                } else {
+                    hosts.first().id
+                }
+
+            // Skip full reload if hosts haven't changed and sessions are already loaded
+            val hostsChanged = current.hosts.map { it.id }.toSet() != hostIds
+            val needsObserve = hostsChanged || current.groups.isEmpty()
+
+            _uiState.update { state ->
+                state.copy(
+                    isLoading = needsObserve && state.groups.isEmpty(),
                     hosts = hosts,
                     selectedHostId = selectedHostId,
                     errorMessage = null,
                 )
             }
 
-            observeHost(selectedHostId)
-            viewModelScope.launch(Dispatchers.IO) {
-                repository.initialize(selectedHostId)
+            if (needsObserve) {
+                observeHost(selectedHostId)
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.initialize(selectedHostId)
+                }
             }
         }
     }
@@ -471,6 +489,7 @@ class SessionsViewModel(
     override fun onCleared() {
         observeJob?.cancel()
         searchDebounceJob?.cancel()
+        _navigateToChat.close()
         super.onCleared()
     }
 }
