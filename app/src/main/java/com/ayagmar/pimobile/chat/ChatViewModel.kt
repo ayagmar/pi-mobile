@@ -451,14 +451,14 @@ class ChatViewModel(
 
     private fun addNotification(event: ExtensionUiRequestEvent) {
         appendNotification(
-            message = event.message.orEmpty(),
+            message = event.message.orEmpty().stripAnsi(),
             type = event.notifyType ?: "info",
         )
     }
 
     private fun updateExtensionStatus(event: ExtensionUiRequestEvent) {
         val key = event.statusKey ?: "default"
-        val text = event.statusText
+        val text = event.statusText?.stripAnsi()
         _uiState.update { state ->
             val newStatuses = state.extensionStatuses.toMutableMap()
             if (text == null) {
@@ -472,7 +472,7 @@ class ChatViewModel(
 
     private fun updateExtensionWidget(event: ExtensionUiRequestEvent) {
         val key = event.widgetKey ?: "default"
-        val lines = event.widgetLines
+        val lines = event.widgetLines?.map { it.stripAnsi() }
         _uiState.update { state ->
             val newWidgets = state.extensionWidgets.toMutableMap()
             if (lines == null) {
@@ -490,7 +490,7 @@ class ChatViewModel(
 
     private fun updateExtensionTitle(event: ExtensionUiRequestEvent) {
         event.title?.let { title ->
-            _uiState.update { it.copy(extensionTitle = title) }
+            _uiState.update { it.copy(extensionTitle = title.stripAnsi()) }
         }
     }
 

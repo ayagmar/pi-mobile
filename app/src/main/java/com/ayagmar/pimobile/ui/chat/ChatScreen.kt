@@ -53,6 +53,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -2305,22 +2306,26 @@ private fun TreeNavigationSheet(
             Column(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
                 tree?.sessionPath?.let { sessionPath ->
                     Text(
-                        text = "Session: ${truncatePath(sessionPath)}",
+                        text = truncatePath(sessionPath),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
                 }
 
-                Row(
+                // Scrollable filter chips to avoid overflow
+                LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    TREE_FILTER_OPTIONS.forEach { (filter, label) ->
-                        val chipLabel = if (filter == selectedFilter) "• $label" else label
-                        AssistChip(
+                    items(
+                        items = TREE_FILTER_OPTIONS,
+                        key = { (filter, _) -> filter },
+                    ) { (filter, label) ->
+                        FilterChip(
+                            selected = filter == selectedFilter,
                             onClick = { onFilterChange(filter) },
-                            label = { Text(chipLabel) },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
                         )
                     }
                 }
@@ -2352,7 +2357,7 @@ private fun TreeNavigationSheet(
 
                     else -> {
                         LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             items(
@@ -2392,38 +2397,76 @@ private fun TreeEntryRow(
     onForkFromEntry: (String) -> Unit,
     onJumpAndContinue: (String) -> Unit,
 ) {
-    val indent = (depth * 12).dp
+    val indent = (depth * 8).dp
+    val isMessage = entry.entryType == "message"
+    val containerColor =
+        when {
+            isCurrent -> MaterialTheme.colorScheme.primaryContainer
+            isMessage -> MaterialTheme.colorScheme.surface
+            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        }
+    val contentColor =
+        when {
+            isCurrent -> MaterialTheme.colorScheme.onPrimaryContainer
+            else -> MaterialTheme.colorScheme.onSurface
+        }
 
-    Card(modifier = Modifier.fillMaxWidth().padding(start = indent)) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(start = indent),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = containerColor,
+            ),
+    ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val label =
-                    buildString {
-                        append(entry.entryType)
-                        entry.role?.let { append(" • $it") }
-                    }
-                Text(label, style = MaterialTheme.typography.labelMedium)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val typeIcon = treeEntryIcon(entry.entryType)
+                    Icon(
+                        imageVector = typeIcon,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = contentColor.copy(alpha = 0.7f),
+                    )
+                    val label =
+                        buildString {
+                            append(entry.entryType.replace('_', ' '))
+                            entry.role?.let { append(" · $it") }
+                        }
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = contentColor.copy(alpha = 0.7f),
+                    )
+                }
 
                 if (isCurrent) {
                     Text(
-                        text = "current",
+                        text = "● current",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
             }
 
-            Text(
-                text = entry.preview,
-                style = MaterialTheme.typography.bodySmall,
-            )
+            if (isMessage) {
+                Text(
+                    text = entry.preview,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    color = contentColor,
+                )
+            }
 
             if (entry.isBookmarked && !entry.label.isNullOrBlank()) {
                 Text(
@@ -2438,23 +2481,47 @@ private fun TreeEntryRow(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val branchLabel = if (childCount > 1) "branch point ($childCount)" else ""
-                Text(
-                    text = branchLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary,
-                )
+                if (childCount > 1) {
+                    Text(
+                        text = "↳ $childCount branches",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { onJumpAndContinue(entry.entryId) }) {
-                        Text("Jump + Continue")
+                Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                    TextButton(
+                        onClick = { onJumpAndContinue(entry.entryId) },
+                        contentPadding =
+                            androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = 8.dp,
+                                vertical = 0.dp,
+                            ),
+                    ) {
+                        Text("Jump", style = MaterialTheme.typography.labelSmall)
                     }
-                    TextButton(onClick = { onForkFromEntry(entry.entryId) }) {
-                        Text("Fork")
+                    TextButton(
+                        onClick = { onForkFromEntry(entry.entryId) },
+                        contentPadding =
+                            androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = 8.dp,
+                                vertical = 0.dp,
+                            ),
+                    ) {
+                        Text("Fork", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
         }
+    }
+}
+
+private fun treeEntryIcon(entryType: String): ImageVector {
+    return when (entryType) {
+        "message" -> Icons.Default.Description
+        "model_change" -> Icons.Default.Refresh
+        "thinking_level_change" -> Icons.Default.Menu
+        else -> Icons.Default.PlayArrow
     }
 }
 
