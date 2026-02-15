@@ -2,7 +2,7 @@
 
 Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 
-> Last updated: 2026-02-15 (All RPC enhancement backlog tasks completed)
+> Last updated: 2026-02-15 (Post-parity hardening started)
 
 ---
 
@@ -35,6 +35,16 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 | 6 | Tree navigation MVP | DONE | `360aa4f` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ `(cd bridge && pnpm run check)` ✅ | Added bridge session-tree endpoint, app bridge request path, and chat tree sheet with fork-from-entry navigation |
 | 7 | Keyboard shortcuts/gestures help screen | DONE | `5ca89ce` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | Added settings help card documenting chat actions, gestures, and key interactions |
 | 8 | README/docs sync | DONE | `5dd4b48` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | README refreshed with current UX capabilities and limitations (including image support) |
+
+---
+
+## Post-parity hardening backlog
+
+| Order | Task | Status | Commit | Verification | Notes |
+|---|---|---|---|---|---|
+| H1 | Tree contract conformance tests | DONE | `e56db90` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ `(cd bridge && pnpm run check)` ✅ | Added bridge/session-indexer tree endpoint tests and app tree parser mapping test |
+| H2 | Lifecycle notification noise controls | TODO | - | - | Add throttling/dedup for lifecycle notifications |
+| H3 | Settings mode controls test coverage | TODO | - | - | Add view-model tests for set mode success/failure rollback |
 
 ---
 

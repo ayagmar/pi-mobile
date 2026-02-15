@@ -197,8 +197,36 @@ Acceptance:
 
 ---
 
+## 6) Post-parity hardening queue (new)
+
+### Task H1 — Tree contract conformance tests
+**Priority:** HIGH
+
+Scope:
+- Add bridge tests for `bridge_get_session_tree` success/error handling.
+- Add session-indexer tests for parent/child tree parsing from fixture sessions.
+- Add app parser test coverage for `parseSessionTreeSnapshot` mapping.
+
+Acceptance:
+- Tests fail on tree payload contract regressions and pass on current schema.
+
+### Task H2 — Lifecycle notification noise controls
+**Priority:** MEDIUM
+
+Scope:
+- Add throttling/dedup logic for lifecycle notifications during high-frequency event bursts.
+- Keep extension errors always visible.
+
+### Task H3 — Settings mode controls test coverage
+**Priority:** MEDIUM
+
+Scope:
+- Add tests for steering/follow-up mode view-model state transitions and rollback on RPC failures.
+
+---
+
 ## Ordered execution queue (next)
 
-All tasks in this plan are complete.
-
-Next recommended step: define a new backlog for post-parity polish/performance.
+1. Task H1 — Tree contract conformance tests ✅ DONE (`e56db90`)
+2. Task H2 — Lifecycle notification noise controls
+3. Task H3 — Settings mode controls test coverage
