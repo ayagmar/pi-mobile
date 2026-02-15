@@ -30,6 +30,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.After
@@ -59,6 +60,7 @@ class ChatViewModelThinkingExpansionTest {
             val controller = FakeSessionController()
             val viewModel = ChatViewModel(sessionController = controller)
             dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
 
             val longThinking = "a".repeat(320)
             controller.emitEvent(
@@ -122,6 +124,7 @@ class ChatViewModelThinkingExpansionTest {
             val controller = FakeSessionController()
             val viewModel = ChatViewModel(sessionController = controller)
             dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
 
             val longThinking = "b".repeat(300)
             controller.emitEvent(
@@ -178,6 +181,7 @@ class ChatViewModelThinkingExpansionTest {
             val controller = FakeSessionController()
             val viewModel = ChatViewModel(sessionController = controller)
             dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
 
             controller.emitEvent(
                 textUpdate(
@@ -231,6 +235,7 @@ class ChatViewModelThinkingExpansionTest {
 
             val viewModel = ChatViewModel(sessionController = controller)
             dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
 
             viewModel.onInputTextChanged("/")
             dispatcher.scheduler.advanceUntilIdle()
@@ -254,6 +259,7 @@ class ChatViewModelThinkingExpansionTest {
             val controller = FakeSessionController()
             val viewModel = ChatViewModel(sessionController = controller)
             dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
 
             viewModel.onInputTextChanged("Please inspect /tmp/file.txt")
             dispatcher.scheduler.advanceUntilIdle()
@@ -274,6 +280,7 @@ class ChatViewModelThinkingExpansionTest {
             val controller = FakeSessionController()
             val viewModel = ChatViewModel(sessionController = controller)
             dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
 
             viewModel.onInputTextChanged("/tr")
             dispatcher.scheduler.advanceUntilIdle()
@@ -293,6 +300,38 @@ class ChatViewModelThinkingExpansionTest {
             assertFalse(viewModel.uiState.value.isCommandPaletteAutoOpened)
         }
 
+    @Test
+    fun initialHistoryLoadsWithWindowAndCanPageOlderMessages() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.messagesPayload = historyWithUserMessages(count = 260)
+
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            val initialState = viewModel.uiState.value
+            assertEquals(120, initialState.timeline.size)
+            assertTrue(initialState.hasOlderMessages)
+            assertEquals(140, initialState.hiddenHistoryCount)
+
+            viewModel.loadOlderMessages()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val secondWindow = viewModel.uiState.value
+            assertEquals(240, secondWindow.timeline.size)
+            assertTrue(secondWindow.hasOlderMessages)
+            assertEquals(20, secondWindow.hiddenHistoryCount)
+
+            viewModel.loadOlderMessages()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val fullWindow = viewModel.uiState.value
+            assertEquals(260, fullWindow.timeline.size)
+            assertFalse(fullWindow.hasOlderMessages)
+            assertEquals(0, fullWindow.hiddenHistoryCount)
+        }
+
     private fun ChatViewModel.assistantItems(): List<ChatTimelineItem.Assistant> =
         uiState.value.timeline.filterIsInstance<ChatTimelineItem.Assistant>()
 
@@ -300,6 +339,21 @@ class ChatViewModelThinkingExpansionTest {
         val items = assistantItems()
         assertEquals(1, items.size)
         return items.single()
+    }
+
+    private fun awaitInitialLoad(viewModel: ChatViewModel) {
+        repeat(INITIAL_LOAD_WAIT_ATTEMPTS) {
+            if (!viewModel.uiState.value.isLoading) {
+                return
+            }
+            Thread.sleep(INITIAL_LOAD_WAIT_STEP_MS)
+        }
+
+        val state = viewModel.uiState.value
+        error(
+            "Timed out waiting for initial chat history load: " +
+                "isLoading=${state.isLoading}, error=${state.errorMessage}, timeline=${state.timeline.size}",
+        )
     }
 
     private fun thinkingUpdate(
@@ -340,6 +394,28 @@ class ChatViewModelThinkingExpansionTest {
         buildJsonObject {
             put("timestamp", timestamp)
         }
+
+    private fun historyWithUserMessages(count: Int): JsonObject =
+        buildJsonObject {
+            put(
+                "messages",
+                buildJsonArray {
+                    repeat(count) { index ->
+                        add(
+                            buildJsonObject {
+                                put("role", "user")
+                                put("content", "message-$index")
+                            },
+                        )
+                    }
+                },
+            )
+        }
+
+    companion object {
+        private const val INITIAL_LOAD_WAIT_ATTEMPTS = 200
+        private const val INITIAL_LOAD_WAIT_STEP_MS = 5L
+    }
 }
 
 private class FakeSessionController : SessionController {
@@ -347,6 +423,7 @@ private class FakeSessionController : SessionController {
 
     var availableCommands: List<SlashCommandInfo> = emptyList()
     var getCommandsCallCount: Int = 0
+    var messagesPayload: JsonObject? = null
 
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = events
     override val connectionState: StateFlow<ConnectionState> = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -368,6 +445,7 @@ private class FakeSessionController : SessionController {
                 type = "response",
                 command = "get_messages",
                 success = true,
+                data = messagesPayload,
             ),
         )
 

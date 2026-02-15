@@ -61,6 +61,8 @@ class ChatViewModel(
     private val recentLifecycleNotificationTimestamps = ArrayDeque<Long>()
     private var lastLifecycleNotificationMessage: String? = null
     private var lastLifecycleNotificationTimestampMs: Long = 0L
+    private var fullTimeline: List<ChatTimelineItem> = emptyList()
+    private var visibleTimelineSize: Int = 0
 
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -306,13 +308,13 @@ class ChatViewModel(
     }
 
     fun toggleToolExpansion(itemId: String) {
-        _uiState.update { state ->
+        updateTimelineState { state ->
             ChatTimelineReducer.toggleToolExpansion(state, itemId)
         }
     }
 
     fun toggleDiffExpansion(itemId: String) {
-        _uiState.update { state ->
+        updateTimelineState { state ->
             ChatTimelineReducer.toggleDiffExpansion(state, itemId)
         }
     }
@@ -659,6 +661,15 @@ class ChatViewModel(
         }
     }
 
+    fun loadOlderMessages() {
+        if (visibleTimelineSize >= fullTimeline.size) {
+            return
+        }
+
+        visibleTimelineSize = minOf(visibleTimelineSize + TIMELINE_PAGE_SIZE, fullTimeline.size)
+        publishVisibleTimeline()
+    }
+
     private fun loadInitialMessages() {
         viewModelScope.launch(Dispatchers.IO) {
             val messagesResult = sessionController.getMessages()
@@ -670,9 +681,14 @@ class ChatViewModel(
 
             _uiState.update { state ->
                 if (messagesResult.isFailure) {
+                    fullTimeline = emptyList()
+                    visibleTimelineSize = 0
                     state.copy(
                         isLoading = false,
                         errorMessage = messagesResult.exceptionOrNull()?.message,
+                        timeline = emptyList(),
+                        hasOlderMessages = false,
+                        hiddenHistoryCount = 0,
                         currentModel = modelInfo,
                         thinkingLevel = thinkingLevel,
                         isStreaming = isStreaming,
@@ -680,14 +696,20 @@ class ChatViewModel(
                 } else {
                     // Record first messages rendered for resume timing
                     PerformanceMetrics.recordFirstMessagesRendered()
+                    val historyTimeline = parseHistoryItems(messagesResult.getOrNull()?.data)
+                    val mergedTimeline =
+                        if (state.isLoading) {
+                            mergeHistoryWithRealtimeTimeline(historyTimeline)
+                        } else {
+                            historyTimeline
+                        }
+                    setInitialTimeline(mergedTimeline)
                     state.copy(
                         isLoading = false,
                         errorMessage = null,
-                        timeline =
-                            ChatTimelineReducer.limitTimeline(
-                                timeline = parseHistoryItems(messagesResult.getOrNull()?.data),
-                                maxTimelineItems = MAX_TIMELINE_ITEMS,
-                            ),
+                        timeline = visibleTimeline(),
+                        hasOlderMessages = hasOlderMessages(),
+                        hiddenHistoryCount = hiddenHistoryCount(),
                         currentModel = modelInfo,
                         thinkingLevel = thinkingLevel,
                         isStreaming = isStreaming,
@@ -741,7 +763,7 @@ class ChatViewModel(
     }
 
     fun toggleThinkingExpansion(itemId: String) {
-        _uiState.update { state ->
+        updateTimelineState { state ->
             ChatTimelineReducer.toggleThinkingExpansion(state, itemId)
         }
     }
@@ -1146,13 +1168,70 @@ class ChatViewModel(
     }
 
     private fun upsertTimelineItem(item: ChatTimelineItem) {
-        _uiState.update { state ->
+        val timelineState = ChatUiState(timeline = fullTimeline)
+        fullTimeline =
             ChatTimelineReducer.upsertTimelineItem(
-                state = state,
+                state = timelineState,
                 item = item,
                 maxTimelineItems = MAX_TIMELINE_ITEMS,
+            ).timeline
+
+        if (visibleTimelineSize == 0) {
+            visibleTimelineSize = minOf(fullTimeline.size, INITIAL_TIMELINE_SIZE)
+        }
+
+        publishVisibleTimeline()
+    }
+
+    private fun setInitialTimeline(history: List<ChatTimelineItem>) {
+        fullTimeline =
+            ChatTimelineReducer.limitTimeline(
+                timeline = history,
+                maxTimelineItems = MAX_TIMELINE_ITEMS,
+            )
+        visibleTimelineSize = minOf(fullTimeline.size, INITIAL_TIMELINE_SIZE)
+    }
+
+    private fun mergeHistoryWithRealtimeTimeline(history: List<ChatTimelineItem>): List<ChatTimelineItem> {
+        val realtimeItems = fullTimeline.filterNot { item -> item.id.startsWith(HISTORY_ITEM_PREFIX) }
+        return if (realtimeItems.isEmpty()) {
+            history
+        } else {
+            history + realtimeItems
+        }
+    }
+
+    private fun updateTimelineState(transform: (ChatUiState) -> ChatUiState) {
+        val timelineState = ChatUiState(timeline = fullTimeline)
+        fullTimeline = transform(timelineState).timeline
+        publishVisibleTimeline()
+    }
+
+    private fun publishVisibleTimeline() {
+        _uiState.update { state ->
+            state.copy(
+                timeline = visibleTimeline(),
+                hasOlderMessages = hasOlderMessages(),
+                hiddenHistoryCount = hiddenHistoryCount(),
             )
         }
+    }
+
+    private fun visibleTimeline(): List<ChatTimelineItem> {
+        if (fullTimeline.isEmpty()) {
+            return emptyList()
+        }
+
+        val visibleCount = visibleTimelineSize.coerceIn(0, fullTimeline.size)
+        return fullTimeline.takeLast(visibleCount)
+    }
+
+    private fun hasOlderMessages(): Boolean {
+        return fullTimeline.size > visibleTimelineSize
+    }
+
+    private fun hiddenHistoryCount(): Int {
+        return (fullTimeline.size - visibleTimelineSize).coerceAtLeast(0)
     }
 
     fun addImage(pendingImage: PendingImage) {
@@ -1193,10 +1272,13 @@ class ChatViewModel(
 
         private val SLASH_COMMAND_TOKEN_REGEX = Regex("^/([a-zA-Z0-9:_-]*)$")
 
+        private const val HISTORY_ITEM_PREFIX = "history-"
         private const val ASSISTANT_UPDATE_THROTTLE_MS = 40L
         private const val TOOL_UPDATE_THROTTLE_MS = 50L
         private const val TOOL_COLLAPSE_THRESHOLD = 400
-        private const val MAX_TIMELINE_ITEMS = 400
+        private const val MAX_TIMELINE_ITEMS = 1_200
+        private const val INITIAL_TIMELINE_SIZE = 120
+        private const val TIMELINE_PAGE_SIZE = 120
         private const val BASH_HISTORY_SIZE = 10
         private const val MAX_NOTIFICATIONS = 6
         private const val LIFECYCLE_NOTIFICATION_WINDOW_MS = 5_000L
@@ -1211,6 +1293,8 @@ data class ChatUiState(
     val isStreaming: Boolean = false,
     val isRetrying: Boolean = false,
     val timeline: List<ChatTimelineItem> = emptyList(),
+    val hasOlderMessages: Boolean = false,
+    val hiddenHistoryCount: Int = 0,
     val inputText: String = "",
     val errorMessage: String? = null,
     val currentModel: ModelInfo? = null,

@@ -101,6 +101,7 @@ private data class ChatCallbacks(
     val onToggleThinkingExpansion: (String) -> Unit,
     val onToggleDiffExpansion: (String) -> Unit,
     val onToggleToolArgumentsExpansion: (String) -> Unit,
+    val onLoadOlderMessages: () -> Unit,
     val onInputTextChanged: (String) -> Unit,
     val onSendPrompt: () -> Unit,
     val onAbort: () -> Unit,
@@ -161,6 +162,7 @@ fun ChatRoute() {
                 onToggleThinkingExpansion = chatViewModel::toggleThinkingExpansion,
                 onToggleDiffExpansion = chatViewModel::toggleDiffExpansion,
                 onToggleToolArgumentsExpansion = chatViewModel::toggleToolArgumentsExpansion,
+                onLoadOlderMessages = chatViewModel::loadOlderMessages,
                 onInputTextChanged = chatViewModel::onInputTextChanged,
                 onSendPrompt = chatViewModel::sendPrompt,
                 onAbort = chatViewModel::abort,
@@ -436,7 +438,10 @@ private fun ChatBody(
     } else {
         ChatTimeline(
             timeline = state.timeline,
+            hasOlderMessages = state.hasOlderMessages,
+            hiddenHistoryCount = state.hiddenHistoryCount,
             expandedToolArguments = state.expandedToolArguments,
+            onLoadOlderMessages = callbacks.onLoadOlderMessages,
             onToggleToolExpansion = callbacks.onToggleToolExpansion,
             onToggleThinkingExpansion = callbacks.onToggleThinkingExpansion,
             onToggleDiffExpansion = callbacks.onToggleDiffExpansion,
@@ -770,7 +775,10 @@ private fun CommandItem(
 @Composable
 private fun ChatTimeline(
     timeline: List<ChatTimelineItem>,
+    hasOlderMessages: Boolean,
+    hiddenHistoryCount: Int,
     expandedToolArguments: Set<String>,
+    onLoadOlderMessages: () -> Unit,
     onToggleToolExpansion: (String) -> Unit,
     onToggleThinkingExpansion: (String) -> Unit,
     onToggleDiffExpansion: (String) -> Unit,
@@ -781,6 +789,17 @@ private fun ChatTimeline(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (hasOlderMessages) {
+            item(key = "load-older-messages") {
+                TextButton(
+                    onClick = onLoadOlderMessages,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Load older messages ($hiddenHistoryCount hidden)")
+                }
+            }
+        }
+
         items(items = timeline, key = { item -> item.id }) { item ->
             when (item) {
                 is ChatTimelineItem.User -> TimelineCard(title = "User", text = item.text)
