@@ -25,7 +25,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 
 | Task | Status | Commit | Verification | Notes |
 |------|--------|--------|--------------|-------|
-| **2.1** File Edit Diff View | `TODO` | - | - | Show unified diff for edit tool calls |
+| **2.1** File Edit Diff View | `DONE` | 653cfe6 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Show unified diff for edit tool calls |
 | **2.2** Bash Tool Execution UI | `TODO` | - | - | Add bash dialog with streaming output |
 | **2.3** Enhanced Tool Argument Display | `TODO` | - | - | Collapsible arguments, tool icons |
 

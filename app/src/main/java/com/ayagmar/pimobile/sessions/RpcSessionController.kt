@@ -4,9 +4,12 @@ import com.ayagmar.pimobile.corenet.ConnectionState
 import com.ayagmar.pimobile.corenet.PiRpcConnection
 import com.ayagmar.pimobile.corenet.PiRpcConnectionConfig
 import com.ayagmar.pimobile.corenet.WebSocketTarget
+import com.ayagmar.pimobile.corerpc.AbortBashCommand
 import com.ayagmar.pimobile.corerpc.AbortCommand
 import com.ayagmar.pimobile.corerpc.AgentEndEvent
 import com.ayagmar.pimobile.corerpc.AgentStartEvent
+import com.ayagmar.pimobile.corerpc.BashCommand
+import com.ayagmar.pimobile.corerpc.BashResult
 import com.ayagmar.pimobile.corerpc.CompactCommand
 import com.ayagmar.pimobile.corerpc.CycleModelCommand
 import com.ayagmar.pimobile.corerpc.CycleThinkingLevelCommand
@@ -381,6 +384,47 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun executeBash(
+        command: String,
+        timeoutMs: Int?,
+    ): Result<BashResult> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val bashCommand =
+                    BashCommand(
+                        id = UUID.randomUUID().toString(),
+                        command = command,
+                        timeoutMs = timeoutMs,
+                    )
+                val response =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = timeoutMs?.toLong() ?: BASH_TIMEOUT_MS,
+                        command = bashCommand,
+                        expectedCommand = BASH_COMMAND,
+                    ).requireSuccess("Failed to execute bash command")
+
+                parseBashResult(response.data)
+            }
+        }
+    }
+
+    override suspend fun abortBash(): Result<Unit> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                sendAndAwaitResponse(
+                    connection = connection,
+                    requestTimeoutMs = requestTimeoutMs,
+                    command = AbortBashCommand(id = UUID.randomUUID().toString()),
+                    expectedCommand = ABORT_BASH_COMMAND,
+                ).requireSuccess("Failed to abort bash command")
+                Unit
+            }
+        }
+    }
+
     private suspend fun clearActiveConnection() {
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
@@ -449,8 +493,11 @@ class RpcSessionController(
         private const val CYCLE_THINKING_COMMAND = "cycle_thinking_level"
         private const val NEW_SESSION_COMMAND = "new_session"
         private const val GET_COMMANDS_COMMAND = "get_commands"
+        private const val BASH_COMMAND = "bash"
+        private const val ABORT_BASH_COMMAND = "abort_bash"
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
+        private const val BASH_TIMEOUT_MS = 60_000L
     }
 }
 
@@ -542,4 +589,13 @@ private fun parseSlashCommands(data: JsonObject?): List<SlashCommandInfo> {
             path = commandObject.stringField("path"),
         )
     }
+}
+
+private fun parseBashResult(data: JsonObject?): BashResult {
+    return BashResult(
+        output = data?.stringField("output") ?: "",
+        exitCode = data?.get("exitCode")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: -1,
+        wasTruncated = data?.booleanField("wasTruncated") ?: false,
+        fullLogPath = data?.stringField("fullLogPath"),
+    )
 }

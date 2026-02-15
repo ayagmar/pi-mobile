@@ -129,6 +129,20 @@ data class GetCommandsCommand(
 ) : RpcCommand
 
 @Serializable
+data class BashCommand(
+    override val id: String? = null,
+    override val type: String = "bash",
+    val command: String,
+    val timeoutMs: Int? = null,
+) : RpcCommand
+
+@Serializable
+data class AbortBashCommand(
+    override val id: String? = null,
+    override val type: String = "abort_bash",
+) : RpcCommand
+
+@Serializable
 data class ImagePayload(
     val type: String = "image",
     val data: String,
@@ -142,4 +156,14 @@ data class SlashCommand(
     val source: String,
     val location: String? = null,
     val path: String? = null,
+)
+
+/**
+ * Result of a bash command execution.
+ */
+data class BashResult(
+    val output: String,
+    val exitCode: Int,
+    val wasTruncated: Boolean,
+    val fullLogPath: String? = null,
 )

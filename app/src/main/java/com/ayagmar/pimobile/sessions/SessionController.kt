@@ -1,6 +1,7 @@
 package com.ayagmar.pimobile.sessions
 
 import com.ayagmar.pimobile.corenet.ConnectionState
+import com.ayagmar.pimobile.corerpc.BashResult
 import com.ayagmar.pimobile.corerpc.RpcIncomingMessage
 import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.coresessions.SessionRecord
@@ -59,6 +60,13 @@ interface SessionController {
     suspend fun newSession(): Result<Unit>
 
     suspend fun getCommands(): Result<List<SlashCommandInfo>>
+
+    suspend fun executeBash(
+        command: String,
+        timeoutMs: Int? = null,
+    ): Result<BashResult>
+
+    suspend fun abortBash(): Result<Unit>
 }
 
 /**
