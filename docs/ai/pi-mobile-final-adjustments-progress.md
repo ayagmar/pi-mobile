@@ -64,7 +64,7 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 | 13 | F2 Reconnect/resync race hardening | DONE | fix(core-net): harden reconnect resync epochs and pending requests |  | ktlint✅ detekt✅ test✅ bridge✅ | Added reconnect epoch gating, cancelled pending request responses on reconnect/disconnect, and synced streaming flag from resync snapshots |
 | 14 | F3 Bridge auth + exposure hardening | DONE | fix(bridge): harden token auth and exposure defaults |  | ktlint✅ detekt✅ test✅ bridge✅ | Added constant-time token hash compare, health endpoint exposure toggle, non-loopback bind warnings, and README security guidance |
 | 15 | F4 Android network security tightening | DONE | fix(android): tighten cleartext policy to tailscale hostnames |  | ktlint✅ detekt✅ test✅ bridge✅ | Scoped cleartext to `localhost` + `*.ts.net`, set `usesCleartextTraffic=false`, and documented MagicDNS/Tailnet assumptions |
-| 16 | F5 Bridge session index scalability | TODO |  |  |  |  |
+| 16 | F5 Bridge session index scalability | DONE | perf(bridge): cache session metadata by stat signature |  | ktlint✅ detekt✅ test✅ bridge✅ | Added session metadata cache keyed by file mtime/size to avoid repeated full file reads for unchanged session indexes |
 
 ---
 
@@ -356,15 +356,33 @@ Notes/blockers:
 - Updated README connect/security guidance to prefer Tailnet MagicDNS hostnames and document scoped cleartext assumptions.
 ```
 
+### 2026-02-15
+
+```text
+Task: F5
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Added session metadata cache in session indexer using file stat signatures (mtime/size).
+- Unchanged session files now skip re-read/re-parse during repeated `bridge_list_sessions` calls.
+- Added regression test proving cached reads are reused and invalidated when a session file changes.
+```
+
 ---
 
 ## Overall completion
 
 - Backlog tasks: 26
-- Backlog done: 15
+- Backlog done: 16
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining (not done): 11
+- Backlog remaining (not done): 10
 - Reference completed items (not counted in backlog): 6
 
 ---
@@ -373,7 +391,7 @@ Notes/blockers:
 
 - [x] Critical UX fixes complete
 - [x] Quick wins complete
-- [ ] Stability/security fixes complete
+- [x] Stability/security fixes complete
 - [ ] Maintainability improvements complete
 - [ ] Theming + Design System complete
 - [ ] Heavy hitters complete (or documented protocol limits)

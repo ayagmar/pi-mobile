@@ -50,16 +50,30 @@ export interface SessionIndexerOptions {
     logger: Logger;
 }
 
+interface CachedSessionMetadata {
+    mtimeMs: number;
+    size: number;
+    entry: SessionIndexEntry | undefined;
+}
+
 export function createSessionIndexer(options: SessionIndexerOptions): SessionIndexer {
     const sessionsRoot = path.resolve(options.sessionsDirectory);
+    const sessionMetadataCache = new Map<string, CachedSessionMetadata>();
 
     return {
         async listSessions(): Promise<SessionIndexGroup[]> {
             const sessionFiles = await findSessionFiles(sessionsRoot, options.logger);
             const sessions: SessionIndexEntry[] = [];
 
+            const sessionFileSet = new Set(sessionFiles);
+            for (const cachedPath of sessionMetadataCache.keys()) {
+                if (!sessionFileSet.has(cachedPath)) {
+                    sessionMetadataCache.delete(cachedPath);
+                }
+            }
+
             for (const sessionFile of sessionFiles) {
-                const entry = await parseSessionFile(sessionFile, options.logger);
+                const entry = await parseSessionFileWithCache(sessionFile, options.logger, sessionMetadataCache);
                 if (!entry) continue;
                 sessions.push(entry);
             }
@@ -155,7 +169,41 @@ async function findSessionFiles(rootDir: string, logger: Logger): Promise<string
     return sessionFiles;
 }
 
-async function parseSessionFile(sessionPath: string, logger: Logger): Promise<SessionIndexEntry | undefined> {
+async function parseSessionFileWithCache(
+    sessionPath: string,
+    logger: Logger,
+    cache: Map<string, CachedSessionMetadata>,
+): Promise<SessionIndexEntry | undefined> {
+    let fileStats: Awaited<ReturnType<typeof fs.stat>>;
+
+    try {
+        fileStats = await fs.stat(sessionPath);
+    } catch (error: unknown) {
+        cache.delete(sessionPath);
+        logger.warn({ sessionPath, error }, "Failed to stat session file");
+        return undefined;
+    }
+
+    const cached = cache.get(sessionPath);
+    if (cached && cached.mtimeMs === fileStats.mtimeMs && cached.size === fileStats.size) {
+        return cached.entry;
+    }
+
+    const entry = await parseSessionFile(sessionPath, fileStats, logger);
+    cache.set(sessionPath, {
+        mtimeMs: fileStats.mtimeMs,
+        size: fileStats.size,
+        entry,
+    });
+
+    return entry;
+}
+
+async function parseSessionFile(
+    sessionPath: string,
+    fileStats: Awaited<ReturnType<typeof fs.stat>>,
+    logger: Logger,
+): Promise<SessionIndexEntry | undefined> {
     let fileContent: string;
 
     try {
@@ -179,8 +227,6 @@ async function parseSessionFile(sessionPath: string, logger: Logger): Promise<Se
         logger.warn({ sessionPath }, "Skipping invalid session header");
         return undefined;
     }
-
-    const fileStats = await fs.stat(sessionPath);
 
     const createdAt = getValidIsoTimestamp(header.timestamp) ?? fileStats.birthtime.toISOString();
     let updatedAt = getValidIsoTimestamp(header.timestamp) ?? fileStats.mtime.toISOString();

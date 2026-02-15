@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createLogger } from "../src/logger.js";
 import { createSessionIndexer } from "../src/session-indexer.js";
@@ -255,6 +255,79 @@ describe("createSessionIndexer", () => {
                 "Session path is outside configured session directory",
             );
         } finally {
+            await fs.rm(tempRoot, { recursive: true, force: true });
+        }
+    });
+
+    it("reuses cached metadata for unchanged session files", async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-session-cache-"));
+        const projectDir = path.join(tempRoot, "--tmp-project-cache--");
+        await fs.mkdir(projectDir, { recursive: true });
+
+        const sessionPath = path.join(projectDir, "2026-02-03T00-00-00-000Z_c1111111.jsonl");
+        await fs.writeFile(
+            sessionPath,
+            [
+                JSON.stringify({
+                    type: "session",
+                    version: 3,
+                    id: "c1111111",
+                    timestamp: "2026-02-03T00:00:00.000Z",
+                    cwd: "/tmp/project-cache",
+                }),
+                JSON.stringify({
+                    type: "session_info",
+                    id: "i1",
+                    timestamp: "2026-02-03T00:00:01.000Z",
+                    name: "Cache Warm",
+                }),
+                JSON.stringify({
+                    type: "message",
+                    id: "m1",
+                    parentId: null,
+                    timestamp: "2026-02-03T00:00:02.000Z",
+                    message: { role: "user", content: "hello" },
+                }),
+            ].join("\n"),
+            "utf-8",
+        );
+
+        const sessionIndexer = createSessionIndexer({
+            sessionsDirectory: tempRoot,
+            logger: createLogger("silent"),
+        });
+
+        const readFileSpy = vi.spyOn(fs, "readFile");
+
+        try {
+            const firstGroups = await sessionIndexer.listSessions();
+            expect(firstGroups[0]?.sessions[0]?.displayName).toBe("Cache Warm");
+            expect(readFileSpy.mock.calls.length).toBeGreaterThan(0);
+
+            readFileSpy.mockClear();
+
+            const secondGroups = await sessionIndexer.listSessions();
+            expect(secondGroups[0]?.sessions[0]?.displayName).toBe("Cache Warm");
+            expect(readFileSpy).not.toHaveBeenCalled();
+
+            await fs.appendFile(
+                sessionPath,
+                `\n${JSON.stringify({
+                    type: "session_info",
+                    id: "i2",
+                    timestamp: "2026-02-03T00:00:03.000Z",
+                    name: "Cache Updated",
+                })}`,
+                "utf-8",
+            );
+
+            readFileSpy.mockClear();
+
+            const thirdGroups = await sessionIndexer.listSessions();
+            expect(thirdGroups[0]?.sessions[0]?.displayName).toBe("Cache Updated");
+            expect(readFileSpy).toHaveBeenCalled();
+        } finally {
+            readFileSpy.mockRestore();
             await fs.rm(tempRoot, { recursive: true, force: true });
         }
     });
