@@ -388,10 +388,30 @@ class ChatViewModel(
             ChatTimelineItem.Assistant(
                 id = itemId,
                 text = update.text,
+                thinking = update.thinking,
+                isThinkingComplete = update.isThinkingComplete,
                 isStreaming = !update.isFinal,
             )
 
-        upsertTimelineItem(nextItem)
+        upsertTimelineItem(nextItem, preserveThinkingState = true)
+    }
+
+    fun toggleThinkingExpansion(itemId: String) {
+        _uiState.update { state ->
+            val existingIndex = state.timeline.indexOfFirst { it.id == itemId }
+            if (existingIndex < 0) return@update state
+
+            val existing = state.timeline[existingIndex]
+            if (existing !is ChatTimelineItem.Assistant) return@update state
+
+            val updatedTimeline = state.timeline.toMutableList()
+            updatedTimeline[existingIndex] =
+                existing.copy(
+                    isThinkingExpanded = !existing.isThinkingExpanded,
+                )
+
+            state.copy(timeline = updatedTimeline)
+        }
     }
 
     private fun handleToolStart(event: ToolExecutionStartEvent) {
@@ -444,7 +464,10 @@ class ChatViewModel(
         upsertTimelineItem(nextItem)
     }
 
-    private fun upsertTimelineItem(item: ChatTimelineItem) {
+    private fun upsertTimelineItem(
+        item: ChatTimelineItem,
+        preserveThinkingState: Boolean = false,
+    ) {
         _uiState.update { state ->
             val existingIndex = state.timeline.indexOfFirst { existing -> existing.id == item.id }
             val updatedTimeline =
@@ -456,6 +479,18 @@ class ChatViewModel(
                                 existing is ChatTimelineItem.Tool && item is ChatTimelineItem.Tool -> {
                                     // Preserve user toggled expansion state across streaming updates.
                                     item.copy(isCollapsed = existing.isCollapsed)
+                                }
+                                existing is ChatTimelineItem.Assistant &&
+                                    item is ChatTimelineItem.Assistant &&
+                                    preserveThinkingState -> {
+                                    // Preserve thinking expansion state and collapse new thinking if long.
+                                    val shouldCollapse =
+                                        item.thinking != null &&
+                                            item.thinking.length > THINKING_COLLAPSE_THRESHOLD &&
+                                            !existing.isThinkingExpanded
+                                    item.copy(
+                                        isThinkingExpanded = existing.isThinkingExpanded && shouldCollapse,
+                                    )
                                 }
                                 else -> item
                             }
@@ -470,6 +505,7 @@ class ChatViewModel(
 
     companion object {
         private const val TOOL_COLLAPSE_THRESHOLD = 400
+        private const val THINKING_COLLAPSE_THRESHOLD = 280
     }
 }
 
@@ -538,6 +574,9 @@ sealed interface ChatTimelineItem {
     data class Assistant(
         override val id: String,
         val text: String,
+        val thinking: String? = null,
+        val isThinkingExpanded: Boolean = false,
+        val isThinkingComplete: Boolean = false,
         val isStreaming: Boolean,
     ) : ChatTimelineItem
 
@@ -575,9 +614,12 @@ private fun parseHistoryItems(data: JsonObject?): List<ChatTimelineItem> {
 
             "assistant" -> {
                 val text = extractAssistantText(message["content"])
+                val thinking = extractAssistantThinking(message["content"])
                 ChatTimelineItem.Assistant(
                     id = "history-assistant-$index",
                     text = text,
+                    thinking = thinking,
+                    isThinkingComplete = thinking != null,
                     isStreaming = false,
                 )
             }
@@ -630,6 +672,21 @@ private fun extractAssistantText(content: JsonElement?): String {
                 null
             }
         }.joinToString("\n")
+}
+
+private fun extractAssistantThinking(content: JsonElement?): String? {
+    val contentArray = runCatching { content?.jsonArray }.getOrNull() ?: return null
+    val thinkingBlocks =
+        contentArray
+            .mapNotNull { block ->
+                val blockObject = block.jsonObject
+                if (blockObject.stringField("type") == "thinking") {
+                    blockObject.stringField("thinking")
+                } else {
+                    null
+                }
+            }
+    return thinkingBlocks.takeIf { it.isNotEmpty() }?.joinToString("\n")
 }
 
 private fun extractToolOutput(source: JsonObject?): String {

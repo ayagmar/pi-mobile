@@ -33,6 +33,7 @@ data class AssistantMessageEvent(
     val delta: String? = null,
     val content: String? = null,
     val partial: JsonObject? = null,
+    val thinking: String? = null,
 )
 
 @Serializable

@@ -50,6 +50,7 @@ import com.ayagmar.pimobile.sessions.ModelInfo
 
 private data class ChatCallbacks(
     val onToggleToolExpansion: (String) -> Unit,
+    val onToggleThinkingExpansion: (String) -> Unit,
     val onInputTextChanged: (String) -> Unit,
     val onSendPrompt: () -> Unit,
     val onAbort: () -> Unit,
@@ -72,6 +73,7 @@ fun ChatRoute() {
         remember {
             ChatCallbacks(
                 onToggleToolExpansion = chatViewModel::toggleToolExpansion,
+                onToggleThinkingExpansion = chatViewModel::toggleThinkingExpansion,
                 onInputTextChanged = chatViewModel::onInputTextChanged,
                 onSendPrompt = chatViewModel::sendPrompt,
                 onAbort = chatViewModel::abort,
@@ -213,6 +215,7 @@ private fun ChatBody(
         ChatTimeline(
             timeline = state.timeline,
             onToggleToolExpansion = callbacks.onToggleToolExpansion,
+            onToggleThinkingExpansion = callbacks.onToggleThinkingExpansion,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -420,6 +423,7 @@ private fun NotificationsDisplay(
 private fun ChatTimeline(
     timeline: List<ChatTimelineItem>,
     onToggleToolExpansion: (String) -> Unit,
+    onToggleThinkingExpansion: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -430,8 +434,10 @@ private fun ChatTimeline(
             when (item) {
                 is ChatTimelineItem.User -> TimelineCard(title = "User", text = item.text)
                 is ChatTimelineItem.Assistant -> {
-                    val title = if (item.isStreaming) "Assistant (streaming)" else "Assistant"
-                    TimelineCard(title = title, text = item.text)
+                    AssistantCard(
+                        item = item,
+                        onToggleThinkingExpansion = onToggleThinkingExpansion,
+                    )
                 }
 
                 is ChatTimelineItem.Tool -> {
@@ -463,6 +469,92 @@ private fun TimelineCard(
                 text = text.ifBlank { "(empty)" },
                 style = MaterialTheme.typography.bodyMedium,
             )
+        }
+    }
+}
+
+@Composable
+private fun AssistantCard(
+    item: ChatTimelineItem.Assistant,
+    onToggleThinkingExpansion: (String) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val title = if (item.isStreaming) "Assistant (streaming)" else "Assistant"
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+            )
+
+            Text(
+                text = item.text.ifBlank { "(empty)" },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            ThinkingBlock(
+                thinking = item.thinking,
+                isThinkingComplete = item.isThinkingComplete,
+                isThinkingExpanded = item.isThinkingExpanded,
+                itemId = item.id,
+                onToggleThinkingExpansion = onToggleThinkingExpansion,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThinkingBlock(
+    thinking: String?,
+    isThinkingComplete: Boolean,
+    isThinkingExpanded: Boolean,
+    itemId: String,
+    onToggleThinkingExpansion: (String) -> Unit,
+) {
+    if (thinking == null) return
+
+    val shouldCollapse = thinking.length > THINKING_COLLAPSE_THRESHOLD
+    val displayThinking =
+        if (!isThinkingExpanded && shouldCollapse) {
+            thinking.take(THINKING_COLLAPSE_THRESHOLD) + "…"
+        } else {
+            thinking
+        }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors =
+            androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = if (isThinkingComplete) "Thinking" else "Thinking…",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = displayThinking,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            if (shouldCollapse || isThinkingExpanded) {
+                TextButton(
+                    onClick = { onToggleThinkingExpansion(itemId) },
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    Text(
+                        if (isThinkingExpanded) "Show less" else "Show more",
+                    )
+                }
+            }
         }
     }
 }
@@ -766,3 +858,4 @@ private fun ExtensionStatuses(statuses: Map<String, String>) {
 }
 
 private const val COLLAPSED_OUTPUT_LENGTH = 280
+private const val THINKING_COLLAPSE_THRESHOLD = 280
