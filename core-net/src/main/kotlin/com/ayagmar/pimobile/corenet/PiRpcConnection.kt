@@ -44,6 +44,7 @@ class PiRpcConnection(
     private val requestIdFactory: () -> String = { UUID.randomUUID().toString() },
 ) {
     private val lifecycleMutex = Mutex()
+    private val reconnectSyncMutex = Mutex()
     private val pendingResponses = ConcurrentHashMap<String, CompletableDeferred<RpcResponse>>()
     private val bridgeChannels = ConcurrentHashMap<String, Channel<BridgeMessage>>()
 
@@ -63,6 +64,9 @@ class PiRpcConnection(
     private var connectionMonitorJob: Job? = null
     private var activeConfig: PiRpcConnectionConfig? = null
 
+    @Volatile
+    private var lifecycleEpoch: Long = 0
+
     val rpcEvents: SharedFlow<RpcIncomingMessage> = _rpcEvents
     val bridgeEvents: SharedFlow<BridgeMessage> = _bridgeEvents
     val resyncEvents: SharedFlow<RpcResyncSnapshot> = _resyncEvents
@@ -70,10 +74,13 @@ class PiRpcConnection(
 
     suspend fun connect(config: PiRpcConnectionConfig) {
         val resolvedConfig = config.resolveClientId()
-        lifecycleMutex.withLock {
-            activeConfig = resolvedConfig
-            startBackgroundJobs()
-        }
+        val connectionEpoch =
+            lifecycleMutex.withLock {
+                activeConfig = resolvedConfig
+                lifecycleEpoch += 1
+                startBackgroundJobs()
+                lifecycleEpoch
+            }
 
         val helloChannel = bridgeChannel(bridgeChannels, BRIDGE_HELLO_TYPE)
 
@@ -98,22 +105,20 @@ class PiRpcConnection(
             )
         }
 
-        resync()
+        resyncIfActive(connectionEpoch)
     }
 
     suspend fun disconnect() {
         lifecycleMutex.withLock {
             activeConfig = null
+            lifecycleEpoch += 1
             inboundJob?.cancel()
             connectionMonitorJob?.cancel()
             inboundJob = null
             connectionMonitorJob = null
         }
 
-        pendingResponses.values.forEach { deferred ->
-            deferred.cancel()
-        }
-        pendingResponses.clear()
+        cancelPendingResponses()
 
         bridgeChannels.values.forEach { channel ->
             channel.close()
@@ -167,14 +172,7 @@ class PiRpcConnection(
     }
 
     suspend fun resync(): RpcResyncSnapshot {
-        val stateResponse = requestState()
-        val messagesResponse = requestMessages()
-
-        val snapshot =
-            RpcResyncSnapshot(
-                stateResponse = stateResponse,
-                messagesResponse = messagesResponse,
-            )
+        val snapshot = buildResyncSnapshot()
         _resyncEvents.emit(snapshot)
         return snapshot
     }
@@ -195,11 +193,19 @@ class PiRpcConnection(
                     var previousState = connectionState.value
                     connectionState.collect { currentState ->
                         if (
+                            currentState == ConnectionState.RECONNECTING ||
+                            currentState == ConnectionState.DISCONNECTED
+                        ) {
+                            cancelPendingResponses()
+                        }
+
+                        if (
                             previousState == ConnectionState.RECONNECTING &&
                             currentState == ConnectionState.CONNECTED
                         ) {
+                            val reconnectEpoch = lifecycleEpoch
                             runCatching {
-                                synchronizeAfterReconnect()
+                                synchronizeAfterReconnect(reconnectEpoch)
                             }
                         }
                         previousState = currentState
@@ -241,27 +247,70 @@ class PiRpcConnection(
         }
     }
 
-    private suspend fun synchronizeAfterReconnect() {
-        val config = activeConfig ?: return
+    private suspend fun synchronizeAfterReconnect(expectedEpoch: Long) {
+        reconnectSyncMutex.withLock {
+            val config =
+                if (isEpochActive(expectedEpoch)) {
+                    activeConfig
+                } else {
+                    null
+                }
 
-        val helloChannel = bridgeChannel(bridgeChannels, BRIDGE_HELLO_TYPE)
-        val hello =
-            withTimeout(config.requestTimeoutMs) {
-                helloChannel.receive()
+            if (config != null) {
+                val helloChannel = bridgeChannel(bridgeChannels, BRIDGE_HELLO_TYPE)
+                val hello =
+                    withTimeout(config.requestTimeoutMs) {
+                        helloChannel.receive()
+                    }
+                val resumed = hello.payload.booleanField("resumed") ?: false
+                val helloCwd = hello.payload.stringField("cwd")
+
+                if (isEpochActive(expectedEpoch)) {
+                    if (!resumed || helloCwd != config.cwd) {
+                        ensureBridgeControl(
+                            transport = transport,
+                            json = json,
+                            channels = bridgeChannels,
+                            config = config,
+                        )
+                    }
+
+                    resyncIfActive(expectedEpoch)
+                }
             }
-        val resumed = hello.payload.booleanField("resumed") ?: false
-        val helloCwd = hello.payload.stringField("cwd")
+        }
+    }
 
-        if (!resumed || helloCwd != config.cwd) {
-            ensureBridgeControl(
-                transport = transport,
-                json = json,
-                channels = bridgeChannels,
-                config = config,
-            )
+    private suspend fun buildResyncSnapshot(): RpcResyncSnapshot {
+        val stateResponse = requestState()
+        val messagesResponse = requestMessages()
+        return RpcResyncSnapshot(
+            stateResponse = stateResponse,
+            messagesResponse = messagesResponse,
+        )
+    }
+
+    private suspend fun resyncIfActive(expectedEpoch: Long): RpcResyncSnapshot? {
+        if (isEpochActive(expectedEpoch)) {
+            val snapshot = buildResyncSnapshot()
+            if (isEpochActive(expectedEpoch)) {
+                _resyncEvents.emit(snapshot)
+                return snapshot
+            }
         }
 
-        resync()
+        return null
+    }
+
+    private fun isEpochActive(expectedEpoch: Long): Boolean {
+        return lifecycleEpoch == expectedEpoch && activeConfig != null
+    }
+
+    private fun cancelPendingResponses() {
+        pendingResponses.values.forEach { deferred ->
+            deferred.cancel()
+        }
+        pendingResponses.clear()
     }
 
     private suspend fun requestResponse(command: RpcCommand): RpcResponse {

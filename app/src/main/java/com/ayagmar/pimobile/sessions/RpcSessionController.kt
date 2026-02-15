@@ -92,6 +92,7 @@ class RpcSessionController(
     private var rpcEventsJob: Job? = null
     private var connectionStateJob: Job? = null
     private var streamingMonitorJob: Job? = null
+    private var resyncMonitorJob: Job? = null
 
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = _rpcEvents
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -765,9 +766,11 @@ class RpcSessionController(
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
         streamingMonitorJob?.cancel()
+        resyncMonitorJob?.cancel()
         rpcEventsJob = null
         connectionStateJob = null
         streamingMonitorJob = null
+        resyncMonitorJob = null
 
         activeConnection?.disconnect()
         activeConnection = null
@@ -782,6 +785,7 @@ class RpcSessionController(
         rpcEventsJob?.cancel()
         connectionStateJob?.cancel()
         streamingMonitorJob?.cancel()
+        resyncMonitorJob?.cancel()
 
         rpcEventsJob =
             scope.launch {
@@ -805,6 +809,14 @@ class RpcSessionController(
                         is AgentEndEvent -> _isStreaming.value = false
                         else -> Unit
                     }
+                }
+            }
+
+        resyncMonitorJob =
+            scope.launch {
+                connection.resyncEvents.collect { snapshot ->
+                    val isStreaming = snapshot.stateResponse.data.booleanField("isStreaming") ?: false
+                    _isStreaming.value = isStreaming
                 }
             }
     }

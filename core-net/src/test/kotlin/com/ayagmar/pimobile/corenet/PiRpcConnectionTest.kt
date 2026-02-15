@@ -108,6 +108,40 @@ class PiRpcConnectionTest {
             connection.disconnect()
         }
 
+    @Test
+    fun `in-flight request is cancelled when transport enters reconnecting`() =
+        runBlocking {
+            val transport = FakeSocketTransport()
+            transport.onSend = { outgoing -> transport.respondToOutgoing(outgoing) }
+            val connection = PiRpcConnection(transport = transport)
+
+            connection.connect(
+                PiRpcConnectionConfig(
+                    target = WebSocketTarget(url = "ws://127.0.0.1:3000/ws"),
+                    cwd = "/tmp/project-d",
+                    clientId = "client-d",
+                    requestTimeoutMs = 5_000,
+                ),
+            )
+
+            transport.onSend = { outgoing -> transport.respondToBridgeControlOnly(outgoing) }
+
+            val pendingRequest =
+                async {
+                    runCatching {
+                        connection.requestState()
+                    }
+                }
+
+            delay(20)
+            transport.setConnectionState(ConnectionState.RECONNECTING)
+
+            val requestResult = withTimeout(1_000) { pendingRequest.await() }
+            assertTrue(requestResult.isFailure)
+
+            connection.disconnect()
+        }
+
     private class FakeSocketTransport : SocketTransport {
         private val json = Json { ignoreUnknownKeys = true }
 
@@ -163,6 +197,10 @@ class PiRpcConnectionTest {
             )
         }
 
+        fun setConnectionState(state: ConnectionState) {
+            connectionState.value = state
+        }
+
         fun clearSentMessages() {
             sentMessages.clear()
         }
@@ -205,6 +243,20 @@ class PiRpcConnectionTest {
                     id = payload["id"]?.toString()?.trim('"').orEmpty(),
                     command = "get_messages",
                 )
+            }
+        }
+
+        suspend fun respondToBridgeControlOnly(message: String) {
+            val envelope = json.parseToJsonElement(message).jsonObject
+            val channel = envelope["channel"]?.toString()?.trim('"')
+            if (channel != "bridge") {
+                return
+            }
+
+            val payload = parsePayload(message)
+            when (payload["type"]?.toString()?.trim('"')) {
+                "bridge_set_cwd" -> emitBridge(buildJsonObject { put("type", "bridge_cwd_set") })
+                "bridge_acquire_control" -> emitBridge(buildJsonObject { put("type", "bridge_control_acquired") })
             }
         }
 
