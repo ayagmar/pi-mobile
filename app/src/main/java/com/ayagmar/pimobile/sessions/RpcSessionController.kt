@@ -493,7 +493,10 @@ class RpcSessionController(
                         expectedCommand = SET_MODEL_COMMAND,
                     ).requireSuccess("Failed to set model")
 
-                parseModelInfo(response.data)
+                // set_model returns the model object directly (without thinkingLevel).
+                // Refresh state to get the effective thinking level.
+                val refreshedState = connection.requestState().requireSuccess("Failed to refresh state after set_model")
+                parseModelInfo(refreshedState.data) ?: parseModelInfo(response.data)
             }
         }
     }
@@ -657,7 +660,8 @@ private fun parseForkableMessages(data: JsonObject?): List<ForkableMessage> {
     return messages.mapNotNull { messageElement ->
         val messageObject = messageElement.jsonObject
         val entryId = messageObject.stringField("entryId") ?: return@mapNotNull null
-        val preview = messageObject.stringField("preview") ?: "(no preview)"
+        // pi RPC currently returns "text" for fork messages; keep "preview" as fallback.
+        val preview = messageObject.stringField("text") ?: messageObject.stringField("preview") ?: "(no preview)"
         val timestamp = messageObject["timestamp"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
 
         ForkableMessage(
@@ -679,16 +683,17 @@ private fun JsonObject?.booleanField(fieldName: String): Boolean? {
 }
 
 private fun parseModelInfo(data: JsonObject?): ModelInfo? {
-    return data?.let {
-        it["model"]?.jsonObject?.let { model ->
-            ModelInfo(
-                id = model.stringField("id") ?: "unknown",
-                name = model.stringField("name") ?: "Unknown Model",
-                provider = model.stringField("provider") ?: "unknown",
-                thinkingLevel = data.stringField("thinkingLevel") ?: "off",
-            )
-        }
-    }
+    val model =
+        data?.get("model")?.jsonObject
+            ?: data?.takeIf { it.stringField("id") != null }
+            ?: return null
+
+    return ModelInfo(
+        id = model.stringField("id") ?: "unknown",
+        name = model.stringField("name") ?: "Unknown Model",
+        provider = model.stringField("provider") ?: "unknown",
+        thinkingLevel = data.stringField("thinkingLevel") ?: "off",
+    )
 }
 
 private fun parseSlashCommands(data: JsonObject?): List<SlashCommandInfo> {
@@ -711,24 +716,79 @@ private fun parseBashResult(data: JsonObject?): BashResult {
     return BashResult(
         output = data?.stringField("output") ?: "",
         exitCode = data?.get("exitCode")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: -1,
-        wasTruncated = data?.booleanField("wasTruncated") ?: false,
-        fullLogPath = data?.stringField("fullLogPath"),
+        // pi RPC uses "truncated" and "fullOutputPath".
+        wasTruncated = data?.booleanField("truncated") ?: data?.booleanField("wasTruncated") ?: false,
+        fullLogPath = data?.stringField("fullOutputPath") ?: data?.stringField("fullLogPath"),
     )
 }
 
-@Suppress("MagicNumber")
+@Suppress("MagicNumber", "LongMethod")
 private fun parseSessionStats(data: JsonObject?): SessionStats {
+    val tokens = data?.get("tokens")?.jsonObject
+
+    val inputTokens =
+        coalesceLong(
+            tokens?.longField("input"),
+            data?.longField("inputTokens"),
+        )
+    val outputTokens =
+        coalesceLong(
+            tokens?.longField("output"),
+            data?.longField("outputTokens"),
+        )
+    val cacheReadTokens =
+        coalesceLong(
+            tokens?.longField("cacheRead"),
+            data?.longField("cacheReadTokens"),
+        )
+    val cacheWriteTokens =
+        coalesceLong(
+            tokens?.longField("cacheWrite"),
+            data?.longField("cacheWriteTokens"),
+        )
+    val totalCost =
+        coalesceDouble(
+            data?.doubleField("cost"),
+            data?.doubleField("totalCost"),
+        )
+
+    val messageCount =
+        coalesceInt(
+            data?.intField("totalMessages"),
+            data?.intField("messageCount"),
+        )
+    val userMessageCount =
+        coalesceInt(
+            data?.intField("userMessages"),
+            data?.intField("userMessageCount"),
+        )
+    val assistantMessageCount =
+        coalesceInt(
+            data?.intField("assistantMessages"),
+            data?.intField("assistantMessageCount"),
+        )
+    val toolResultCount =
+        coalesceInt(
+            data?.intField("toolResults"),
+            data?.intField("toolResultCount"),
+        )
+    val sessionPath =
+        coalesceString(
+            data?.stringField("sessionFile"),
+            data?.stringField("sessionPath"),
+        )
+
     return SessionStats(
-        inputTokens = data?.longField("inputTokens") ?: 0L,
-        outputTokens = data?.longField("outputTokens") ?: 0L,
-        cacheReadTokens = data?.longField("cacheReadTokens") ?: 0L,
-        cacheWriteTokens = data?.longField("cacheWriteTokens") ?: 0L,
-        totalCost = data?.doubleField("totalCost") ?: 0.0,
-        messageCount = data?.intField("messageCount") ?: 0,
-        userMessageCount = data?.intField("userMessageCount") ?: 0,
-        assistantMessageCount = data?.intField("assistantMessageCount") ?: 0,
-        toolResultCount = data?.intField("toolResultCount") ?: 0,
-        sessionPath = data?.stringField("sessionPath"),
+        inputTokens = inputTokens,
+        outputTokens = outputTokens,
+        cacheReadTokens = cacheReadTokens,
+        cacheWriteTokens = cacheWriteTokens,
+        totalCost = totalCost,
+        messageCount = messageCount,
+        userMessageCount = userMessageCount,
+        assistantMessageCount = assistantMessageCount,
+        toolResultCount = toolResultCount,
+        sessionPath = sessionPath,
     )
 }
 
@@ -738,17 +798,38 @@ private fun parseAvailableModels(data: JsonObject?): List<AvailableModel> {
     return models.mapNotNull { modelElement ->
         val modelObject = modelElement.jsonObject
         val id = modelObject.stringField("id") ?: return@mapNotNull null
+        val cost = modelObject["cost"]?.jsonObject
+
         AvailableModel(
             id = id,
             name = modelObject.stringField("name") ?: id,
             provider = modelObject.stringField("provider") ?: "unknown",
             contextWindow = modelObject.intField("contextWindow"),
-            maxOutputTokens = modelObject.intField("maxOutputTokens"),
-            supportsThinking = modelObject.booleanField("supportsThinking") ?: false,
-            inputCostPer1k = modelObject.doubleField("inputCostPer1k"),
-            outputCostPer1k = modelObject.doubleField("outputCostPer1k"),
+            maxOutputTokens = modelObject.intField("maxTokens") ?: modelObject.intField("maxOutputTokens"),
+            supportsThinking =
+                modelObject.booleanField("reasoning")
+                    ?: modelObject.booleanField("supportsThinking")
+                    ?: false,
+            inputCostPer1k = cost?.doubleField("input") ?: modelObject.doubleField("inputCostPer1k"),
+            outputCostPer1k = cost?.doubleField("output") ?: modelObject.doubleField("outputCostPer1k"),
         )
     }
+}
+
+private fun coalesceLong(vararg values: Long?): Long {
+    return values.firstOrNull { it != null } ?: 0L
+}
+
+private fun coalesceInt(vararg values: Int?): Int {
+    return values.firstOrNull { it != null } ?: 0
+}
+
+private fun coalesceDouble(vararg values: Double?): Double {
+    return values.firstOrNull { it != null } ?: 0.0
+}
+
+private fun coalesceString(vararg values: String?): String? {
+    return values.firstOrNull { !it.isNullOrBlank() }
 }
 
 private fun JsonObject?.longField(fieldName: String): Long? {
