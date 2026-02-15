@@ -107,20 +107,28 @@ class ChatViewModel(
     }
 
     fun sendPrompt() {
-        val message = _uiState.value.inputText.trim()
-        if (message.isEmpty()) return
+        val currentState = _uiState.value
+        val message = currentState.inputText.trim()
+        val pendingImages = currentState.pendingImages
+        if (message.isEmpty() && pendingImages.isEmpty()) return
 
         // Record prompt send for TTFT tracking
         PerformanceMetrics.recordPromptSend()
         hasRecordedFirstToken = false
 
-        val images = _uiState.value.pendingImages
-
         viewModelScope.launch {
             val imagePayloads =
-                images.mapNotNull { pending ->
+                pendingImages.mapNotNull { pending ->
                     imageEncoder?.encodeToPayload(pending)
                 }
+
+            if (message.isEmpty() && imagePayloads.isEmpty()) {
+                _uiState.update {
+                    it.copy(errorMessage = "Unable to attach image. Please try again.")
+                }
+                return@launch
+            }
+
             _uiState.update { it.copy(inputText = "", pendingImages = emptyList(), errorMessage = null) }
             val result = sessionController.sendPrompt(message, imagePayloads)
             if (result.isFailure) {
