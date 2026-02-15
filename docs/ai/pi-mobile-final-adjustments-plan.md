@@ -31,25 +31,6 @@ Manual smoke checklist (UI/protocol tasks):
 - new session from Sessions tab creates + navigates correctly
 - chat auto-scrolls to latest message during streaming
 
-### C4 — Persistent bridge connection (architectural change)
-**Why:** Currently the app connects to bridge on-demand per session. This causes friction when:
-- Creating new session (no active connection)
-- Switching between sessions quickly
-- Background/resume scenarios
-
-**User suggestion:** "Shouldn't we establish connection to bridge when we load the application?"
-
-**Primary files:**
-- `app/src/main/java/com/ayagmar/pimobile/sessions/RpcSessionController.kt`
-- `app/src/main/java/com/ayagmar/pimobile/di/AppServices.kt`
-- `app/src/main/java/com/ayagmar/pimobile/ui/PiMobileApp.kt`
-
-**Acceptance:**
-- Bridge connection established on app start (if host configured)
-- Multiple sessions can share one bridge connection
-- `newSession()`, `resumeSession()` just send commands over existing connection
-- Proper lifecycle management (disconnect on app kill, reconnect on network issues)
-
 ---
 
 ## 1) Critical UX fixes (immediate)
@@ -71,6 +52,22 @@ Manual smoke checklist (UI/protocol tasks):
 - New session creation shows success/loading state, not error
 - Auto-navigates to chat with new session active
 - Works regardless of whether a session was previously resumed
+
+---
+
+### C4 — Persistent bridge connection (architectural fix for C1)
+**Why:** app currently connects on-demand per session; this causes friction for new session, rapid switching, and background/resume.
+
+**Primary files:**
+- `app/src/main/java/com/ayagmar/pimobile/sessions/RpcSessionController.kt`
+- `app/src/main/java/com/ayagmar/pimobile/di/AppServices.kt` (or replacement DI graph)
+- `app/src/main/java/com/ayagmar/pimobile/ui/PiMobileApp.kt`
+
+**Acceptance:**
+- bridge connection established early when host context is available
+- `newSession()` and `resumeSession()` reuse the active connection/session control flow
+- robust lifecycle behavior (foreground/background/network reconnect)
+- C1 moves from quick patch behavior to durable architecture
 
 ---
 
@@ -419,30 +416,31 @@ Manual smoke checklist (UI/protocol tasks):
 ## Ordered execution queue (strict)
 
 1. C1 Fix "New Session" error message bug
-2. C2 Compact chat header (stop blocking streaming view)
-3. C3 Flatten directory explorer (improve CWD browsing UX)
-4. Q1 image-only send fix
-5. Q2 full tree filters (`all`)
-6. Q3 command palette built-in parity layer
-7. Q4 global collapse/expand controls
-8. Q5 live frame metrics wiring
-9. Q6 transport preference setting parity
-10. Q7 queue inspector UX for pending steer/follow-up
-11. F1 bridge event isolation + lock correctness
-12. F2 reconnect/resync hardening
-13. F3 bridge auth/exposure hardening
-14. F4 Android network security tightening
-15. F5 bridge session index scalability
-16. M1 replace service locator with DI
-17. M2 split god classes (architecture hygiene)
-18. M3 unify streaming/backpressure runtime pipeline
-19. M4 tighten static analysis rules
-20. T1 Centralized theme architecture (PiMobileTheme)
-21. T2 Component design system
-22. H1 true `/tree` parity
-23. H2 session parsing alignment with Pi internals
-24. H3 incremental history loading strategy
-25. H4 extension-ize selected workflows
+2. C4 Persistent bridge connection (architectural fix for C1)
+3. C2 Compact chat header (stop blocking streaming view)
+4. C3 Flatten directory explorer (improve CWD browsing UX)
+5. Q1 image-only send fix
+6. Q2 full tree filters (`all`)
+7. Q3 command palette built-in parity layer
+8. Q4 global collapse/expand controls
+9. Q5 live frame metrics wiring
+10. Q6 transport preference setting parity
+11. Q7 queue inspector UX for pending steer/follow-up
+12. F1 bridge event isolation + lock correctness
+13. F2 reconnect/resync hardening
+14. F3 bridge auth/exposure hardening
+15. F4 Android network security tightening
+16. F5 bridge session index scalability
+17. M1 replace service locator with DI
+18. M2 split god classes (architecture hygiene)
+19. M3 unify streaming/backpressure runtime pipeline
+20. M4 tighten static analysis rules
+21. T1 Centralized theme architecture (PiMobileTheme)
+22. T2 Component design system
+23. H1 true `/tree` parity
+24. H2 session parsing alignment with Pi internals
+25. H3 incremental history loading strategy
+26. H4 extension-ize selected workflows
 
 ---
 

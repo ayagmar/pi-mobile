@@ -35,10 +35,10 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 1 | C1 Fix "New Session" error message bug | DONE (partial) | fix(sessions): make New Session work + add flat view toggle | e81d27f | Quick fix implemented; needs C4 for proper architecture |
-| 2 | C2 Compact chat header | TODO |  |  |  | Blocks streaming view, needs collapse/minimal mode |
-| 3 | C3 Flatten directory explorer | DONE | fix(sessions): make New Session work + add flat view toggle | e81d27f | "All" / "Tree" toggle implemented |
-| 4 | C4 Persistent bridge connection | TODO |  |  |  | Architectural change; establish connection on app start |
+| 1 | C1 Fix "New Session" error message bug | DONE | fix(sessions): connect before new_session + navigate cleanly |  | ktlint✅ detekt✅ test✅ bridge✅ | Finalized via C4 connection architecture (no more forced resume hack) |
+| 2 | C4 Persistent bridge connection (architectural fix for C1) | DONE | feat(sessions): persist/reuse bridge connection across new/resume |  | ktlint✅ detekt✅ test✅ bridge✅ | Added `ensureConnected`, warmup on host/session load, and activity teardown disconnect |
+| 3 | C2 Compact chat header | DONE | feat(chat): compact header during streaming + keep model access |  | ktlint✅ detekt✅ test✅ bridge✅ | Streaming mode now hides non-essential header actions and uses compact model/thinking controls |
+| 4 | C3 Flatten directory explorer | DONE | fix(sessions): make New Session work + add flat view toggle | e81d27f |  | "All" / "Tree" toggle implemented |
 
 ---
 
@@ -46,13 +46,13 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 4 | Q1 Fix image-only prompt mismatch | TODO |  |  |  |  |
-| 5 | Q2 Add full tree filters (`all` included) | TODO |  |  |  |  |
-| 6 | Q3 Command palette built-in parity layer | TODO |  |  |  |  |
-| 7 | Q4 Global collapse/expand controls | TODO |  |  |  |  |
-| 8 | Q5 Wire frame metrics into live chat | TODO |  |  |  |  |
-| 9 | Q6 Transport preference setting parity | TODO |  |  |  |  |
-| 10 | Q7 Queue inspector UX for pending steer/follow-up | TODO |  |  |  |  |
+| 5 | Q1 Fix image-only prompt mismatch | DONE | fix(chat): allow image-only prompt flow and guard failed image encoding |  | ktlint✅ detekt✅ test✅ bridge✅ | ChatViewModel now allows empty text when image payloads exist |
+| 6 | Q2 Add full tree filters (`all` included) | TODO |  |  |  |  |
+| 7 | Q3 Command palette built-in parity layer | TODO |  |  |  |  |
+| 8 | Q4 Global collapse/expand controls | TODO |  |  |  |  |
+| 9 | Q5 Wire frame metrics into live chat | TODO |  |  |  |  |
+| 10 | Q6 Transport preference setting parity | TODO |  |  |  |  |
+| 11 | Q7 Queue inspector UX for pending steer/follow-up | TODO |  |  |  |  |
 
 ---
 
@@ -60,11 +60,11 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 11 | F1 Bridge event isolation + lock correctness | TODO |  |  |  |  |
-| 12 | F2 Reconnect/resync race hardening | TODO |  |  |  |  |
-| 13 | F3 Bridge auth + exposure hardening | TODO |  |  |  |  |
-| 14 | F4 Android network security tightening | TODO |  |  |  |  |
-| 15 | F5 Bridge session index scalability | TODO |  |  |  |  |
+| 12 | F1 Bridge event isolation + lock correctness | TODO |  |  |  |  |
+| 13 | F2 Reconnect/resync race hardening | TODO |  |  |  |  |
+| 14 | F3 Bridge auth + exposure hardening | TODO |  |  |  |  |
+| 15 | F4 Android network security tightening | TODO |  |  |  |  |
+| 16 | F5 Bridge session index scalability | TODO |  |  |  |  |
 
 ---
 
@@ -72,10 +72,10 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 16 | M1 Replace service locator with explicit DI | TODO |  |  |  |  |
-| 17 | M2 Split god classes (complexity-focused, non-rigid) | TODO |  |  |  | Reduce `LargeClass` / `LongMethod` / `TooManyFunctions` signals |
-| 18 | M3 Unify streaming/backpressure runtime pipeline | TODO |  |  |  |  |
-| 19 | M4 Tighten static analysis rules/suppressions | TODO |  |  |  |  |
+| 17 | M1 Replace service locator with explicit DI | TODO |  |  |  |  |
+| 18 | M2 Split god classes (complexity-focused, non-rigid) | TODO |  |  |  | Reduce `LargeClass` / `LongMethod` / `TooManyFunctions` signals |
+| 19 | M3 Unify streaming/backpressure runtime pipeline | TODO |  |  |  |  |
+| 20 | M4 Tighten static analysis rules/suppressions | TODO |  |  |  |  |
 
 ---
 
@@ -83,8 +83,8 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 20 | T1 Centralized theme architecture (PiMobileTheme) | TODO |  |  |  | Light/dark mode, color schemes |
-| 21 | T2 Component design system | TODO |  |  |  | Reusable components, spacing tokens |
+| 21 | T1 Centralized theme architecture (PiMobileTheme) | TODO |  |  |  | Light/dark mode, color schemes |
+| 22 | T2 Component design system | TODO |  |  |  | Reusable components, spacing tokens |
 
 ---
 
@@ -92,10 +92,10 @@ Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE`
 
 | Order | Task | Status | Commit message | Commit hash | Verification | Notes |
 |---|---|---|---|---|---|---|
-| 22 | H1 True `/tree` parity (in-place navigate) | TODO |  |  |  |  |
-| 23 | H2 Session parsing alignment with Pi internals | TODO |  |  |  |  |
-| 24 | H3 Incremental session history loading strategy | TODO |  |  |  |  |
-| 25 | H4 Extension-ize selected hardcoded workflows | TODO |  |  |  |  |
+| 23 | H1 True `/tree` parity (in-place navigate) | TODO |  |  |  |  |
+| 24 | H2 Session parsing alignment with Pi internals | TODO |  |  |  |  |
+| 25 | H3 Incremental session history loading strategy | TODO |  |  |  |  |
+| 26 | H4 Extension-ize selected hardcoded workflows | TODO |  |  |  |  |
 
 ---
 
@@ -124,15 +124,68 @@ Verification:
 Notes/blockers:
 ```
 
+### 2026-02-15
+
+```text
+Task: C4 (and C1 finalization)
+Status change: C4 TODO -> DONE, C1 IN_PROGRESS -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Added SessionController.ensureConnected()/disconnect() and RpcSessionController connection reuse by host+cwd.
+- SessionsViewModel now warms bridge connection after host/session load and reuses it for newSession/resume.
+- MainActivity now triggers sessionController.disconnect() on app finish.
+```
+
+### 2026-02-15
+
+```text
+Task: C2
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- Chat header now enters compact mode while streaming.
+- Non-essential actions (stats/copy/bash) are hidden during streaming to free vertical space.
+- Model selector remains directly accessible in compact mode.
+```
+
+### 2026-02-15
+
+```text
+Task: Q1
+Status change: TODO -> DONE
+Commit: pending
+Verification:
+- ktlintCheck: ✅
+- detekt: ✅
+- test: ✅
+- bridge check: ✅
+- manual smoke: ⏳ pending on device
+Notes/blockers:
+- ChatViewModel.sendPrompt() now allows image-only prompts.
+- Added guard for image-encoding failures to avoid sending empty prompt with no payload.
+```
+
 ---
 
 ## Overall completion
 
-- Backlog tasks: 25
-- Backlog done: 0
+- Backlog tasks: 26
+- Backlog done: 5
 - Backlog in progress: 0
 - Backlog blocked: 0
-- Backlog remaining: 25
+- Backlog remaining (not done): 21
 - Reference completed items (not counted in backlog): 6
 
 ---
