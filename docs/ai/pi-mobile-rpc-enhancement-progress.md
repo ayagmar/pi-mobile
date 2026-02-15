@@ -2,217 +2,112 @@
 
 Status values: `TODO` | `IN_PROGRESS` | `BLOCKED` | `DONE` | `DE_SCOPED`
 
-> Last updated: 2026-02-15
+> Last updated: 2026-02-15 (All RPC enhancement backlog tasks completed)
 
 ---
 
-## Phase 1 — Core UX Parity (Critical)
+## Completed milestones
 
-| Task | Status | Commit | Verification | Notes |
-|------|--------|--------|--------------|-------|
-| **1.1** Reasoning/Thinking Block Display | `DONE` | a5b5611 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Parse `thinking_delta` events, display with toggle |
-| **1.2** Slash Commands Palette | `DONE` | 51da6e4 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Implement `get_commands`, add command palette UI |
-| **1.3** Auto-Compaction/Retry Event Handling | `DONE` | b7affd1 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Show banners for compaction/retry events |
-
-### Phase 1 Completion Criteria
-- [x] Thinking blocks visible and toggleable
-- [x] Command palette functional with search
-- [x] Compaction/retry events show notifications
-
----
-
-## Phase 2 — Enhanced Tool Display
-
-| Task | Status | Commit | Verification | Notes |
-|------|--------|--------|--------------|-------|
-| **2.1** File Edit Diff View | `DONE` | 653cfe6 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Show unified diff for edit tool calls |
-| **2.2** Bash Tool Execution UI | `DONE` | ce76ea5 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Full bash dialog with history, abort, exit code |
-| **2.3** Enhanced Tool Argument Display | `DONE` | ce76ea5 | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Tool icons, collapsible arguments, copy functionality |
-
-### Phase 2 Completion Criteria
-- [x] Edit operations show diffs with syntax highlight
-- [x] Bash commands executable from UI
-- [x] Tool arguments visible and copyable
+| Area | Status | Notes |
+|---|---|---|
+| Thinking blocks + collapse | DONE | Implemented in assembler + chat UI |
+| Slash commands palette | DONE | `get_commands` + grouped searchable UI |
+| Auto compaction/retry notifications | DONE | Events parsed and surfaced |
+| Tool UX enhancements | DONE | icons, arguments, diff viewer |
+| Bash UI | DONE | execute/abort/history/output/copy |
+| Session stats | DONE | stats sheet in chat |
+| Model picker | DONE | available models + set model |
+| Auto settings toggles | DONE | auto-compaction + auto-retry |
+| Image attachments | DONE | picker + thumbnails + base64 payload |
+| RPC schema mismatch fixes | DONE | stats/bash/models/set_model/fork fields fixed in controller parser |
 
 ---
 
-## Phase 3 — Session Management Enhancements
+## Ordered backlog (current)
 
-| Task | Status | Commit | Verification | Notes |
-|------|--------|--------|--------------|-------|
-| **3.1** Session Stats Display | `DONE` | 5afd90e | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Token counts, cost, message counts in sheet |
-| **3.2** Model Picker (Beyond Cycling) | `DONE` | 5afd90e | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Full model list with search, long-press to open |
-| **3.3** Tree Navigation (/tree equivalent) | `TODO` | - | - | Visual conversation tree navigation |
-
-### Phase 3 Completion Criteria
-- [x] Stats visible in bottom sheet
-- [x] Model picker with all capabilities
-- [ ] Tree view for history navigation
-
----
-
-## Phase 4 — Power User Features
-
-| Task | Status | Commit | Verification | Notes |
-|------|--------|--------|--------------|-------|
-| **4.1** Auto-Compaction Toggle | `DONE` | 6c2153d | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Settings toggles with SharedPreferences persistence |
-| **4.2** Image Attachment Support | `DONE` | 932628a | ✅ ktlintCheck, detekt, test, :app:assembleDebug | Photo picker, thumbnails, base64 encoding, size limit |
-
-### Phase 4 Completion Criteria
-- [x] Auto-compaction/retry toggles work
-- [x] Images can be attached to prompts
+| Order | Task | Status | Commit | Verification | Notes |
+|---|---|---|---|---|---|
+| 1 | Protocol conformance tests (stats/bash/models/set_model/fork) | DONE | `1f90b3f` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | Added `RpcSessionControllerTest` conformance coverage for canonical + legacy mapping fields |
+| 2 | Parse missing events: `message_start/end`, `turn_start/end`, `extension_error` | DONE | `1f57a2a` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | Added parser branches + models and event parsing tests for lifecycle and extension errors |
+| 3 | Surface lifecycle + extension errors in chat UX | DONE | `09e2b27` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | Added non-blocking lifecycle notifications and contextual extension error notifications in chat |
+| 4 | Steering/follow-up mode controls (`set_*_mode`) | DONE | `948ace3` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | Added RPC commands, session controller wiring, settings UI selectors, and get_state mode sync |
+| 5 | Tree navigation spike (`/tree` equivalent feasibility) | DONE | `4472f89` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | Added spike doc; decision: RPC-only is insufficient, add read-only bridge session-tree endpoint |
+| 6 | Tree navigation MVP | DONE | `360aa4f` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ `(cd bridge && pnpm run check)` ✅ | Added bridge session-tree endpoint, app bridge request path, and chat tree sheet with fork-from-entry navigation |
+| 7 | Keyboard shortcuts/gestures help screen | DONE | `5ca89ce` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | Added settings help card documenting chat actions, gestures, and key interactions |
+| 8 | README/docs sync | DONE | `5dd4b48` | `ktlintCheck` ✅ `detekt` ✅ `test` ✅ | README refreshed with current UX capabilities and limitations (including image support) |
 
 ---
 
-## Phase 5 — Quality & Polish
+## Command coverage status
 
-| Task | Status | Commit | Verification | Notes |
-|------|--------|--------|--------------|-------|
-| **5.1** Message Start/End Event Handling | `TODO` | - | - | Parse message lifecycle events |
-| **5.2** Turn Start/End Event Handling | `TODO` | - | - | Parse turn lifecycle events |
-| **5.3** Keyboard Shortcuts Help | `TODO` | - | - | Document all gestures/actions |
+### Implemented
+- `prompt`, `steer`, `follow_up`, `abort`, `new_session`
+- `get_state`, `get_messages`, `switch_session`
+- `set_session_name`, `get_fork_messages`, `fork`
+- `export_html`, `compact`
+- `cycle_model`, `cycle_thinking_level`
+- `get_commands`
+- `bash`, `abort_bash`
+- `get_session_stats`
+- `get_available_models`, `set_model`
+- `set_auto_compaction`, `set_auto_retry`
+- `set_steering_mode`, `set_follow_up_mode`
 
-### Phase 5 Completion Criteria
-- [ ] All lifecycle events parsed
-- [ ] Shortcuts documented in UI
-
----
-
-## Commands Implementation Status
-
-| Command | Status | Notes |
-|---------|--------|-------|
-| `prompt` | ✅ DONE | With images support (structure only) |
-| `steer` | ✅ DONE | - |
-| `follow_up` | ✅ DONE | - |
-| `abort` | ✅ DONE | - |
-| `get_state` | ✅ DONE | - |
-| `get_messages` | ✅ DONE | - |
-| `switch_session` | ✅ DONE | - |
-| `set_session_name` | ✅ DONE | - |
-| `get_fork_messages` | ✅ DONE | - |
-| `fork` | ✅ DONE | - |
-| `export_html` | ✅ DONE | - |
-| `compact` | ✅ DONE | - |
-| `cycle_model` | ✅ DONE | - |
-| `cycle_thinking_level` | ✅ DONE | - |
-| `new_session` | ✅ DONE | - |
-| `extension_ui_response` | ✅ DONE | - |
-| `get_commands` | ✅ DONE | For slash commands palette |
-| `get_available_models` | ✅ DONE | For model picker |
-| `set_model` | ✅ DONE | For model picker |
-| `get_session_stats` | ✅ DONE | For stats display |
-| `bash` | ✅ DONE | For bash execution |
-| `abort_bash` | ✅ DONE | For bash cancellation |
-| `set_auto_compaction` | ✅ DONE | For settings toggle |
-| `set_auto_retry` | ✅ DONE | For settings toggle |
-| `set_steering_mode` | ⬜ TODO | Low priority |
-| `set_follow_up_mode` | ⬜ TODO | Low priority |
+### Remaining
+- None
 
 ---
 
-## Events Implementation Status
+## Event coverage status
 
-| Event | Status | Notes |
-|-------|--------|-------|
-| `message_update` | ✅ DONE | text_delta, thinking_delta handled |
-| `tool_execution_start` | ✅ DONE | - |
-| `tool_execution_update` | ✅ DONE | - |
-| `tool_execution_end` | ✅ DONE | - |
-| `extension_ui_request` | ✅ DONE | All dialog methods |
-| `agent_start` | ✅ DONE | - |
-| `agent_end` | ✅ DONE | - |
-| `thinking_delta` | ✅ DONE | **Now implemented** |
-| `auto_compaction_start` | ✅ DONE | **Now implemented** |
-| `auto_compaction_end` | ✅ DONE | **Now implemented** |
-| `auto_retry_start` | ✅ DONE | **Now implemented** |
-| `auto_retry_end` | ✅ DONE | **Now implemented** |
-| `message_start` | ⬜ TODO | Low priority |
-| `message_end` | ⬜ TODO | Low priority |
-| `turn_start` | ⬜ TODO | Low priority |
-| `turn_end` | ⬜ TODO | Low priority |
-| `extension_error` | ⬜ TODO | Medium priority |
+### Implemented
+- `message_update` (text + thinking)
+- `message_start` / `message_end`
+- `turn_start` / `turn_end`
+- `tool_execution_start/update/end`
+- `extension_ui_request`
+- `extension_error`
+- `agent_start/end`
+- `auto_compaction_start/end`
+- `auto_retry_start/end`
+
+### Remaining
+- None (parser-level)
 
 ---
 
-## Feature Parity Checklist
+## Feature parity checklist (pi mono TUI)
 
-### Critical (Must Have)
-- [ ] Thinking block display
-- [ ] Slash commands palette
-- [ ] Auto-compaction/retry notifications
-
-### High Priority (Should Have)
-- [ ] File edit diff view
-- [ ] Session stats display
-- [ ] Tool argument display
-- [ ] Bash execution UI
-
-### Medium Priority (Nice to Have)
-- [ ] Model picker (vs cycling only)
-- [ ] Image attachments
-- [ ] Tree navigation
-- [ ] Settings toggles
-
-### Low Priority (Polish)
-- [ ] Message/turn lifecycle events
-- [ ] Keyboard shortcuts help
-- [ ] Advanced tool output formatting
+- [x] Tool calls visible
+- [x] Tool output collapse/expand
+- [x] Reasoning visibility + collapse/expand
+- [x] File edit diff view
+- [x] Slash commands discovery/use
+- [x] Model control beyond cycling
+- [x] Session stats display
+- [x] Image attachments
+- [x] Tree navigation equivalent (`/tree`)
+- [x] Steering/follow-up delivery mode controls
+- [x] Lifecycle/extension error event completeness
 
 ---
 
-## Per-Task Verification Commands
+## Verification commands
 
 ```bash
-# Run all quality checks
 ./gradlew ktlintCheck
 ./gradlew detekt
 ./gradlew test
-
-# If bridge modified:
-cd bridge && pnpm run check
-
-# Module-specific tests
-./gradlew :core-rpc:test
-./gradlew :core-net:test
-./gradlew :core-sessions:test
-
-# UI tests
-./gradlew :app:connectedCheck
-
-# Assembly
-./gradlew :app:assembleDebug
+# if bridge changed:
+(cd bridge && pnpm run check)
 ```
 
 ---
 
-## Blockers & Dependencies
+## Blockers / risks
 
-| Task | Blocked By | Resolution |
-|------|------------|------------|
-| 3.3 Tree Navigation | RPC protocol gap | Research if `get_messages` parentIds sufficient |
-| 4.2 Image Attachments | None | High complexity, defer to later sprint |
-
----
-
-## Sprint Planning
-
-### Current Sprint: None assigned
-
-### Recommended Next Sprint: Phase 1 (Core Parity)
-**Focus:** Tasks 1.1, 1.2, 1.3
-**Goal:** Achieve feature parity for thinking blocks and commands
-
-### Upcoming Sprints
-- Sprint 2: Phase 2 (Tool Enhancements)
-- Sprint 3: Phase 3 (Session Management)
-- Sprint 4: Phase 4-5 (Power Features + Polish)
-
----
-
-## Notes
-
-- Thinking block support is the biggest UX gap vs pi mono TUI
-- Slash commands will unlock full extension ecosystem
-- Tree navigation may require bridge enhancements
-- Image attachments complex due to base64 encoding + size limits
+| Task | Risk | Mitigation |
+|---|---|---|
+| Tree navigation | Bridge/tree payload drift across pi session formats | Keep parser defensive and cover with bridge tests/fixtures |
+| Lifecycle UX noise | Too many system notifications can clutter chat | Keep subtle + dismissible + rate-limited |
+| Protocol regressions | Field names can drift across pi versions | Add parser conformance tests with real payload fixtures |
