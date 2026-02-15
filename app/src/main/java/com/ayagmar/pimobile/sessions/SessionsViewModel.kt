@@ -17,6 +17,7 @@ import com.ayagmar.pimobile.hosts.SharedPreferencesHostProfileStore
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -41,6 +42,7 @@ class SessionsViewModel(
 
     private val collapsedCwds = linkedSetOf<String>()
     private var observeJob: Job? = null
+    private var searchDebounceJob: Job? = null
 
     init {
         loadHosts()
@@ -57,6 +59,7 @@ class SessionsViewModel(
         }
 
         collapsedCwds.clear()
+        searchDebounceJob?.cancel()
 
         _uiState.update { current ->
             current.copy(
@@ -85,7 +88,12 @@ class SessionsViewModel(
         }
 
         val hostId = _uiState.value.selectedHostId ?: return
-        observeHost(hostId)
+        searchDebounceJob?.cancel()
+        searchDebounceJob =
+            viewModelScope.launch {
+                delay(250)
+                observeHost(hostId)
+            }
     }
 
     fun onCwdToggle(cwd: String) {
@@ -451,6 +459,12 @@ class SessionsViewModel(
                     }
                 }
             }
+    }
+
+    override fun onCleared() {
+        observeJob?.cancel()
+        searchDebounceJob?.cancel()
+        super.onCleared()
     }
 }
 
