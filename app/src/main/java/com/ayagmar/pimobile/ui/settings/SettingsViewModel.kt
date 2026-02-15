@@ -1,6 +1,7 @@
 package com.ayagmar.pimobile.ui.settings
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,20 +21,23 @@ import kotlinx.serialization.json.jsonPrimitive
 @Suppress("TooManyFunctions")
 class SettingsViewModel(
     private val sessionController: SessionController,
-    context: Context,
+    context: Context? = null,
+    sharedPreferences: SharedPreferences? = null,
+    appVersionOverride: String? = null,
 ) : ViewModel() {
     var uiState by mutableStateOf(SettingsUiState())
         private set
 
-    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences =
+        sharedPreferences
+            ?: requireNotNull(context) {
+                "SettingsViewModel requires a Context when sharedPreferences is not provided"
+            }.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     init {
         val appVersion =
-            try {
-                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
-            } catch (_: PackageManager.NameNotFoundException) {
-                "unknown"
-            }
+            appVersionOverride
+                ?: context.resolveAppVersion()
 
         uiState =
             uiState.copy(
@@ -250,6 +254,15 @@ class SettingsViewModel(
         private const val PREFS_NAME = "pi_mobile_settings"
         private const val KEY_AUTO_COMPACTION = "auto_compaction_enabled"
         private const val KEY_AUTO_RETRY = "auto_retry_enabled"
+    }
+}
+
+private fun Context?.resolveAppVersion(): String {
+    val safeContext = this ?: return "unknown"
+    return try {
+        safeContext.packageManager.getPackageInfo(safeContext.packageName, 0).versionName ?: "unknown"
+    } catch (_: PackageManager.NameNotFoundException) {
+        "unknown"
     }
 }
 
