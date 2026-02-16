@@ -38,7 +38,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
@@ -47,6 +46,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -431,6 +431,7 @@ private fun ChatHeader(
 ) {
     val isCompact = isStreaming
     var runStartedAtMs by remember { mutableStateOf<Long?>(null) }
+    var showSecondaryActionsMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(isStreaming) {
         if (isStreaming) {
@@ -509,7 +510,10 @@ private fun ChatHeader(
             }
 
             // Action buttons
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (isSyncingSession) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
@@ -524,25 +528,38 @@ private fun ChatHeader(
                     }
                 }
 
-                if (!isCompact) {
-                    IconButton(onClick = callbacks.onShowTreeSheet) {
-                        Icon(
-                            imageVector = Icons.Default.Folder,
-                            contentDescription = "Tree",
-                        )
-                    }
-                    IconButton(onClick = callbacks.onShowBashDialog) {
-                        Icon(
-                            imageVector = Icons.Default.Terminal,
-                            contentDescription = "Bash",
-                        )
-                    }
-                    IconButton(onClick = callbacks.onShowStatsSheet) {
-                        Icon(
-                            imageVector = Icons.Default.BarChart,
-                            contentDescription = "Stats",
-                        )
-                    }
+                IconButton(onClick = { showSecondaryActionsMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "More actions",
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showSecondaryActionsMenu,
+                    onDismissRequest = { showSecondaryActionsMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Tree") },
+                        onClick = {
+                            showSecondaryActionsMenu = false
+                            callbacks.onShowTreeSheet()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Bash") },
+                        onClick = {
+                            showSecondaryActionsMenu = false
+                            callbacks.onShowBashDialog()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Stats") },
+                        onClick = {
+                            showSecondaryActionsMenu = false
+                            callbacks.onShowStatsSheet()
+                        },
+                    )
                 }
             }
         }
