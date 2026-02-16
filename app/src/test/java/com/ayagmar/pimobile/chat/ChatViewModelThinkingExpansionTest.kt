@@ -575,6 +575,49 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun syncNowFlagsPotentialCrossDeviceEditsWhenHistoryChanges() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.messagesPayload = historyWithMessageTexts(listOf("baseline"))
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.messagesPayload = historyWithMessageTexts(listOf("baseline", "external-change"))
+            viewModel.syncNow()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            waitForState(viewModel) { state -> !state.isSyncingSession }
+            val state = viewModel.uiState.value
+            assertEquals(
+                "Potential cross-device session edits detected. Use Sync now before continuing.",
+                state.sessionCoherencyWarning,
+            )
+        }
+
+    @Test
+    fun syncNowClearsCoherencyWarningWhenNoExternalDiffIsFound() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.messagesPayload = historyWithMessageTexts(listOf("unchanged"))
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.messagesPayload = historyWithMessageTexts(listOf("unchanged", "changed"))
+            viewModel.syncNow()
+            dispatcher.scheduler.advanceUntilIdle()
+            waitForState(viewModel) { state -> !state.isSyncingSession && state.sessionCoherencyWarning != null }
+
+            controller.messagesPayload = historyWithMessageTexts(listOf("unchanged", "changed"))
+            viewModel.syncNow()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            waitForState(viewModel) { state -> !state.isSyncingSession }
+            assertEquals(null, viewModel.uiState.value.sessionCoherencyWarning)
+        }
+
+    @Test
     fun jumpAndContinueUsesInPlaceTreeNavigationResult() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
@@ -815,6 +858,24 @@ class ChatViewModelThinkingExpansionTest {
                             buildJsonObject {
                                 put("role", "user")
                                 put("content", "message-$index")
+                            },
+                        )
+                    }
+                },
+            )
+        }
+
+    private fun historyWithMessageTexts(messages: List<String>): JsonObject =
+        buildJsonObject {
+            put(
+                "messages",
+                buildJsonArray {
+                    messages.forEachIndexed { index, text ->
+                        add(
+                            buildJsonObject {
+                                put("role", "user")
+                                put("entryId", "entry-$index")
+                                put("content", text)
                             },
                         )
                     }

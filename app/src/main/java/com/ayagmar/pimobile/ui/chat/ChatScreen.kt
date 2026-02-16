@@ -153,6 +153,7 @@ private data class ChatCallbacks(
     val onHideModelPicker: () -> Unit,
     val onModelsQueryChanged: (String) -> Unit,
     val onSelectModel: (AvailableModel) -> Unit,
+    val onSyncNow: () -> Unit,
     // Tree navigation callbacks
     val onShowTreeSheet: () -> Unit,
     val onHideTreeSheet: () -> Unit,
@@ -230,6 +231,7 @@ fun ChatRoute(sessionController: SessionController) {
                 onHideModelPicker = chatViewModel::hideModelPicker,
                 onModelsQueryChanged = chatViewModel::onModelsQueryChanged,
                 onSelectModel = chatViewModel::selectModel,
+                onSyncNow = chatViewModel::syncNow,
                 onShowTreeSheet = chatViewModel::showTreeSheet,
                 onHideTreeSheet = chatViewModel::hideTreeSheet,
                 onForkFromTreeEntry = chatViewModel::forkFromTreeEntry,
@@ -337,6 +339,7 @@ private fun ChatScreen(
     )
 }
 
+@Suppress("LongMethod")
 @Composable
 private fun ChatScreenContent(
     state: ChatUiState,
@@ -350,6 +353,8 @@ private fun ChatScreenContent(
             isStreaming = state.isStreaming,
             isRetrying = state.isRetrying,
             timeline = state.timeline,
+            isSyncingSession = state.isSyncingSession,
+            sessionCoherencyWarning = state.sessionCoherencyWarning,
             extensionTitle = state.extensionTitle,
             connectionState = state.connectionState,
             currentModel = state.currentModel,
@@ -413,6 +418,8 @@ private fun ChatHeader(
     isStreaming: Boolean,
     isRetrying: Boolean,
     timeline: List<ChatTimelineItem>,
+    isSyncingSession: Boolean,
+    sessionCoherencyWarning: String?,
     extensionTitle: String?,
     connectionState: com.ayagmar.pimobile.corenet.ConnectionState,
     currentModel: ModelInfo?,
@@ -501,6 +508,20 @@ private fun ChatHeader(
 
             // Action buttons
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (isSyncingSession) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    IconButton(onClick = callbacks.onSyncNow) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Sync now",
+                        )
+                    }
+                }
+
                 if (!isCompact) {
                     IconButton(onClick = callbacks.onShowTreeSheet) {
                         Icon(
@@ -528,6 +549,14 @@ private fun ChatHeader(
             LiveRunProgressIndicator(
                 phase = runPhase,
                 elapsedSeconds = elapsedSeconds,
+            )
+        }
+
+        sessionCoherencyWarning?.let { warning ->
+            Text(
+                text = warning,
+                color = MaterialTheme.colorScheme.tertiary,
+                style = MaterialTheme.typography.bodySmall,
             )
         }
 

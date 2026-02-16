@@ -81,7 +81,7 @@ class ChatViewModel(
         observeConnection()
         observeStreamingState()
         observeEvents()
-        loadInitialMessages()
+        loadInitialMessages(reason = TimelineReloadReason.INITIAL)
     }
 
     fun onInputTextChanged(text: String) {
@@ -128,6 +128,8 @@ class ChatViewModel(
             handleNonRpcBuiltinCommand(builtinCommand)
             return
         }
+
+        _uiState.update { it.copy(sessionCoherencyWarning = null) }
 
         // Record prompt send for TTFT tracking
         recordMetricsSafely { PerformanceMetrics.recordPromptSend() }
@@ -483,7 +485,7 @@ class ChatViewModel(
                 }
                 // Reload messages when connection becomes active and timeline is empty
                 if (state == ConnectionState.CONNECTED && previousState != ConnectionState.CONNECTED && timelineEmpty) {
-                    loadInitialMessages()
+                    loadInitialMessages(reason = TimelineReloadReason.CONNECTION_RECOVERY)
                 }
             }
         }
@@ -549,7 +551,7 @@ class ChatViewModel(
         runCatching(record)
     }
 
-    @Suppress("CyclomaticComplexMethod")
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun observeEvents() {
         // Observe session changes and reload timeline
         viewModelScope.launch {
@@ -565,7 +567,8 @@ class ChatViewModel(
                 visibleTimelineSize = 0
                 pendingLocalUserIds.clear()
                 resetHistoryWindow()
-                loadInitialMessages()
+                _uiState.update { it.copy(sessionCoherencyWarning = null, isSyncingSession = false) }
+                loadInitialMessages(reason = TimelineReloadReason.SESSION_CHANGED)
             }
         }
 
@@ -1113,6 +1116,18 @@ class ChatViewModel(
         _uiState.update { it.copy(pendingQueueItems = emptyList()) }
     }
 
+    fun syncNow() {
+        if (_uiState.value.isSyncingSession) return
+
+        _uiState.update {
+            it.copy(
+                isSyncingSession = true,
+                errorMessage = null,
+            )
+        }
+        loadInitialMessages(reason = TimelineReloadReason.MANUAL_SYNC)
+    }
+
     fun loadOlderMessages() {
         when {
             visibleTimelineSize < fullTimeline.size -> {
@@ -1155,7 +1170,18 @@ class ChatViewModel(
         }
     }
 
-    private fun loadInitialMessages() {
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
+    private fun loadInitialMessages(reason: TimelineReloadReason) {
+        val previousHistorySignature =
+            if (
+                reason == TimelineReloadReason.MANUAL_SYNC ||
+                reason == TimelineReloadReason.CONNECTION_RECOVERY
+            ) {
+                historyWindowSignature(historyWindowMessages)
+            } else {
+                null
+            }
+
         initialLoadJob?.cancel()
         initialLoadJob =
             viewModelScope.launch(Dispatchers.IO) {
@@ -1190,6 +1216,45 @@ class ChatViewModel(
                             metadata = metadata,
                         )
                     }
+                }
+
+                val refreshedHistorySignature = historyWindowSignature(historyWindowMessages)
+                val hasPotentialExternalChanges =
+                    messagesResult.isSuccess &&
+                        previousHistorySignature != null &&
+                        previousHistorySignature != refreshedHistorySignature
+
+                if (reason == TimelineReloadReason.MANUAL_SYNC) {
+                    _uiState.update { state ->
+                        state.copy(
+                            isSyncingSession = false,
+                            sessionCoherencyWarning =
+                                if (hasPotentialExternalChanges) {
+                                    SESSION_COHERENCY_WARNING_MESSAGE
+                                } else {
+                                    null
+                                },
+                        )
+                    }
+
+                    if (messagesResult.isSuccess) {
+                        val message =
+                            if (hasPotentialExternalChanges) {
+                                "Potential cross-device edits detected. Timeline refreshed."
+                            } else {
+                                "Session sync complete"
+                            }
+                        val type = if (hasPotentialExternalChanges) "warning" else "info"
+                        addSystemNotification(message = message, type = type)
+                    }
+                } else if (hasPotentialExternalChanges) {
+                    _uiState.update {
+                        it.copy(sessionCoherencyWarning = SESSION_COHERENCY_WARNING_MESSAGE)
+                    }
+                    addSystemNotification(
+                        message = "Session changed while disconnected or edited elsewhere. Review before continuing.",
+                        type = "warning",
+                    )
                 }
             }
     }
@@ -1590,7 +1655,7 @@ class ChatViewModel(
                         sessionTree = updatedTree,
                     )
                 }
-                loadInitialMessages()
+                loadInitialMessages(reason = TimelineReloadReason.TREE_NAVIGATION)
             } else {
                 _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
             }
@@ -1971,6 +2036,14 @@ class ChatViewModel(
         NON_DELTA,
     }
 
+    private enum class TimelineReloadReason {
+        INITIAL,
+        CONNECTION_RECOVERY,
+        SESSION_CHANGED,
+        TREE_NAVIGATION,
+        MANUAL_SYNC,
+    }
+
     override fun onCleared() {
         initialLoadJob?.cancel()
         logThinkingDiagnostics(reason = "viewmodel_cleared")
@@ -2059,6 +2132,8 @@ class ChatViewModel(
         private const val MAX_PENDING_QUEUE_ITEMS = 20
         private const val THINKING_DIAGNOSTICS_LOG_TAG = "ThinkingDiagnostics"
         private const val STREAMING_DIAGNOSTICS_LOG_TAG = "StreamingDiagnostics"
+        private const val SESSION_COHERENCY_WARNING_MESSAGE =
+            "Potential cross-device session edits detected. Use Sync now before continuing."
     }
 }
 
@@ -2086,6 +2161,8 @@ data class ChatUiState(
     val steeringMode: String = ChatViewModel.DELIVERY_MODE_ALL,
     val followUpMode: String = ChatViewModel.DELIVERY_MODE_ALL,
     val pendingQueueItems: List<PendingQueueItem> = emptyList(),
+    val isSyncingSession: Boolean = false,
+    val sessionCoherencyWarning: String? = null,
     // Bash dialog state
     val isBashDialogVisible: Boolean = false,
     val bashCommand: String = "",
@@ -2265,6 +2342,20 @@ private data class HistoryMessageWindow(
     val messages: List<JsonObject>,
     val absoluteOffset: Int,
 )
+
+private fun historyWindowSignature(messages: List<JsonObject>): String {
+    if (messages.isEmpty()) return "empty"
+
+    val marker =
+        messages
+            .joinToString(separator = "|") { message ->
+                val role = message.stringField("role").orEmpty()
+                val entryId = message.stringField("entryId").orEmpty()
+                "$role:$entryId:${message.toString().hashCode()}"
+            }
+
+    return "${messages.size}:$marker"
+}
 
 private fun extractHistoryMessageWindow(data: JsonObject?): HistoryMessageWindow {
     val rawMessages = runCatching { data?.get("messages")?.jsonArray }.getOrNull() ?: JsonArray(emptyList())
