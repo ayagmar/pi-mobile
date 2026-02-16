@@ -737,7 +737,6 @@ private fun ChatBody(
             hiddenHistoryCount = hiddenHistoryCount,
             expandedToolArguments = expandedToolArguments,
             showInlineRunProgress = showInlineRunProgress,
-            isRunActive = isRunActive,
             runPhase = runPhase,
             runElapsedSeconds = runElapsedSeconds,
             onLoadOlderMessages = callbacks.onLoadOlderMessages,
@@ -758,7 +757,6 @@ private fun ChatTimeline(
     hiddenHistoryCount: Int,
     expandedToolArguments: Set<String>,
     showInlineRunProgress: Boolean,
-    isRunActive: Boolean,
     runPhase: LiveRunPhase,
     runElapsedSeconds: Long,
     onLoadOlderMessages: () -> Unit,
@@ -781,7 +779,7 @@ private fun ChatTimeline(
                 lastItemIndex <= 0 || lastVisibleIndex >= lastItemIndex - AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS
             }
         }
-    val shouldShowJumpToLatest = isRunActive && totalItems > 0 && !shouldAutoScrollToBottom
+    val shouldShowJumpToLatest = totalItems > 0 && !shouldAutoScrollToBottom
 
     // Auto-scroll only while the user stays near the bottom.
     // This avoids jumping when loading older history or reading past messages.
