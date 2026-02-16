@@ -11,6 +11,8 @@ import com.ayagmar.pimobile.hosts.SharedPreferencesHostProfileStore
 import com.ayagmar.pimobile.sessions.BridgeSessionIndexRemoteDataSource
 import com.ayagmar.pimobile.sessions.RpcSessionController
 import com.ayagmar.pimobile.sessions.SessionController
+import com.ayagmar.pimobile.sessions.SessionCwdPreferenceStore
+import com.ayagmar.pimobile.sessions.SharedPreferencesSessionCwdPreferenceStore
 
 class AppGraph(
     context: Context,
@@ -18,6 +20,10 @@ class AppGraph(
     private val appContext = context.applicationContext
 
     val sessionController: SessionController by lazy { RpcSessionController() }
+
+    val sessionCwdPreferenceStore: SessionCwdPreferenceStore by lazy {
+        SharedPreferencesSessionCwdPreferenceStore(appContext)
+    }
 
     val hostProfileStore: HostProfileStore by lazy {
         SharedPreferencesHostProfileStore(appContext)

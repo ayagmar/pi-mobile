@@ -37,8 +37,9 @@ _Last updated: 2026-02-16_
 
 ## P1 — Next improvements
 
-- [ ] **Persist preferred cwd per host**
+- [x] **Persist preferred cwd per host**
   - Save/restore selected cwd across app restarts
+  - Note: implemented with `SessionCwdPreferenceStore` and wired through `AppGraph`
 
 - [ ] **Compose UI tests for grouped cwd chip selector**
   - Chip rendering

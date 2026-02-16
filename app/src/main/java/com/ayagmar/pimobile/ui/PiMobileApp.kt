@@ -127,6 +127,7 @@ fun piMobileApp(appGraph: AppGraph) {
                         tokenStore = appGraph.hostTokenStore,
                         repository = appGraph.sessionIndexRepository,
                         sessionController = appGraph.sessionController,
+                        cwdPreferenceStore = appGraph.sessionCwdPreferenceStore,
                         onNavigateToChat = {
                             navController.navigate("chat") {
                                 launchSingleTop = true

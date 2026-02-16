@@ -34,6 +34,7 @@ class SessionsViewModel(
     private val tokenStore: HostTokenStore,
     private val repository: SessionIndexRepository,
     private val sessionController: SessionController,
+    private val cwdPreferenceStore: SessionCwdPreferenceStore,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SessionsUiState(isLoading = true))
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 16)
@@ -72,7 +73,7 @@ class SessionsViewModel(
         _uiState.update { current ->
             current.copy(
                 selectedHostId = hostId,
-                selectedCwd = null,
+                selectedCwd = readPreferredCwd(hostId),
                 isLoading = true,
                 groups = emptyList(),
                 activeSessionPath = null,
@@ -115,6 +116,7 @@ class SessionsViewModel(
         }
 
         _uiState.value.selectedHostId?.let { hostId ->
+            persistPreferredCwd(hostId = hostId, cwd = cwd)
             maybeWarmupConnection(hostId = hostId, preferredCwd = cwd)
         }
     }
@@ -176,6 +178,18 @@ class SessionsViewModel(
 
     private fun emitError(message: String) {
         _uiState.update { current -> current.copy(isResuming = false, errorMessage = message) }
+    }
+
+    private fun readPreferredCwd(hostId: String): String? {
+        return cwdPreferenceStore.getPreferredCwd(hostId)?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun persistPreferredCwd(
+        hostId: String,
+        cwd: String,
+    ) {
+        val normalized = cwd.trim().takeIf { it.isNotBlank() } ?: return
+        cwdPreferenceStore.setPreferredCwd(hostId = hostId, cwd = normalized)
     }
 
     private fun maybeWarmupConnection(
@@ -563,11 +577,17 @@ class SessionsViewModel(
             val needsObserve = hostsChanged || current.groups.isEmpty()
 
             _uiState.update { state ->
+                val preferredCwd = readPreferredCwd(selectedHostId)
                 state.copy(
                     isLoading = needsObserve && state.groups.isEmpty(),
                     hosts = hosts,
                     selectedHostId = selectedHostId,
-                    selectedCwd = if (state.selectedHostId == selectedHostId) state.selectedCwd else null,
+                    selectedCwd =
+                        if (state.selectedHostId == selectedHostId) {
+                            state.selectedCwd ?: preferredCwd
+                        } else {
+                            preferredCwd
+                        },
                     errorMessage = null,
                 )
             }
@@ -597,7 +617,8 @@ class SessionsViewModel(
                             PerformanceMetrics.recordSessionsVisible()
                         }
                         val mappedGroups = mapGroups(state.groups)
-                        val selectedCwd = resolveSelectedCwd(current.selectedCwd, mappedGroups)
+                        val preferredSelection = current.selectedCwd ?: readPreferredCwd(hostId)
+                        val selectedCwd = resolveSelectedCwd(preferredSelection, mappedGroups)
 
                         current.copy(
                             isLoading = false,
@@ -606,6 +627,10 @@ class SessionsViewModel(
                             isRefreshing = state.isRefreshing,
                             errorMessage = state.errorMessage,
                         )
+                    }
+
+                    _uiState.value.selectedCwd?.let { selectedCwd ->
+                        persistPreferredCwd(hostId = hostId, cwd = selectedCwd)
                     }
 
                     maybeWarmupConnection(
@@ -738,6 +763,7 @@ class SessionsViewModelFactory(
     private val tokenStore: HostTokenStore,
     private val repository: SessionIndexRepository,
     private val sessionController: SessionController,
+    private val cwdPreferenceStore: SessionCwdPreferenceStore,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         check(modelClass == SessionsViewModel::class.java) {
@@ -750,6 +776,7 @@ class SessionsViewModelFactory(
             tokenStore = tokenStore,
             repository = repository,
             sessionController = sessionController,
+            cwdPreferenceStore = cwdPreferenceStore,
         ) as T
     }
 }

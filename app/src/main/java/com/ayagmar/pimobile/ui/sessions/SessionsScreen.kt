@@ -33,6 +33,7 @@ import com.ayagmar.pimobile.hosts.HostTokenStore
 import com.ayagmar.pimobile.sessions.CwdSessionGroupUiState
 import com.ayagmar.pimobile.sessions.SessionAction
 import com.ayagmar.pimobile.sessions.SessionController
+import com.ayagmar.pimobile.sessions.SessionCwdPreferenceStore
 import com.ayagmar.pimobile.sessions.SessionsUiState
 import com.ayagmar.pimobile.sessions.SessionsViewModel
 import com.ayagmar.pimobile.sessions.SessionsViewModelFactory
@@ -50,15 +51,17 @@ fun SessionsRoute(
     tokenStore: HostTokenStore,
     repository: SessionIndexRepository,
     sessionController: SessionController,
+    cwdPreferenceStore: SessionCwdPreferenceStore,
     onNavigateToChat: () -> Unit = {},
 ) {
     val factory =
-        remember(profileStore, tokenStore, repository, sessionController) {
+        remember(profileStore, tokenStore, repository, sessionController, cwdPreferenceStore) {
             SessionsViewModelFactory(
                 profileStore = profileStore,
                 tokenStore = tokenStore,
                 repository = repository,
                 sessionController = sessionController,
+                cwdPreferenceStore = cwdPreferenceStore,
             )
         }
     val sessionsViewModel: SessionsViewModel = viewModel(factory = factory)
