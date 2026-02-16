@@ -5,6 +5,12 @@ import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -78,6 +84,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -153,6 +160,20 @@ private data class ChatCallbacks(
     // Image attachment callbacks
     val onAddImage: (PendingImage) -> Unit,
     val onRemoveImage: (Int) -> Unit,
+)
+
+internal data class PromptControlsCallbacks(
+    val onInputTextChanged: (String) -> Unit,
+    val onSendPrompt: () -> Unit,
+    val onShowCommandPalette: () -> Unit,
+    val onAddImage: (PendingImage) -> Unit,
+    val onRemoveImage: (Int) -> Unit,
+    val onAbort: () -> Unit,
+    val onAbortRetry: () -> Unit,
+    val onSteer: (String) -> Unit,
+    val onFollowUp: (String) -> Unit,
+    val onRemovePendingQueueItem: (String) -> Unit,
+    val onClearPendingQueueItems: () -> Unit,
 )
 
 @Suppress("LongMethod")
@@ -364,7 +385,20 @@ private fun ChatScreenContent(
             followUpMode = state.followUpMode,
             inputText = state.inputText,
             pendingImages = state.pendingImages,
-            callbacks = callbacks,
+            callbacks =
+                PromptControlsCallbacks(
+                    onInputTextChanged = callbacks.onInputTextChanged,
+                    onSendPrompt = callbacks.onSendPrompt,
+                    onShowCommandPalette = callbacks.onShowCommandPalette,
+                    onAddImage = callbacks.onAddImage,
+                    onRemoveImage = callbacks.onRemoveImage,
+                    onAbort = callbacks.onAbort,
+                    onAbortRetry = callbacks.onAbortRetry,
+                    onSteer = callbacks.onSteer,
+                    onFollowUp = callbacks.onFollowUp,
+                    onRemovePendingQueueItem = callbacks.onRemovePendingQueueItem,
+                    onClearPendingQueueItems = callbacks.onClearPendingQueueItems,
+                ),
         )
     }
 }
@@ -1239,7 +1273,7 @@ private fun inferLanguageFromToolContext(item: ChatTimelineItem.Tool): String? {
 }
 
 @Composable
-private fun PromptControls(
+internal fun PromptControls(
     isStreaming: Boolean,
     isRetrying: Boolean,
     pendingQueueItems: List<PendingQueueItem>,
@@ -1247,16 +1281,24 @@ private fun PromptControls(
     followUpMode: String,
     inputText: String,
     pendingImages: List<PendingImage>,
-    callbacks: ChatCallbacks,
+    callbacks: PromptControlsCallbacks,
 ) {
     var showSteerDialog by remember { mutableStateOf(false) }
     var showFollowUpDialog by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(CHAT_PROMPT_CONTROLS_TAG)
+                .animateContentSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (isStreaming || isRetrying) {
+        AnimatedVisibility(
+            visible = isStreaming || isRetrying,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
             StreamingControls(
                 isRetrying = isRetrying,
                 onAbort = callbacks.onAbort,
@@ -1266,7 +1308,11 @@ private fun PromptControls(
             )
         }
 
-        if (isStreaming && pendingQueueItems.isNotEmpty()) {
+        AnimatedVisibility(
+            visible = isStreaming && pendingQueueItems.isNotEmpty(),
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
             PendingQueueInspector(
                 pendingItems = pendingQueueItems,
                 steeringMode = steeringMode,
@@ -1320,7 +1366,7 @@ private fun StreamingControls(
     onFollowUpClick: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag(CHAT_STREAMING_CONTROLS_TAG),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1469,7 +1515,7 @@ private fun deliveryModeLabel(mode: String): String {
 
 @Suppress("LongMethod", "LongParameterList")
 @Composable
-private fun PromptInputRow(
+internal fun PromptInputRow(
     inputText: String,
     isStreaming: Boolean,
     pendingImages: List<PendingImage>,
@@ -1495,7 +1541,7 @@ private fun PromptInputRow(
             }
         }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = Modifier.fillMaxWidth().testTag(CHAT_PROMPT_INPUT_ROW_TAG)) {
         // Pending images strip
         if (pendingImages.isNotEmpty()) {
             ImageAttachmentStrip(
@@ -1823,6 +1869,10 @@ private fun ExtensionWidgets(
         }
     }
 }
+
+internal const val CHAT_PROMPT_CONTROLS_TAG = "chat_prompt_controls"
+internal const val CHAT_STREAMING_CONTROLS_TAG = "chat_streaming_controls"
+internal const val CHAT_PROMPT_INPUT_ROW_TAG = "chat_prompt_input_row"
 
 private const val COLLAPSED_OUTPUT_LENGTH = 280
 private const val THINKING_COLLAPSE_THRESHOLD = 280

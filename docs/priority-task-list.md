@@ -47,6 +47,7 @@ _Last updated: 2026-02-16_
   - New session uses selected cwd (covered in selection/resolve unit tests)
   - Note: added `CwdChipSelectorTest` (androidTest) + compile verification loop
 
-- [ ] **Compose UI tests for keyboard + input transitions**
-  - Input row stable with IME open/close
-  - Streaming controls appearance does not produce blank region
+- [x] **Compose UI tests for keyboard + input transitions**
+  - Input row remains stable when streaming controls appear/disappear
+  - Streaming controls + pending inspector visibility transitions covered
+  - Note: added `PromptControlsTransitionTest` (androidTest) and compile verification loop
