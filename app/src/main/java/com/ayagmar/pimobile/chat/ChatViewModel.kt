@@ -567,7 +567,13 @@ class ChatViewModel(
                 visibleTimelineSize = 0
                 pendingLocalUserIds.clear()
                 resetHistoryWindow()
-                _uiState.update { it.copy(sessionCoherencyWarning = null, isSyncingSession = false) }
+                _uiState.update {
+                    it.copy(
+                        sessionCoherencyWarning = null,
+                        isSyncingSession = false,
+                        extensionStatuses = emptyMap(),
+                    )
+                }
                 loadInitialMessages(reason = TimelineReloadReason.SESSION_CHANGED)
             }
         }
@@ -702,7 +708,15 @@ class ChatViewModel(
             return
         }
 
-        // Ignore non-workflow status messages to avoid UI clutter/noise.
+        _uiState.update { state ->
+            val updatedStatuses = state.extensionStatuses.toMutableMap()
+            if (text == null) {
+                updatedStatuses.remove(key)
+            } else {
+                updatedStatuses[key] = text
+            }
+            state.copy(extensionStatuses = updatedStatuses)
+        }
     }
 
     private fun handleInternalWorkflowStatus(payloadText: String) {
@@ -2152,6 +2166,7 @@ data class ChatUiState(
     val activeExtensionRequest: ExtensionUiRequest? = null,
     val notifications: List<ExtensionNotification> = emptyList(),
     val extensionWidgets: Map<String, ExtensionWidget> = emptyMap(),
+    val extensionStatuses: Map<String, String> = emptyMap(),
     val extensionTitle: String? = null,
     val isCommandPaletteVisible: Boolean = false,
     val isCommandPaletteAutoOpened: Boolean = false,

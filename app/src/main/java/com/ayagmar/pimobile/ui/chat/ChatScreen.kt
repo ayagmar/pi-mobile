@@ -386,6 +386,8 @@ private fun ChatScreenContent(
             placement = "belowEditor",
         )
 
+        ExtensionStatusStrip(statuses = state.extensionStatuses)
+
         PromptControls(
             isStreaming = state.isStreaming,
             isRetrying = state.isRetrying,
@@ -1952,6 +1954,57 @@ private fun ModelThinkingControls(
 }
 
 @Composable
+private fun ExtensionStatusStrip(statuses: Map<String, String>) {
+    if (statuses.isEmpty()) return
+
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Extension status (${statuses.size})",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(if (expanded) "Hide" else "Show")
+                }
+            }
+
+            val orderedStatuses = statuses.toSortedMap()
+            val visibleStatuses = if (expanded) orderedStatuses.entries else orderedStatuses.entries.take(2)
+            visibleStatuses.forEach { (key, value) ->
+                Text(
+                    text = "$key: ${value.take(STATUS_VALUE_MAX_LENGTH)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = if (expanded) 4 else 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            if (!expanded && statuses.size > 2) {
+                Text(
+                    text = "+${statuses.size - 2} more",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ExtensionWidgets(
     widgets: Map<String, ExtensionWidget>,
     placement: String,
@@ -1992,6 +2045,7 @@ private const val MAX_INLINE_USER_IMAGE_PREVIEWS = 4
 private const val USER_IMAGE_PREVIEW_SIZE_DP = 56
 private const val AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS = 2
 private const val TOOL_HIGHLIGHT_MAX_LENGTH = 1_000
+private const val STATUS_VALUE_MAX_LENGTH = 180
 private const val RUN_PROGRESS_TICK_MS = 1_000L
 private const val STREAMING_FRAME_LOG_TAG = "StreamingFrameMetrics"
 private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")
