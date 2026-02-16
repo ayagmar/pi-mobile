@@ -1,14 +1,17 @@
 package com.ayagmar.pimobile.ui
 
 import android.content.Context
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Computer
@@ -16,14 +19,15 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MenuOpen
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -33,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -134,37 +139,90 @@ fun piMobileApp(appGraph: AppGraph) {
             drawerContent = {
                 ModalDrawerSheet(
                     modifier = Modifier.widthIn(min = 248.dp, max = 300.dp),
+                    drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)) {
-                        Text(
-                            text = "Navigation",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            text = "Opens from the left side. Tap outside to close.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Divider()
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    destinations.forEach { destination ->
-                        NavigationDrawerItem(
-                            selected = currentRoute == destination.route,
-                            onClick = {
-                                navigateTo(destination.route)
-                                scope.launch { drawerState.close() }
-                            },
-                            label = { Text(destination.label) },
-                            icon = {
-                                Icon(
-                                    imageVector = destination.icon,
-                                    contentDescription = destination.label,
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    text = "Navigation",
+                                    style = MaterialTheme.typography.titleMedium,
                                 )
-                            },
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                Text(
+                                    text = "Slides from the left. Tap outside to close.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+
+                        HorizontalDivider()
+
+                        Text(
+                            text = "WORKSPACE",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp),
                         )
+
+                        destinations.forEach { destination ->
+                            val selected = currentRoute == destination.route
+                            NavigationDrawerItem(
+                                selected = selected,
+                                onClick = {
+                                    navigateTo(destination.route)
+                                    scope.launch { drawerState.close() }
+                                },
+                                label = {
+                                    Text(
+                                        text = destination.label,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                },
+                                icon = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Box(
+                                            modifier =
+                                                Modifier
+                                                    .size(6.dp)
+                                                    .background(
+                                                        color =
+                                                            if (selected) {
+                                                                MaterialTheme.colorScheme.primary
+                                                            } else {
+                                                                MaterialTheme.colorScheme.outlineVariant
+                                                            },
+                                                        shape = CircleShape,
+                                                    ),
+                                        )
+                                        Icon(
+                                            imageVector = destination.icon,
+                                            contentDescription = destination.label,
+                                        )
+                                    }
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                colors =
+                                    NavigationDrawerItemDefaults.colors(
+                                        selectedContainerColor =
+                                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.52f),
+                                        unselectedContainerColor = MaterialTheme.colorScheme.surface,
+                                    ),
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                            )
+                        }
                     }
                 }
             },
@@ -207,8 +265,10 @@ fun piMobileApp(appGraph: AppGraph) {
 
                     Surface(
                         shape = CircleShape,
-                        tonalElevation = 4.dp,
-                        modifier = Modifier.padding(start = 12.dp, top = 8.dp),
+                        tonalElevation = 6.dp,
+                        shadowElevation = 8.dp,
+                        color = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.padding(start = 12.dp, top = 10.dp),
                     ) {
                         FilledTonalIconButton(
                             onClick = {
