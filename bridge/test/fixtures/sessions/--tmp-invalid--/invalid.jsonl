@@ -1,0 +1,2 @@
+{"type":"not-a-session","cwd":"/tmp/invalid"}
+{"type":"message","message":{"role":"user","content":"ignore me"}}

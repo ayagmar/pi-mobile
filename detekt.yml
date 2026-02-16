@@ -1,0 +1,18 @@
+build:
+  maxIssues: 0
+
+style:
+  MaxLineLength:
+    maxLineLength: 120
+
+naming:
+  FunctionNaming:
+    ignoreAnnotated:
+      - Composable
+
+complexity:
+  TooManyFunctions:
+    active: true
+    ignorePrivate: true
+    thresholdInFiles: 15
+    thresholdInClasses: 15

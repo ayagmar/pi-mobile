@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"b1111111","timestamp":"2026-02-02T00:00:00.000Z","cwd":"/tmp/project-b"}
+{"type":"message","id":"bm1","parentId":null,"timestamp":"2026-02-02T00:00:03.000Z","message":{"role":"user","content":"Investigate bug B"}}
+{"type":"message","id":"bm2","parentId":"bm1","timestamp":"2026-02-02T00:00:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Found likely root cause"}],"provider":"anthropic","model":"claude-sonnet-4"}}
+{"type":"session_info","id":"bi1","parentId":"bm2","timestamp":"2026-02-02T00:00:11.000Z","name":"Bug B investigation"}

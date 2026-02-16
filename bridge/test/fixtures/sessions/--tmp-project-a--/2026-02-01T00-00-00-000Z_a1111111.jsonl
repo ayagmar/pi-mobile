@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"a1111111","timestamp":"2026-02-01T00:00:00.000Z","cwd":"/tmp/project-a"}
+{"type":"message","id":"m1","parentId":null,"timestamp":"2026-02-01T00:00:01.000Z","message":{"role":"user","content":"Implement feature A with tests"}}
+{"type":"message","id":"m2","parentId":"m1","timestamp":"2026-02-01T00:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Working on it"}],"provider":"openai","model":"gpt-5.3-codex"}}
+{"type":"session_info","id":"i1","parentId":"m2","timestamp":"2026-02-01T00:00:06.000Z","name":"Feature A work"}
