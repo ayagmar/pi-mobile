@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,6 +56,7 @@ import com.ayagmar.pimobile.di.AppGraph
 import com.ayagmar.pimobile.ui.chat.ChatRoute
 import com.ayagmar.pimobile.ui.hosts.HostsRoute
 import com.ayagmar.pimobile.ui.sessions.SessionsRoute
+import com.ayagmar.pimobile.ui.settings.KEY_SHOW_EXTENSION_STATUS_STRIP
 import com.ayagmar.pimobile.ui.settings.KEY_THEME_PREFERENCE
 import com.ayagmar.pimobile.ui.settings.SETTINGS_PREFS_NAME
 import com.ayagmar.pimobile.ui.settings.SettingsRoute
@@ -188,12 +191,21 @@ fun piMobileApp(appGraph: AppGraph) {
             ),
         )
     }
+    var showExtensionStatusStrip by remember(settingsPrefs) {
+        mutableStateOf(settingsPrefs.getBoolean(KEY_SHOW_EXTENSION_STATUS_STRIP, true))
+    }
 
     DisposableEffect(settingsPrefs) {
         val listener =
             android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
-                if (key == KEY_THEME_PREFERENCE) {
-                    themePreference = ThemePreference.fromValue(prefs.getString(KEY_THEME_PREFERENCE, null))
+                when (key) {
+                    KEY_THEME_PREFERENCE -> {
+                        themePreference = ThemePreference.fromValue(prefs.getString(KEY_THEME_PREFERENCE, null))
+                    }
+
+                    KEY_SHOW_EXTENSION_STATUS_STRIP -> {
+                        showExtensionStatusStrip = prefs.getBoolean(KEY_SHOW_EXTENSION_STATUS_STRIP, true)
+                    }
                 }
             }
         settingsPrefs.registerOnSharedPreferenceChangeListener(listener)
@@ -222,9 +234,10 @@ fun piMobileApp(appGraph: AppGraph) {
         ModalNavigationDrawer(
             drawerState = drawerState,
             gesturesEnabled = drawerState.isOpen,
+            scrimColor = Color.Transparent,
             drawerContent = {
                 ModalDrawerSheet(
-                    modifier = Modifier.widthIn(min = 248.dp, max = 300.dp),
+                    modifier = Modifier.widthIn(min = 220.dp, max = 270.dp),
                     drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
                 ) {
                     Column(
@@ -303,7 +316,10 @@ fun piMobileApp(appGraph: AppGraph) {
                             )
                         }
                         composable(route = "chat") {
-                            ChatRoute(sessionController = appGraph.sessionController)
+                            ChatRoute(
+                                sessionController = appGraph.sessionController,
+                                showExtensionStatusStrip = showExtensionStatusStrip,
+                            )
                         }
                         composable(route = "settings") {
                             SettingsRoute(sessionController = appGraph.sessionController)
@@ -312,12 +328,17 @@ fun piMobileApp(appGraph: AppGraph) {
 
                     Surface(
                         shape = CircleShape,
-                        tonalElevation = 6.dp,
+                        tonalElevation = 5.dp,
                         shadowElevation = 8.dp,
                         color = MaterialTheme.colorScheme.surface,
-                        modifier = Modifier.padding(start = 12.dp, top = 10.dp),
+                        modifier =
+                            Modifier
+                                .align(Alignment.TopStart)
+                                .statusBarsPadding()
+                                .offset(x = (-6).dp, y = 2.dp),
                     ) {
                         FilledTonalIconButton(
+                            modifier = Modifier.size(42.dp),
                             onClick = {
                                 scope.launch {
                                     if (drawerState.isOpen) {

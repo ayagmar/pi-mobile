@@ -69,7 +69,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -114,8 +113,6 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeEntry
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
-import com.ayagmar.pimobile.ui.settings.KEY_SHOW_EXTENSION_STATUS_STRIP
-import com.ayagmar.pimobile.ui.settings.SETTINGS_PREFS_NAME
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -185,7 +182,10 @@ internal data class PromptControlsCallbacks(
 
 @Suppress("LongMethod")
 @Composable
-fun ChatRoute(sessionController: SessionController) {
+fun ChatRoute(
+    sessionController: SessionController,
+    showExtensionStatusStrip: Boolean,
+) {
     val context = LocalContext.current
     val imageEncoder = remember { ImageEncoder(context) }
     val factory =
@@ -197,27 +197,6 @@ fun ChatRoute(sessionController: SessionController) {
         }
     val chatViewModel: ChatViewModel = viewModel(factory = factory)
     val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
-
-    val settingsPrefs =
-        remember(context) {
-            context.getSharedPreferences(SETTINGS_PREFS_NAME, android.content.Context.MODE_PRIVATE)
-        }
-    var showExtensionStatusStrip by remember(settingsPrefs) {
-        mutableStateOf(settingsPrefs.getBoolean(KEY_SHOW_EXTENSION_STATUS_STRIP, true))
-    }
-
-    DisposableEffect(settingsPrefs) {
-        val listener =
-            android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
-                if (key == KEY_SHOW_EXTENSION_STATUS_STRIP) {
-                    showExtensionStatusStrip = prefs.getBoolean(KEY_SHOW_EXTENSION_STATUS_STRIP, true)
-                }
-            }
-        settingsPrefs.registerOnSharedPreferenceChangeListener(listener)
-        onDispose {
-            settingsPrefs.unregisterOnSharedPreferenceChangeListener(listener)
-        }
-    }
 
     val callbacks =
         remember(chatViewModel) {
@@ -2131,12 +2110,14 @@ private fun ExtensionStatusStrip(statuses: Map<String, String>) {
         hasPreviousSnapshot = true
     }
 
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+        tonalElevation = 1.dp,
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
@@ -2144,17 +2125,29 @@ private fun ExtensionStatusStrip(statuses: Map<String, String>) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = "Extension status (${statuses.size})",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Terminal,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        text = "${presentation.activeCount} active · ${presentation.quietCount} quiet",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            text = "Extension status",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = "${presentation.activeCount} active · ${presentation.quietCount} quiet",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
 
                 TextButton(onClick = { expanded = !expanded }) {
@@ -2163,47 +2156,50 @@ private fun ExtensionStatusStrip(statuses: Map<String, String>) {
             }
 
             if (!expanded) {
-                LazyRow(
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    items(
-                        items = presentation.visibleEntries,
-                        key = { entry -> entry.key },
-                    ) { entry ->
-                        StatusPill(entry = entry)
+                    val first = presentation.visibleEntries.firstOrNull()
+                    if (first != null) {
+                        StatusPill(entry = first)
                     }
-                }
-            } else {
-                presentation.visibleEntries.forEach { entry ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
+                    if (presentation.hiddenCount > 0) {
                         Text(
-                            text = if (entry.isChanged) "•" else "",
+                            text = "+${presentation.hiddenCount} more",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                        Text(
-                            text = "${entry.key}: ${entry.value.take(STATUS_VALUE_MAX_LENGTH)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 4,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
                         )
                     }
                 }
             }
 
-            if (!expanded && presentation.hiddenCount > 0) {
-                Text(
-                    text = "+${presentation.hiddenCount} more",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    presentation.visibleEntries.forEach { entry ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Text(
+                                text = if (entry.isChanged) "•" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                            Text(
+                                text = "${entry.key}: ${entry.value.take(STATUS_VALUE_MAX_LENGTH)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
             }
 
             if (presentation.changedCount > 0) {
