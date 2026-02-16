@@ -67,6 +67,7 @@ class SettingsViewModel(
                 effectiveTransportPreference = effectiveTransport,
                 transportRuntimeNote = transportRuntimeNote(transportPreference, effectiveTransport),
                 themePreference = themePreference,
+                showExtensionStatusStrip = prefs.getBoolean(KEY_SHOW_EXTENSION_STATUS_STRIP, true),
             )
 
         viewModelScope.launch {
@@ -214,6 +215,12 @@ class SettingsViewModel(
         uiState = uiState.copy(themePreference = preference)
     }
 
+    fun toggleExtensionStatusStrip() {
+        val newValue = !uiState.showExtensionStatusStrip
+        prefs.edit().putBoolean(KEY_SHOW_EXTENSION_STATUS_STRIP, newValue).apply()
+        uiState = uiState.copy(showExtensionStatusStrip = newValue)
+    }
+
     fun setSteeringMode(mode: String) {
         if (mode == uiState.steeringMode) return
 
@@ -319,6 +326,7 @@ data class SettingsUiState(
     val effectiveTransportPreference: TransportPreference = TransportPreference.WEBSOCKET,
     val transportRuntimeNote: String = "",
     val themePreference: ThemePreference = ThemePreference.SYSTEM,
+    val showExtensionStatusStrip: Boolean = true,
     val steeringMode: String = SettingsViewModel.MODE_ALL,
     val followUpMode: String = SettingsViewModel.MODE_ALL,
     val isUpdatingSteeringMode: Boolean = false,

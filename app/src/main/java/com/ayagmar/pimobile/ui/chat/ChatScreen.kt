@@ -69,6 +69,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -113,6 +114,8 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeEntry
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
+import com.ayagmar.pimobile.ui.settings.KEY_SHOW_EXTENSION_STATUS_STRIP
+import com.ayagmar.pimobile.ui.settings.SETTINGS_PREFS_NAME
 import kotlinx.coroutines.delay
 
 private data class ChatCallbacks(
@@ -194,6 +197,27 @@ fun ChatRoute(sessionController: SessionController) {
     val chatViewModel: ChatViewModel = viewModel(factory = factory)
     val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
 
+    val settingsPrefs =
+        remember(context) {
+            context.getSharedPreferences(SETTINGS_PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        }
+    var showExtensionStatusStrip by remember(settingsPrefs) {
+        mutableStateOf(settingsPrefs.getBoolean(KEY_SHOW_EXTENSION_STATUS_STRIP, true))
+    }
+
+    DisposableEffect(settingsPrefs) {
+        val listener =
+            android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+                if (key == KEY_SHOW_EXTENSION_STATUS_STRIP) {
+                    showExtensionStatusStrip = prefs.getBoolean(KEY_SHOW_EXTENSION_STATUS_STRIP, true)
+                }
+            }
+        settingsPrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            settingsPrefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
+
     val callbacks =
         remember(chatViewModel) {
             ChatCallbacks(
@@ -245,6 +269,7 @@ fun ChatRoute(sessionController: SessionController) {
     ChatScreen(
         state = uiState,
         callbacks = callbacks,
+        showExtensionStatusStrip = showExtensionStatusStrip,
     )
 }
 
@@ -253,6 +278,7 @@ fun ChatRoute(sessionController: SessionController) {
 private fun ChatScreen(
     state: ChatUiState,
     callbacks: ChatCallbacks,
+    showExtensionStatusStrip: Boolean,
 ) {
     StreamingFrameMetrics(
         isStreaming = state.isStreaming,
@@ -268,6 +294,7 @@ private fun ChatScreen(
     ChatScreenContent(
         state = state,
         callbacks = callbacks,
+        showExtensionStatusStrip = showExtensionStatusStrip,
     )
 
     ExtensionUiDialogs(
@@ -344,15 +371,64 @@ private fun ChatScreen(
 private fun ChatScreenContent(
     state: ChatUiState,
     callbacks: ChatCallbacks,
+    showExtensionStatusStrip: Boolean,
 ) {
+    val hasStreamingTimelineItem =
+        remember(state.timeline) {
+            state.timeline.any { item ->
+                when (item) {
+                    is ChatTimelineItem.Assistant -> item.isStreaming
+                    is ChatTimelineItem.Tool -> item.isStreaming
+                    is ChatTimelineItem.User -> false
+                }
+            }
+        }
+    val isRunActive = state.isStreaming || state.isRetrying || hasStreamingTimelineItem
+
+    var runStartedAtMs by remember { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(isRunActive) {
+        if (isRunActive) {
+            if (runStartedAtMs == null) {
+                runStartedAtMs = System.currentTimeMillis()
+            }
+        } else {
+            runStartedAtMs = null
+        }
+    }
+
+    val elapsedSeconds by
+        produceState(
+            initialValue = 0L,
+            key1 = isRunActive,
+            key2 = runStartedAtMs,
+        ) {
+            val startedAt = runStartedAtMs
+            if (!isRunActive || startedAt == null) {
+                value = 0L
+                return@produceState
+            }
+
+            while (true) {
+                value = ((System.currentTimeMillis() - startedAt).coerceAtLeast(0L)) / RUN_PROGRESS_TICK_MS
+                delay(RUN_PROGRESS_TICK_MS)
+            }
+        }
+
+    val runPhase =
+        remember(state.isRetrying, state.timeline) {
+            inferLiveRunPhase(
+                isRetrying = state.isRetrying,
+                timeline = state.timeline,
+            )
+        }
+
     Column(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(16.dp).imePadding(),
-        verticalArrangement = Arrangement.spacedBy(if (state.isStreaming) 8.dp else 12.dp),
+        verticalArrangement = Arrangement.spacedBy(if (isRunActive) 8.dp else 12.dp),
     ) {
         ChatHeader(
-            isStreaming = state.isStreaming,
-            isRetrying = state.isRetrying,
-            timeline = state.timeline,
+            isRunActive = isRunActive,
             isSyncingSession = state.isSyncingSession,
             sessionCoherencyWarning = state.sessionCoherencyWarning,
             extensionTitle = state.extensionTitle,
@@ -376,6 +452,9 @@ private fun ChatScreenContent(
                 hasOlderMessages = state.hasOlderMessages,
                 hiddenHistoryCount = state.hiddenHistoryCount,
                 expandedToolArguments = state.expandedToolArguments,
+                isRunActive = isRunActive,
+                runPhase = runPhase,
+                runElapsedSeconds = elapsedSeconds,
                 callbacks = callbacks,
             )
         }
@@ -386,10 +465,8 @@ private fun ChatScreenContent(
             placement = "belowEditor",
         )
 
-        ExtensionStatusStrip(statuses = state.extensionStatuses)
-
         PromptControls(
-            isStreaming = state.isStreaming,
+            isStreaming = isRunActive,
             isRetrying = state.isRetrying,
             pendingQueueItems = state.pendingQueueItems,
             steeringMode = state.steeringMode,
@@ -411,15 +488,17 @@ private fun ChatScreenContent(
                     onClearPendingQueueItems = callbacks.onClearPendingQueueItems,
                 ),
         )
+
+        if (showExtensionStatusStrip) {
+            ExtensionStatusStrip(statuses = state.extensionStatuses)
+        }
     }
 }
 
 @Suppress("LongMethod", "LongParameterList", "CyclomaticComplexMethod")
 @Composable
 private fun ChatHeader(
-    isStreaming: Boolean,
-    isRetrying: Boolean,
-    timeline: List<ChatTimelineItem>,
+    isRunActive: Boolean,
     isSyncingSession: Boolean,
     sessionCoherencyWarning: String?,
     extensionTitle: String?,
@@ -429,45 +508,8 @@ private fun ChatHeader(
     errorMessage: String?,
     callbacks: ChatCallbacks,
 ) {
-    val isCompact = isStreaming
-    var runStartedAtMs by remember { mutableStateOf<Long?>(null) }
+    val isCompact = isRunActive
     var showSecondaryActionsMenu by remember { mutableStateOf(false) }
-
-    LaunchedEffect(isStreaming) {
-        if (isStreaming) {
-            if (runStartedAtMs == null) {
-                runStartedAtMs = System.currentTimeMillis()
-            }
-        } else {
-            runStartedAtMs = null
-        }
-    }
-
-    val elapsedSeconds by
-        produceState(
-            initialValue = 0L,
-            key1 = isStreaming,
-            key2 = runStartedAtMs,
-        ) {
-            val startedAt = runStartedAtMs
-            if (!isStreaming || startedAt == null) {
-                value = 0L
-                return@produceState
-            }
-
-            while (true) {
-                value = ((System.currentTimeMillis() - startedAt).coerceAtLeast(0L)) / RUN_PROGRESS_TICK_MS
-                delay(RUN_PROGRESS_TICK_MS)
-            }
-        }
-
-    val runPhase =
-        remember(isRetrying, timeline) {
-            inferLiveRunPhase(
-                isRetrying = isRetrying,
-                timeline = timeline,
-            )
-        }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // Top row: Title and minimal actions
@@ -564,13 +606,6 @@ private fun ChatHeader(
             }
         }
 
-        if (isStreaming) {
-            LiveRunProgressIndicator(
-                phase = runPhase,
-                elapsedSeconds = elapsedSeconds,
-            )
-        }
-
         sessionCoherencyWarning?.let { warning ->
             Text(
                 text = warning,
@@ -602,10 +637,11 @@ private fun ChatHeader(
 private fun LiveRunProgressIndicator(
     phase: LiveRunPhase,
     elapsedSeconds: Long,
+    modifier: Modifier = Modifier,
 ) {
     Row(
         modifier =
-            Modifier
+            modifier
                 .fillMaxWidth()
                 .padding(top = 4.dp)
                 .testTag(CHAT_RUN_PROGRESS_TAG),
@@ -626,6 +662,36 @@ private fun LiveRunProgressIndicator(
     }
 }
 
+@Composable
+private fun InlineRunProgressCard(
+    phase: LiveRunPhase,
+    elapsedSeconds: Long,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "Assistant",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            LiveRunProgressIndicator(
+                phase = phase,
+                elapsedSeconds = elapsedSeconds,
+                modifier = Modifier,
+            )
+        }
+    }
+}
+
 @Suppress("LongParameterList")
 @Composable
 private fun ChatBody(
@@ -634,8 +700,23 @@ private fun ChatBody(
     hasOlderMessages: Boolean,
     hiddenHistoryCount: Int,
     expandedToolArguments: Set<String>,
+    isRunActive: Boolean,
+    runPhase: LiveRunPhase,
+    runElapsedSeconds: Long,
     callbacks: ChatCallbacks,
 ) {
+    val hasStreamingTimelineItem =
+        remember(timeline) {
+            timeline.any { item ->
+                when (item) {
+                    is ChatTimelineItem.Assistant -> item.isStreaming
+                    is ChatTimelineItem.Tool -> item.isStreaming
+                    is ChatTimelineItem.User -> false
+                }
+            }
+        }
+    val showInlineRunProgress = isRunActive && !hasStreamingTimelineItem
+
     if (isLoading) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
@@ -643,7 +724,7 @@ private fun ChatBody(
         ) {
             CircularProgressIndicator()
         }
-    } else if (timeline.isEmpty()) {
+    } else if (timeline.isEmpty() && !showInlineRunProgress) {
         Text(
             text = "No chat messages yet. Resume a session and send a prompt.",
             style = MaterialTheme.typography.bodyLarge,
@@ -654,6 +735,9 @@ private fun ChatBody(
             hasOlderMessages = hasOlderMessages,
             hiddenHistoryCount = hiddenHistoryCount,
             expandedToolArguments = expandedToolArguments,
+            showInlineRunProgress = showInlineRunProgress,
+            runPhase = runPhase,
+            runElapsedSeconds = runElapsedSeconds,
             onLoadOlderMessages = callbacks.onLoadOlderMessages,
             onToggleToolExpansion = callbacks.onToggleToolExpansion,
             onToggleThinkingExpansion = callbacks.onToggleThinkingExpansion,
@@ -671,6 +755,9 @@ private fun ChatTimeline(
     hasOlderMessages: Boolean,
     hiddenHistoryCount: Int,
     expandedToolArguments: Set<String>,
+    showInlineRunProgress: Boolean,
+    runPhase: LiveRunPhase,
+    runElapsedSeconds: Long,
     onLoadOlderMessages: () -> Unit,
     onToggleToolExpansion: (String) -> Unit,
     onToggleThinkingExpansion: (String) -> Unit,
@@ -679,6 +766,7 @@ private fun ChatTimeline(
     modifier: Modifier = Modifier,
 ) {
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val totalItems = timeline.size + if (showInlineRunProgress) 1 else 0
     val shouldAutoScrollToBottom by
         remember {
             derivedStateOf {
@@ -692,9 +780,9 @@ private fun ChatTimeline(
 
     // Auto-scroll only while the user stays near the bottom.
     // This avoids jumping when loading older history or reading past messages.
-    LaunchedEffect(timeline.lastOrNull(), timeline.size, shouldAutoScrollToBottom) {
-        if (timeline.isNotEmpty() && shouldAutoScrollToBottom) {
-            listState.scrollToItem(timeline.size - 1)
+    LaunchedEffect(timeline.lastOrNull(), totalItems, shouldAutoScrollToBottom) {
+        if (totalItems > 0 && shouldAutoScrollToBottom) {
+            listState.scrollToItem(totalItems - 1)
         }
     }
 
@@ -744,6 +832,15 @@ private fun ChatTimeline(
                         onToggleArgumentsExpansion = onToggleToolArgumentsExpansion,
                     )
                 }
+            }
+        }
+
+        if (showInlineRunProgress) {
+            item(key = "inline-run-progress") {
+                InlineRunProgressCard(
+                    phase = runPhase,
+                    elapsedSeconds = runElapsedSeconds,
+                )
             }
         }
     }

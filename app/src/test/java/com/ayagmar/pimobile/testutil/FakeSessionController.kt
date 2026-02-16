@@ -39,6 +39,10 @@ class FakeSessionController : SessionController {
     var lastPromptMessage: String? = null
     var lastFreshnessSessionPath: String? = null
     var sendPromptResult: Result<Unit> = Result.success(Unit)
+    var abortResult: Result<Unit> = Result.success(Unit)
+    var abortRetryResult: Result<Unit> = Result.success(Unit)
+    var abortCallCount: Int = 0
+    var abortRetryCallCount: Int = 0
     var messagesPayload: JsonObject? = null
     var sessionFreshnessResult: Result<SessionFreshnessSnapshot> =
         Result.failure(IllegalStateException("Not used"))
@@ -134,7 +138,10 @@ class FakeSessionController : SessionController {
         return sendPromptResult
     }
 
-    override suspend fun abort(): Result<Unit> = Result.success(Unit)
+    override suspend fun abort(): Result<Unit> {
+        abortCallCount += 1
+        return abortResult
+    }
 
     override suspend fun steer(message: String): Result<Unit> = Result.success(Unit)
 
@@ -172,7 +179,10 @@ class FakeSessionController : SessionController {
 
     override suspend fun setThinkingLevel(level: String): Result<String?> = Result.success(level)
 
-    override suspend fun abortRetry(): Result<Unit> = Result.success(Unit)
+    override suspend fun abortRetry(): Result<Unit> {
+        abortRetryCallCount += 1
+        return abortRetryResult
+    }
 
     override suspend fun sendExtensionUiResponse(
         requestId: String,

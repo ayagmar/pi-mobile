@@ -189,9 +189,24 @@ class ChatViewModel(
     fun abort() {
         viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
-            val result = sessionController.abort()
-            if (result.isFailure) {
-                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+
+            val abortResult = sessionController.abort()
+            val shouldAttemptAbortRetry = _uiState.value.isRetrying || abortResult.isFailure
+            val abortRetryResult =
+                if (shouldAttemptAbortRetry) {
+                    sessionController.abortRetry()
+                } else {
+                    Result.success(Unit)
+                }
+
+            if (abortResult.isFailure && abortRetryResult.isFailure) {
+                _uiState.update {
+                    it.copy(
+                        errorMessage =
+                            abortResult.exceptionOrNull()?.message
+                                ?: abortRetryResult.exceptionOrNull()?.message,
+                    )
+                }
             }
         }
     }

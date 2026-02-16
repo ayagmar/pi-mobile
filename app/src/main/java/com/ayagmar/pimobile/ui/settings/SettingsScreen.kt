@@ -102,6 +102,7 @@ private fun SettingsScreen(
             effectiveTransportPreference = uiState.effectiveTransportPreference,
             transportRuntimeNote = uiState.transportRuntimeNote,
             themePreference = uiState.themePreference,
+            showExtensionStatusStrip = uiState.showExtensionStatusStrip,
             steeringMode = uiState.steeringMode,
             followUpMode = uiState.followUpMode,
             isUpdatingSteeringMode = uiState.isUpdatingSteeringMode,
@@ -110,6 +111,7 @@ private fun SettingsScreen(
             onToggleAutoRetry = viewModel::toggleAutoRetry,
             onTransportPreferenceSelected = viewModel::setTransportPreference,
             onThemePreferenceSelected = viewModel::setThemePreference,
+            onToggleExtensionStatusStrip = viewModel::toggleExtensionStatusStrip,
             onSteeringModeSelected = viewModel::setSteeringMode,
             onFollowUpModeSelected = viewModel::setFollowUpMode,
         )
@@ -224,6 +226,7 @@ private fun AgentBehaviorCard(
     effectiveTransportPreference: TransportPreference,
     transportRuntimeNote: String,
     themePreference: ThemePreference,
+    showExtensionStatusStrip: Boolean,
     steeringMode: String,
     followUpMode: String,
     isUpdatingSteeringMode: Boolean,
@@ -232,6 +235,7 @@ private fun AgentBehaviorCard(
     onToggleAutoRetry: () -> Unit,
     onTransportPreferenceSelected: (TransportPreference) -> Unit,
     onThemePreferenceSelected: (ThemePreference) -> Unit,
+    onToggleExtensionStatusStrip: () -> Unit,
     onSteeringModeSelected: (String) -> Unit,
     onFollowUpModeSelected: (String) -> Unit,
 ) {
@@ -267,6 +271,13 @@ private fun AgentBehaviorCard(
         ThemePreferenceRow(
             selectedPreference = themePreference,
             onPreferenceSelected = onThemePreferenceSelected,
+        )
+
+        SettingsToggleRow(
+            title = "Show extension status strip",
+            description = "Display extension status updates below the prompt controls in chat",
+            checked = showExtensionStatusStrip,
+            onToggle = onToggleExtensionStatusStrip,
         )
 
         ModeSelectorRow(

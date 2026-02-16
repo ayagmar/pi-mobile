@@ -517,6 +517,46 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun abortFallsBackToAbortRetryWhenAbortFails() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController().apply {
+                    abortResult = Result.failure(IllegalStateException("abort failed"))
+                    abortRetryResult = Result.success(Unit)
+                }
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.abort()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(1, controller.abortCallCount)
+            assertEquals(1, controller.abortRetryCallCount)
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
+    fun abortReportsErrorWhenAbortAndAbortRetryFail() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController().apply {
+                    abortResult = Result.failure(IllegalStateException("abort failed"))
+                    abortRetryResult = Result.failure(IllegalStateException("abort retry failed"))
+                }
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.abort()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(1, controller.abortCallCount)
+            assertEquals(1, controller.abortRetryCallCount)
+            assertEquals("abort failed", viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
     fun initialHistoryLoadsWithWindowAndCanPageOlderMessages() =
         runTest(dispatcher) {
             val controller = FakeSessionController()

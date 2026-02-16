@@ -1,9 +1,21 @@
 package com.ayagmar.pimobile.ui
 
 import android.content.Context
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MenuOpen
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -13,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -31,6 +44,7 @@ import com.ayagmar.pimobile.ui.theme.ThemePreference
 private data class AppDestination(
     val route: String,
     val label: String,
+    val icon: ImageVector,
 )
 
 private val destinations =
@@ -38,18 +52,22 @@ private val destinations =
         AppDestination(
             route = "hosts",
             label = "Hosts",
+            icon = Icons.Default.Computer,
         ),
         AppDestination(
             route = "sessions",
             label = "Sessions",
+            icon = Icons.Default.Storage,
         ),
         AppDestination(
             route = "chat",
             label = "Chat",
+            icon = Icons.Default.Chat,
         ),
         AppDestination(
             route = "settings",
             label = "Settings",
+            icon = Icons.Default.Settings,
         ),
     )
 
@@ -87,63 +105,83 @@ fun piMobileApp(appGraph: AppGraph) {
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route
 
-        Scaffold(
-            bottomBar = {
-                NavigationBar {
+        var isNavExpanded by remember { mutableStateOf(false) }
+
+        fun navigateTo(route: String) {
+            navController.navigate(route) {
+                launchSingleTop = true
+                restoreState = true
+                popUpTo(navController.graph.startDestinationId) {
+                    saveState = true
+                }
+            }
+        }
+
+        Scaffold { paddingValues ->
+            Row(
+                modifier = Modifier.fillMaxSize().padding(paddingValues),
+            ) {
+                NavigationRail(
+                    modifier = Modifier.fillMaxHeight(),
+                ) {
+                    IconButton(onClick = { isNavExpanded = !isNavExpanded }) {
+                        Icon(
+                            imageVector = if (isNavExpanded) Icons.Default.MenuOpen else Icons.Default.Menu,
+                            contentDescription = if (isNavExpanded) "Collapse navigation" else "Expand navigation",
+                        )
+                    }
+
                     destinations.forEach { destination ->
-                        NavigationBarItem(
+                        NavigationRailItem(
                             selected = currentRoute == destination.route,
-                            onClick = {
-                                navController.navigate(destination.route) {
-                                    launchSingleTop = true
-                                    restoreState = true
-                                    popUpTo(navController.graph.startDestinationId) {
-                                        saveState = true
-                                    }
-                                }
+                            onClick = { navigateTo(destination.route) },
+                            icon = {
+                                Icon(
+                                    imageVector = destination.icon,
+                                    contentDescription = destination.label,
+                                )
                             },
-                            icon = { Text(destination.label.take(1)) },
-                            label = { Text(destination.label) },
+                            label =
+                                if (isNavExpanded) {
+                                    { Text(destination.label) }
+                                } else {
+                                    null
+                                },
+                            alwaysShowLabel = isNavExpanded,
                         )
                     }
                 }
-            },
-        ) { paddingValues ->
-            NavHost(
-                navController = navController,
-                startDestination = "sessions",
-                modifier = Modifier.padding(paddingValues),
-            ) {
-                composable(route = "hosts") {
-                    HostsRoute(
-                        profileStore = appGraph.hostProfileStore,
-                        tokenStore = appGraph.hostTokenStore,
-                        diagnostics = appGraph.connectionDiagnostics,
-                    )
-                }
-                composable(route = "sessions") {
-                    SessionsRoute(
-                        profileStore = appGraph.hostProfileStore,
-                        tokenStore = appGraph.hostTokenStore,
-                        repository = appGraph.sessionIndexRepository,
-                        sessionController = appGraph.sessionController,
-                        cwdPreferenceStore = appGraph.sessionCwdPreferenceStore,
-                        onNavigateToChat = {
-                            navController.navigate("chat") {
-                                launchSingleTop = true
-                                restoreState = true
-                                popUpTo(navController.graph.startDestinationId) {
-                                    saveState = true
-                                }
-                            }
-                        },
-                    )
-                }
-                composable(route = "chat") {
-                    ChatRoute(sessionController = appGraph.sessionController)
-                }
-                composable(route = "settings") {
-                    SettingsRoute(sessionController = appGraph.sessionController)
+
+                NavHost(
+                    navController = navController,
+                    startDestination = "sessions",
+                    modifier = Modifier.weight(1f),
+                ) {
+                    composable(route = "hosts") {
+                        HostsRoute(
+                            profileStore = appGraph.hostProfileStore,
+                            tokenStore = appGraph.hostTokenStore,
+                            diagnostics = appGraph.connectionDiagnostics,
+                        )
+                    }
+                    composable(route = "sessions") {
+                        SessionsRoute(
+                            profileStore = appGraph.hostProfileStore,
+                            tokenStore = appGraph.hostTokenStore,
+                            repository = appGraph.sessionIndexRepository,
+                            sessionController = appGraph.sessionController,
+                            cwdPreferenceStore = appGraph.sessionCwdPreferenceStore,
+                            onNavigateToChat = {
+                                navigateTo("chat")
+                            },
+                        )
+                    }
+                    composable(route = "chat") {
+                        ChatRoute(sessionController = appGraph.sessionController)
+                    }
+                    composable(route = "settings") {
+                        SettingsRoute(sessionController = appGraph.sessionController)
+                    }
                 }
             }
         }
