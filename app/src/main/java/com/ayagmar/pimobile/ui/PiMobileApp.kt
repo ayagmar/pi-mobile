@@ -1,10 +1,13 @@
 package com.ayagmar.pimobile.ui
 
 import android.content.Context
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Computer
@@ -27,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -35,6 +39,7 @@ import com.ayagmar.pimobile.di.AppGraph
 import com.ayagmar.pimobile.ui.chat.ChatRoute
 import com.ayagmar.pimobile.ui.hosts.HostsRoute
 import com.ayagmar.pimobile.ui.sessions.SessionsRoute
+import com.ayagmar.pimobile.ui.settings.KEY_NAV_RAIL_EXPANDED
 import com.ayagmar.pimobile.ui.settings.KEY_THEME_PREFERENCE
 import com.ayagmar.pimobile.ui.settings.SETTINGS_PREFS_NAME
 import com.ayagmar.pimobile.ui.settings.SettingsRoute
@@ -86,12 +91,21 @@ fun piMobileApp(appGraph: AppGraph) {
             ),
         )
     }
+    var isNavExpanded by remember(settingsPrefs) {
+        mutableStateOf(settingsPrefs.getBoolean(KEY_NAV_RAIL_EXPANDED, false))
+    }
 
     DisposableEffect(settingsPrefs) {
         val listener =
             android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
-                if (key == KEY_THEME_PREFERENCE) {
-                    themePreference = ThemePreference.fromValue(prefs.getString(KEY_THEME_PREFERENCE, null))
+                when (key) {
+                    KEY_THEME_PREFERENCE -> {
+                        themePreference = ThemePreference.fromValue(prefs.getString(KEY_THEME_PREFERENCE, null))
+                    }
+
+                    KEY_NAV_RAIL_EXPANDED -> {
+                        isNavExpanded = prefs.getBoolean(KEY_NAV_RAIL_EXPANDED, false)
+                    }
                 }
             }
         settingsPrefs.registerOnSharedPreferenceChangeListener(listener)
@@ -104,8 +118,6 @@ fun piMobileApp(appGraph: AppGraph) {
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route
-
-        var isNavExpanded by remember { mutableStateOf(false) }
 
         fun navigateTo(route: String) {
             navController.navigate(route) {
@@ -122,33 +134,44 @@ fun piMobileApp(appGraph: AppGraph) {
                 modifier = Modifier.fillMaxSize().padding(paddingValues),
             ) {
                 NavigationRail(
-                    modifier = Modifier.fillMaxHeight(),
+                    modifier = Modifier.fillMaxHeight().widthIn(min = if (isNavExpanded) 112.dp else 72.dp),
                 ) {
-                    IconButton(onClick = { isNavExpanded = !isNavExpanded }) {
-                        Icon(
-                            imageVector = if (isNavExpanded) Icons.Default.MenuOpen else Icons.Default.Menu,
-                            contentDescription = if (isNavExpanded) "Collapse navigation" else "Expand navigation",
-                        )
-                    }
-
-                    destinations.forEach { destination ->
-                        NavigationRailItem(
-                            selected = currentRoute == destination.route,
-                            onClick = { navigateTo(destination.route) },
-                            icon = {
-                                Icon(
-                                    imageVector = destination.icon,
-                                    contentDescription = destination.label,
-                                )
+                    Column(
+                        modifier = Modifier.fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        IconButton(
+                            onClick = {
+                                val nextValue = !isNavExpanded
+                                isNavExpanded = nextValue
+                                settingsPrefs.edit().putBoolean(KEY_NAV_RAIL_EXPANDED, nextValue).apply()
                             },
-                            label =
-                                if (isNavExpanded) {
-                                    { Text(destination.label) }
-                                } else {
-                                    null
+                        ) {
+                            Icon(
+                                imageVector = if (isNavExpanded) Icons.Default.MenuOpen else Icons.Default.Menu,
+                                contentDescription = if (isNavExpanded) "Collapse navigation" else "Expand navigation",
+                            )
+                        }
+
+                        destinations.forEach { destination ->
+                            NavigationRailItem(
+                                selected = currentRoute == destination.route,
+                                onClick = { navigateTo(destination.route) },
+                                icon = {
+                                    Icon(
+                                        imageVector = destination.icon,
+                                        contentDescription = destination.label,
+                                    )
                                 },
-                            alwaysShowLabel = isNavExpanded,
-                        )
+                                label =
+                                    if (isNavExpanded) {
+                                        { Text(destination.label) }
+                                    } else {
+                                        null
+                                    },
+                                alwaysShowLabel = isNavExpanded,
+                            )
+                        }
                     }
                 }
 

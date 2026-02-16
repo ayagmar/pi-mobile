@@ -117,6 +117,7 @@ import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import com.ayagmar.pimobile.ui.settings.KEY_SHOW_EXTENSION_STATUS_STRIP
 import com.ayagmar.pimobile.ui.settings.SETTINGS_PREFS_NAME
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private data class ChatCallbacks(
     val onToggleToolExpansion: (String) -> Unit,
@@ -736,6 +737,7 @@ private fun ChatBody(
             hiddenHistoryCount = hiddenHistoryCount,
             expandedToolArguments = expandedToolArguments,
             showInlineRunProgress = showInlineRunProgress,
+            isRunActive = isRunActive,
             runPhase = runPhase,
             runElapsedSeconds = runElapsedSeconds,
             onLoadOlderMessages = callbacks.onLoadOlderMessages,
@@ -756,6 +758,7 @@ private fun ChatTimeline(
     hiddenHistoryCount: Int,
     expandedToolArguments: Set<String>,
     showInlineRunProgress: Boolean,
+    isRunActive: Boolean,
     runPhase: LiveRunPhase,
     runElapsedSeconds: Long,
     onLoadOlderMessages: () -> Unit,
@@ -766,6 +769,7 @@ private fun ChatTimeline(
     modifier: Modifier = Modifier,
 ) {
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     val totalItems = timeline.size + if (showInlineRunProgress) 1 else 0
     val shouldAutoScrollToBottom by
         remember {
@@ -777,6 +781,7 @@ private fun ChatTimeline(
                 lastItemIndex <= 0 || lastVisibleIndex >= lastItemIndex - AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS
             }
         }
+    val shouldShowJumpToLatest = isRunActive && totalItems > 0 && !shouldAutoScrollToBottom
 
     // Auto-scroll only while the user stays near the bottom.
     // This avoids jumping when loading older history or reading past messages.
@@ -786,61 +791,82 @@ private fun ChatTimeline(
         }
     }
 
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        if (hasOlderMessages) {
-            item(key = "load-older-messages") {
-                TextButton(
-                    onClick = onLoadOlderMessages,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Load older messages ($hiddenHistoryCount hidden)")
+    Box(modifier = modifier.fillMaxWidth()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (hasOlderMessages) {
+                item(key = "load-older-messages") {
+                    TextButton(
+                        onClick = onLoadOlderMessages,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Load older messages ($hiddenHistoryCount hidden)")
+                    }
                 }
             }
-        }
 
-        items(items = timeline, key = { item -> item.id }) { item ->
-            when (item) {
-                is ChatTimelineItem.User -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        UserCard(
-                            text = item.text,
-                            imageCount = item.imageCount,
-                            imageUris = item.imageUris,
+            items(items = timeline, key = { item -> item.id }) { item ->
+                when (item) {
+                    is ChatTimelineItem.User -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            UserCard(
+                                text = item.text,
+                                imageCount = item.imageCount,
+                                imageUris = item.imageUris,
+                            )
+                        }
+                    }
+
+                    is ChatTimelineItem.Assistant -> {
+                        AssistantCard(
+                            item = item,
+                            onToggleThinkingExpansion = onToggleThinkingExpansion,
+                        )
+                    }
+
+                    is ChatTimelineItem.Tool -> {
+                        ToolCard(
+                            item = item,
+                            isArgumentsExpanded = item.id in expandedToolArguments,
+                            onToggleToolExpansion = onToggleToolExpansion,
+                            onToggleDiffExpansion = onToggleDiffExpansion,
+                            onToggleArgumentsExpansion = onToggleToolArgumentsExpansion,
                         )
                     }
                 }
-                is ChatTimelineItem.Assistant -> {
-                    AssistantCard(
-                        item = item,
-                        onToggleThinkingExpansion = onToggleThinkingExpansion,
-                    )
-                }
+            }
 
-                is ChatTimelineItem.Tool -> {
-                    ToolCard(
-                        item = item,
-                        isArgumentsExpanded = item.id in expandedToolArguments,
-                        onToggleToolExpansion = onToggleToolExpansion,
-                        onToggleDiffExpansion = onToggleDiffExpansion,
-                        onToggleArgumentsExpansion = onToggleToolArgumentsExpansion,
+            if (showInlineRunProgress) {
+                item(key = "inline-run-progress") {
+                    InlineRunProgressCard(
+                        phase = runPhase,
+                        elapsedSeconds = runElapsedSeconds,
                     )
                 }
             }
         }
 
-        if (showInlineRunProgress) {
-            item(key = "inline-run-progress") {
-                InlineRunProgressCard(
-                    phase = runPhase,
-                    elapsedSeconds = runElapsedSeconds,
-                )
+        AnimatedVisibility(
+            visible = shouldShowJumpToLatest,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = {
+                    coroutineScope.launch {
+                        listState.animateScrollToItem(totalItems - 1)
+                    }
+                },
+                modifier = Modifier.testTag(CHAT_JUMP_TO_LATEST_TAG),
+            ) {
+                Text("Jump to latest")
             }
         }
     }
@@ -1583,6 +1609,7 @@ internal fun PromptControls(
     }
 }
 
+@Suppress("LongMethod")
 @Composable
 private fun StreamingControls(
     isRetrying: Boolean,
@@ -1591,57 +1618,66 @@ private fun StreamingControls(
     onSteerClick: () -> Unit,
     onFollowUpClick: () -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth().testTag(CHAT_STREAMING_CONTROLS_TAG),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Button(
-            onClick = onAbort,
-            modifier = Modifier.weight(1f),
-            colors =
-                androidx.compose.material3.ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                ),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Abort",
-                modifier = Modifier.padding(end = 4.dp),
-            )
-            Text(
-                text = "Abort",
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        if (isRetrying) {
             Button(
-                onClick = onAbortRetry,
+                onClick = onAbort,
                 modifier = Modifier.weight(1f),
                 colors =
                     androidx.compose.material3.ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                     ),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp),
             ) {
-                Text(text = "Abort Retry", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-            }
-        } else {
-            Button(
-                onClick = onSteerClick,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(text = "Steer", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                Icon(
+                    imageVector = Icons.Default.Stop,
+                    contentDescription = null,
+                    modifier = Modifier.padding(end = 4.dp),
+                )
+                Text(
+                    text = "Abort",
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
 
-            Button(
-                onClick = onFollowUpClick,
-                modifier = Modifier.weight(1f),
+            if (isRetrying) {
+                OutlinedButton(
+                    onClick = onAbortRetry,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(text = "Abort Retry", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+
+        if (!isRetrying) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "Follow Up", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onSteerClick,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(text = "Steer", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                }
+
+                OutlinedButton(
+                    onClick = onFollowUpClick,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(text = "Follow Up", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
@@ -1898,9 +1934,9 @@ private fun ImageThumbnail(
             modifier =
                 Modifier
                     .align(Alignment.TopEnd)
-                    .size(20.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
         ) {
             Icon(
                 imageVector = Icons.Default.Close,
@@ -2067,11 +2103,35 @@ private fun ModelThinkingControls(
     }
 }
 
+@Suppress("LongMethod")
 @Composable
 private fun ExtensionStatusStrip(statuses: Map<String, String>) {
     if (statuses.isEmpty()) return
 
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var previousStatuses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var hasPreviousSnapshot by remember { mutableStateOf(false) }
+
+    val comparisonSnapshot =
+        if (hasPreviousSnapshot) {
+            previousStatuses
+        } else {
+            statuses.mapValues { (_, value) -> value.trim() }
+        }
+
+    val presentation =
+        remember(statuses, comparisonSnapshot, expanded) {
+            buildExtensionStatusPresentation(
+                statuses = statuses,
+                previousStatuses = comparisonSnapshot,
+                expanded = expanded,
+            )
+        }
+
+    LaunchedEffect(statuses) {
+        previousStatuses = statuses.mapValues { (_, value) -> value.trim() }
+        hasPreviousSnapshot = true
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -2079,43 +2139,176 @@ private fun ExtensionStatusStrip(statuses: Map<String, String>) {
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Extension status (${statuses.size})",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Extension status (${statuses.size})",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = "${presentation.activeCount} active · ${presentation.quietCount} quiet",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
                 TextButton(onClick = { expanded = !expanded }) {
                     Text(if (expanded) "Hide" else "Show")
                 }
             }
 
-            val orderedStatuses = statuses.toSortedMap()
-            val visibleStatuses = if (expanded) orderedStatuses.entries else orderedStatuses.entries.take(2)
-            visibleStatuses.forEach { (key, value) ->
-                Text(
-                    text = "$key: ${value.take(STATUS_VALUE_MAX_LENGTH)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = if (expanded) 4 else 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (!expanded) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(
+                        items = presentation.visibleEntries,
+                        key = { entry -> entry.key },
+                    ) { entry ->
+                        StatusPill(entry = entry)
+                    }
+                }
+            } else {
+                presentation.visibleEntries.forEach { entry ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text(
+                            text = if (entry.isChanged) "•" else "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                        Text(
+                            text = "${entry.key}: ${entry.value.take(STATUS_VALUE_MAX_LENGTH)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
             }
 
-            if (!expanded && statuses.size > 2) {
+            if (!expanded && presentation.hiddenCount > 0) {
                 Text(
-                    text = "+${statuses.size - 2} more",
+                    text = "+${presentation.hiddenCount} more",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+
+            if (presentation.changedCount > 0) {
+                Text(
+                    text = "${presentation.changedCount} update(s) since last refresh",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun StatusPill(entry: ExtensionStatusEntry) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color =
+            if (entry.isLowSignal) {
+                MaterialTheme.colorScheme.surface
+            } else {
+                MaterialTheme.colorScheme.secondaryContainer
+            },
+    ) {
+        Text(
+            text = "${entry.key}: ${entry.value.take(EXTENSION_STATUS_PILL_MAX_LENGTH)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
+}
+
+internal data class ExtensionStatusEntry(
+    val key: String,
+    val value: String,
+    val isLowSignal: Boolean,
+    val isChanged: Boolean,
+)
+
+internal data class ExtensionStatusPresentation(
+    val visibleEntries: List<ExtensionStatusEntry>,
+    val hiddenCount: Int,
+    val activeCount: Int,
+    val quietCount: Int,
+    val changedCount: Int,
+)
+
+internal fun buildExtensionStatusPresentation(
+    statuses: Map<String, String>,
+    previousStatuses: Map<String, String>,
+    expanded: Boolean,
+): ExtensionStatusPresentation {
+    if (statuses.isEmpty()) {
+        return ExtensionStatusPresentation(
+            visibleEntries = emptyList(),
+            hiddenCount = 0,
+            activeCount = 0,
+            quietCount = 0,
+            changedCount = 0,
+        )
+    }
+
+    val entries =
+        statuses
+            .toSortedMap()
+            .map { (key, rawValue) ->
+                val value = rawValue.trim().ifEmpty { "(empty)" }
+                ExtensionStatusEntry(
+                    key = key,
+                    value = value,
+                    isLowSignal = isLowSignalExtensionStatus(value),
+                    isChanged = previousStatuses[key] != value,
+                )
+            }
+
+    val changed = entries.filter { it.isChanged }
+    val active = entries.filterNot { it.isLowSignal }
+    val quietCount = entries.size - active.size
+
+    val compactCandidates =
+        when {
+            changed.isNotEmpty() -> changed
+            active.isNotEmpty() -> active
+            else -> entries
+        }
+
+    val visibleEntries = if (expanded) entries else compactCandidates.take(MAX_COMPACT_EXTENSION_STATUS_ITEMS)
+
+    return ExtensionStatusPresentation(
+        visibleEntries = visibleEntries,
+        hiddenCount = if (expanded) 0 else (entries.size - visibleEntries.size).coerceAtLeast(0),
+        activeCount = active.size,
+        quietCount = quietCount,
+        changedCount = changed.size,
+    )
+}
+
+internal fun isLowSignalExtensionStatus(value: String): Boolean {
+    val normalized = value.trim().lowercase()
+    return LOW_SIGNAL_STATUS_TOKENS.any { token -> normalized.contains(token) }
 }
 
 @Composable
@@ -2151,6 +2344,7 @@ internal const val CHAT_PROMPT_CONTROLS_TAG = "chat_prompt_controls"
 internal const val CHAT_STREAMING_CONTROLS_TAG = "chat_streaming_controls"
 internal const val CHAT_PROMPT_INPUT_ROW_TAG = "chat_prompt_input_row"
 internal const val CHAT_RUN_PROGRESS_TAG = "chat_run_progress"
+internal const val CHAT_JUMP_TO_LATEST_TAG = "chat_jump_to_latest"
 
 private const val COLLAPSED_OUTPUT_LENGTH = 280
 private const val THINKING_COLLAPSE_THRESHOLD = 280
@@ -2160,6 +2354,8 @@ private const val USER_IMAGE_PREVIEW_SIZE_DP = 56
 private const val AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS = 2
 private const val TOOL_HIGHLIGHT_MAX_LENGTH = 1_000
 private const val STATUS_VALUE_MAX_LENGTH = 180
+private const val EXTENSION_STATUS_PILL_MAX_LENGTH = 56
+private const val MAX_COMPACT_EXTENSION_STATUS_ITEMS = 2
 private const val RUN_PROGRESS_TICK_MS = 1_000L
 private const val STREAMING_FRAME_LOG_TAG = "StreamingFrameMetrics"
 private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")
@@ -2216,6 +2412,16 @@ private val TOOL_OUTPUT_LANGUAGE_BY_EXTENSION =
         "go" to "go",
         "rs" to "rust",
         "md" to "markdown",
+    )
+private val LOW_SIGNAL_STATUS_TOKENS =
+    setOf(
+        "idle",
+        "ready",
+        "ok",
+        "connected",
+        "none",
+        "no updates",
+        "synced",
     )
 
 @Suppress("LongParameterList", "LongMethod")
@@ -2331,12 +2537,12 @@ private fun BashDialog(
                             if (output.isNotEmpty()) {
                                 IconButton(
                                     onClick = { clipboardManager.setText(AnnotatedString(output)) },
-                                    modifier = Modifier.size(24.dp),
+                                    modifier = Modifier.size(40.dp),
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.ContentCopy,
                                         contentDescription = "Copy output",
-                                        modifier = Modifier.size(16.dp),
+                                        modifier = Modifier.size(18.dp),
                                     )
                                 }
                             }
