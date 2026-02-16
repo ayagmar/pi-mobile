@@ -1,6 +1,5 @@
 package com.ayagmar.pimobile.ui.sessions
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +36,7 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionsUiState
 import com.ayagmar.pimobile.sessions.SessionsViewModel
 import com.ayagmar.pimobile.sessions.SessionsViewModelFactory
+import com.ayagmar.pimobile.sessions.formatCwdTail
 import com.ayagmar.pimobile.ui.components.PiButton
 import com.ayagmar.pimobile.ui.components.PiCard
 import com.ayagmar.pimobile.ui.components.PiSpacing
@@ -97,11 +97,9 @@ fun SessionsRoute(
             SessionsScreenCallbacks(
                 onHostSelected = sessionsViewModel::onHostSelected,
                 onSearchChanged = sessionsViewModel::onSearchQueryChanged,
-                onCwdToggle = sessionsViewModel::onCwdToggle,
+                onCwdSelected = sessionsViewModel::onCwdSelected,
                 onToggleFlatView = sessionsViewModel::toggleFlatView,
                 onRefreshClick = sessionsViewModel::refreshSessions,
-                onExpandAllCwds = sessionsViewModel::expandAllCwds,
-                onCollapseAllCwds = sessionsViewModel::collapseAllCwds,
                 onNewSession = sessionsViewModel::newSession,
                 onResumeClick = sessionsViewModel::resumeSession,
                 onRename = { name -> sessionsViewModel.runSessionAction(SessionAction.Rename(name)) },
@@ -117,10 +115,8 @@ fun SessionsRoute(
 private data class SessionsScreenCallbacks(
     val onHostSelected: (String) -> Unit,
     val onSearchChanged: (String) -> Unit,
-    val onCwdToggle: (String) -> Unit,
+    val onCwdSelected: (String) -> Unit,
     val onToggleFlatView: () -> Unit,
-    val onExpandAllCwds: () -> Unit,
-    val onCollapseAllCwds: () -> Unit,
     val onRefreshClick: () -> Unit,
     val onNewSession: () -> Unit,
     val onResumeClick: (SessionRecord) -> Unit,
@@ -140,7 +136,7 @@ private data class ActiveSessionActionCallbacks(
 )
 
 private data class SessionsListCallbacks(
-    val onCwdToggle: (String) -> Unit,
+    val onCwdSelected: (String) -> Unit,
     val onResumeClick: (SessionRecord) -> Unit,
     val actions: ActiveSessionActionCallbacks,
 )
@@ -264,20 +260,6 @@ private fun SessionsHeader(
                 TextButton(onClick = callbacks.onToggleFlatView) {
                     Text(if (state.isFlatView) "Grouped" else "Flat")
                 }
-                if (!state.isFlatView) {
-                    val hasCollapsedGroups = state.groups.any { group -> !group.isExpanded }
-                    TextButton(
-                        onClick = {
-                            if (hasCollapsedGroups) {
-                                callbacks.onExpandAllCwds()
-                            } else {
-                                callbacks.onCollapseAllCwds()
-                            }
-                        },
-                    ) {
-                        Text(if (hasCollapsedGroups) "Expand all" else "Collapse all")
-                    }
-                }
                 TextButton(onClick = callbacks.onRefreshClick, enabled = !state.isRefreshing) {
                     Text(if (state.isRefreshing) "Refreshing" else "Refresh")
                 }
@@ -354,11 +336,12 @@ private fun SessionsContent(
             } else {
                 SessionsList(
                     groups = state.groups,
+                    selectedCwd = state.selectedCwd,
                     activeSessionPath = state.activeSessionPath,
                     isBusy = state.isResuming || state.isPerformingAction,
                     callbacks =
                         SessionsListCallbacks(
-                            onCwdToggle = callbacks.onCwdToggle,
+                            onCwdSelected = callbacks.onCwdSelected,
                             onResumeClick = callbacks.onResumeClick,
                             actions = activeSessionActions,
                         ),
@@ -391,23 +374,45 @@ private fun HostSelector(
 @Composable
 private fun SessionsList(
     groups: List<CwdSessionGroupUiState>,
+    selectedCwd: String?,
     activeSessionPath: String?,
     isBusy: Boolean,
     callbacks: SessionsListCallbacks,
 ) {
-    LazyColumn(
+    val resolvedSelectedCwd =
+        remember(groups, selectedCwd) {
+            selectedCwd?.takeIf { target -> groups.any { group -> group.cwd == target } }
+                ?: groups.firstOrNull()?.cwd
+        }
+
+    val selectedGroup =
+        remember(groups, resolvedSelectedCwd) {
+            groups.firstOrNull { group -> group.cwd == resolvedSelectedCwd }
+        }
+
+    Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        groups.forEach { group ->
-            item(key = "header-${group.cwd}") {
-                CwdHeader(
-                    group = group,
-                    onToggle = { callbacks.onCwdToggle(group.cwd) },
-                )
-            }
+        CwdChipSelector(
+            groups = groups,
+            selectedCwd = resolvedSelectedCwd,
+            onCwdSelected = callbacks.onCwdSelected,
+        )
 
-            if (group.isExpanded) {
+        selectedGroup?.let { group ->
+            Text(
+                text = group.cwd,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 items(items = group.sessions, key = { session -> session.sessionPath }) { session ->
                     SessionCard(
                         session = session,
@@ -418,6 +423,30 @@ private fun SessionsList(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CwdChipSelector(
+    groups: List<CwdSessionGroupUiState>,
+    selectedCwd: String?,
+    onCwdSelected: (String) -> Unit,
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(items = groups, key = { group -> group.cwd }) { group ->
+            val shortLabel = formatCwdTail(group.cwd)
+            FilterChip(
+                selected = group.cwd == selectedCwd,
+                onClick = { onCwdSelected(group.cwd) },
+                label = {
+                    Text(
+                        text = "$shortLabel (${group.sessions.size})",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+            )
         }
     }
 }
@@ -450,30 +479,6 @@ private fun FlatSessionsList(
                 showCwd = true,
             )
         }
-    }
-}
-
-@Composable
-private fun CwdHeader(
-    group: CwdSessionGroupUiState,
-    onToggle: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "${group.cwd} (${group.sessions.size})",
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = if (group.isExpanded) "▼" else "▶",
-            style = MaterialTheme.typography.bodyLarge,
-        )
     }
 }
 

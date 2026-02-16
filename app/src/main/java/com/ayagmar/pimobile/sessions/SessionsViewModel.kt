@@ -42,7 +42,6 @@ class SessionsViewModel(
     val messages: SharedFlow<String> = _messages.asSharedFlow()
     val navigateToChat: Flow<Unit> = _navigateToChat.receiveAsFlow()
 
-    private val collapsedCwds = linkedSetOf<String>()
     private var observeJob: Job? = null
     private var searchDebounceJob: Job? = null
     private var warmupConnectionJob: Job? = null
@@ -67,13 +66,13 @@ class SessionsViewModel(
             return
         }
 
-        collapsedCwds.clear()
         searchDebounceJob?.cancel()
         resetWarmConnectionIfHostChanged(hostId)
 
         _uiState.update { current ->
             current.copy(
                 selectedHostId = hostId,
+                selectedCwd = null,
                 isLoading = true,
                 groups = emptyList(),
                 activeSessionPath = null,
@@ -106,36 +105,23 @@ class SessionsViewModel(
             }
     }
 
-    fun onCwdToggle(cwd: String) {
-        if (collapsedCwds.contains(cwd)) {
-            collapsedCwds.remove(cwd)
-        } else {
-            collapsedCwds.add(cwd)
+    fun onCwdSelected(cwd: String) {
+        if (cwd == _uiState.value.selectedCwd) {
+            return
         }
 
         _uiState.update { current ->
-            current.copy(groups = remapGroups(current.groups, collapsedCwds))
+            current.copy(selectedCwd = cwd)
+        }
+
+        _uiState.value.selectedHostId?.let { hostId ->
+            maybeWarmupConnection(hostId = hostId, preferredCwd = cwd)
         }
     }
 
     fun toggleFlatView() {
         _uiState.update { current ->
             current.copy(isFlatView = !current.isFlatView)
-        }
-    }
-
-    fun expandAllCwds() {
-        collapsedCwds.clear()
-        _uiState.update { current ->
-            current.copy(groups = remapGroups(current.groups, collapsedCwds))
-        }
-    }
-
-    fun collapseAllCwds() {
-        collapsedCwds.clear()
-        collapsedCwds.addAll(_uiState.value.groups.map { group -> group.cwd })
-        _uiState.update { current ->
-            current.copy(groups = remapGroups(current.groups, collapsedCwds))
         }
     }
 
@@ -162,7 +148,7 @@ class SessionsViewModel(
                 current.copy(isResuming = true, isPerformingAction = false, errorMessage = null)
             }
 
-            val cwd = resolveConnectionCwd(hostId)
+            val cwd = resolveConnectionCwdForHost(hostId)
             val connectResult = sessionController.ensureConnected(selectedHost, token, cwd)
             if (connectResult.isFailure) {
                 emitError(connectResult.exceptionOrNull()?.message ?: "Failed to connect for new session")
@@ -218,12 +204,16 @@ class SessionsViewModel(
             }
     }
 
-    private fun resolveConnectionCwd(hostId: String): String {
+    private fun resolveConnectionCwdForHost(hostId: String): String {
         val state = _uiState.value
 
-        return warmConnectionCwd?.takeIf { warmConnectionHostId == hostId }
-            ?: state.groups.firstOrNull()?.cwd
-            ?: DEFAULT_NEW_SESSION_CWD
+        return resolveConnectionCwd(
+            hostId = hostId,
+            selectedCwd = state.selectedCwd,
+            warmConnectionHostId = warmConnectionHostId,
+            warmConnectionCwd = warmConnectionCwd,
+            groups = state.groups,
+        )
     }
 
     private suspend fun resolveActiveSessionPath(): String? {
@@ -577,11 +567,15 @@ class SessionsViewModel(
                     isLoading = needsObserve && state.groups.isEmpty(),
                     hosts = hosts,
                     selectedHostId = selectedHostId,
+                    selectedCwd = if (state.selectedHostId == selectedHostId) state.selectedCwd else null,
                     errorMessage = null,
                 )
             }
 
-            maybeWarmupConnection(hostId = selectedHostId, preferredCwd = _uiState.value.groups.firstOrNull()?.cwd)
+            maybeWarmupConnection(
+                hostId = selectedHostId,
+                preferredCwd = _uiState.value.selectedCwd ?: _uiState.value.groups.firstOrNull()?.cwd,
+            )
 
             if (needsObserve) {
                 observeHost(selectedHostId)
@@ -602,9 +596,13 @@ class SessionsViewModel(
                         if (current.isLoading && state.groups.isNotEmpty()) {
                             PerformanceMetrics.recordSessionsVisible()
                         }
+                        val mappedGroups = mapGroups(state.groups)
+                        val selectedCwd = resolveSelectedCwd(current.selectedCwd, mappedGroups)
+
                         current.copy(
                             isLoading = false,
-                            groups = mapGroups(state.groups, collapsedCwds),
+                            groups = mappedGroups,
+                            selectedCwd = selectedCwd,
                             isRefreshing = state.isRefreshing,
                             errorMessage = state.errorMessage,
                         )
@@ -612,7 +610,7 @@ class SessionsViewModel(
 
                     maybeWarmupConnection(
                         hostId = hostId,
-                        preferredCwd = state.groups.firstOrNull()?.cwd,
+                        preferredCwd = _uiState.value.selectedCwd ?: state.groups.firstOrNull()?.cwd,
                     )
                 }
             }
@@ -672,26 +670,40 @@ sealed interface SessionAction {
     }
 }
 
-private fun mapGroups(
-    groups: List<SessionGroup>,
-    collapsedCwds: Set<String>,
-): List<CwdSessionGroupUiState> {
+internal fun resolveConnectionCwd(
+    hostId: String,
+    selectedCwd: String?,
+    warmConnectionHostId: String?,
+    warmConnectionCwd: String?,
+    groups: List<CwdSessionGroupUiState>,
+    defaultCwd: String = DEFAULT_NEW_SESSION_CWD,
+): String {
+    return selectedCwd
+        ?: warmConnectionCwd?.takeIf { warmConnectionHostId == hostId }
+        ?: groups.firstOrNull()?.cwd
+        ?: defaultCwd
+}
+
+private fun mapGroups(groups: List<SessionGroup>): List<CwdSessionGroupUiState> {
     return groups.map { group ->
         CwdSessionGroupUiState(
             cwd = group.cwd,
             sessions = group.sessions,
-            isExpanded = !collapsedCwds.contains(group.cwd),
         )
     }
 }
 
-private fun remapGroups(
+internal fun resolveSelectedCwd(
+    currentSelection: String?,
     groups: List<CwdSessionGroupUiState>,
-    collapsedCwds: Set<String>,
-): List<CwdSessionGroupUiState> {
-    return groups.map { group ->
-        group.copy(isExpanded = !collapsedCwds.contains(group.cwd))
+): String? {
+    if (groups.isEmpty()) {
+        return null
     }
+
+    return currentSelection
+        ?.takeIf { selected -> groups.any { group -> group.cwd == selected } }
+        ?: groups.first().cwd
 }
 
 private fun SessionRecord.summaryTitle(): String {
@@ -702,6 +714,7 @@ data class SessionsUiState(
     val isLoading: Boolean = false,
     val hosts: List<HostProfile> = emptyList(),
     val selectedHostId: String? = null,
+    val selectedCwd: String? = null,
     val query: String = "",
     val groups: List<CwdSessionGroupUiState> = emptyList(),
     val isRefreshing: Boolean = false,
@@ -718,7 +731,6 @@ data class SessionsUiState(
 data class CwdSessionGroupUiState(
     val cwd: String,
     val sessions: List<SessionRecord>,
-    val isExpanded: Boolean,
 )
 
 class SessionsViewModelFactory(
