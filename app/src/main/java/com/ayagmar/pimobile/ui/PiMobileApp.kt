@@ -1,6 +1,9 @@
 package com.ayagmar.pimobile.ui
 
 import android.content.Context
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -86,6 +90,88 @@ private val destinations =
             icon = Icons.Default.Settings,
         ),
     )
+
+@Suppress("LongMethod")
+@Composable
+private fun DrawerDestinationItem(
+    destination: AppDestination,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val itemShape = RoundedCornerShape(14.dp)
+    val itemColor by
+        animateColorAsState(
+            targetValue =
+                if (selected) {
+                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.58f)
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+            animationSpec = tween(durationMillis = 180),
+            label = "drawer_item_color",
+        )
+    val dotColor by
+        animateColorAsState(
+            targetValue =
+                if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant
+                },
+            animationSpec = tween(durationMillis = 180),
+            label = "drawer_dot_color",
+        )
+    val dotSize by
+        animateDpAsState(
+            targetValue = if (selected) 8.dp else 6.dp,
+            animationSpec = tween(durationMillis = 180),
+            label = "drawer_dot_size",
+        )
+
+    Surface(
+        shape = itemShape,
+        color = itemColor,
+        tonalElevation = if (selected) 2.dp else 0.dp,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+    ) {
+        NavigationDrawerItem(
+            selected = selected,
+            onClick = onClick,
+            label = {
+                Text(
+                    text = destination.label,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            },
+            icon = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier =
+                            Modifier
+                                .size(dotSize)
+                                .background(
+                                    color = dotColor,
+                                    shape = CircleShape,
+                                ),
+                    )
+                    Icon(
+                        imageVector = destination.icon,
+                        contentDescription = destination.label,
+                    )
+                }
+            },
+            shape = itemShape,
+            colors =
+                NavigationDrawerItemDefaults.colors(
+                    selectedContainerColor = Color.Transparent,
+                    unselectedContainerColor = Color.Transparent,
+                ),
+        )
+    }
+}
 
 @Suppress("LongMethod")
 @Composable
@@ -175,52 +261,13 @@ fun piMobileApp(appGraph: AppGraph) {
                         )
 
                         destinations.forEach { destination ->
-                            val selected = currentRoute == destination.route
-                            NavigationDrawerItem(
-                                selected = selected,
+                            DrawerDestinationItem(
+                                destination = destination,
+                                selected = currentRoute == destination.route,
                                 onClick = {
                                     navigateTo(destination.route)
                                     scope.launch { drawerState.close() }
                                 },
-                                label = {
-                                    Text(
-                                        text = destination.label,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                    )
-                                },
-                                icon = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Box(
-                                            modifier =
-                                                Modifier
-                                                    .size(6.dp)
-                                                    .background(
-                                                        color =
-                                                            if (selected) {
-                                                                MaterialTheme.colorScheme.primary
-                                                            } else {
-                                                                MaterialTheme.colorScheme.outlineVariant
-                                                            },
-                                                        shape = CircleShape,
-                                                    ),
-                                        )
-                                        Icon(
-                                            imageVector = destination.icon,
-                                            contentDescription = destination.label,
-                                        )
-                                    }
-                                },
-                                shape = RoundedCornerShape(14.dp),
-                                colors =
-                                    NavigationDrawerItemDefaults.colors(
-                                        selectedContainerColor =
-                                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.52f),
-                                        unselectedContainerColor = MaterialTheme.colorScheme.surface,
-                                    ),
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                             )
                         }
                     }
