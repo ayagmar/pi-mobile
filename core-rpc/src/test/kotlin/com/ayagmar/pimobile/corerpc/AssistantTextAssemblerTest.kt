@@ -157,6 +157,70 @@ class AssistantTextAssemblerTest {
     }
 
     @Test
+    fun `thinking_end falls back to content payload when thinking field is absent`() {
+        val assembler = AssistantTextAssembler()
+
+        val thinkingEnd =
+            assembler.apply(
+                messageUpdate(
+                    messageTimestamp = 300,
+                    eventType = "thinking_end",
+                    contentIndex = 0,
+                    content = "Reasoning from content payload",
+                    thinking = null,
+                ),
+            )
+
+        assertEquals("Reasoning from content payload", thinkingEnd?.thinking)
+        assertTrue(thinkingEnd?.isThinkingComplete ?: false)
+    }
+
+    @Test
+    fun `supports mixed thinking payload shapes across providers`() {
+        val assembler = AssistantTextAssembler()
+
+        assembler.apply(
+            messageUpdate(
+                messageTimestamp = 400,
+                eventType = "thinking_start",
+                contentIndex = 0,
+            ),
+        )
+        val legacyThinkingEnd =
+            assembler.apply(
+                messageUpdate(
+                    messageTimestamp = 400,
+                    eventType = "thinking_end",
+                    contentIndex = 0,
+                    thinking = "legacy-thinking-field",
+                ),
+            )
+
+        assembler.apply(
+            messageUpdate(
+                messageTimestamp = 500,
+                eventType = "thinking_start",
+                contentIndex = 0,
+            ),
+        )
+        val contentThinkingEnd =
+            assembler.apply(
+                messageUpdate(
+                    messageTimestamp = 500,
+                    eventType = "thinking_end",
+                    contentIndex = 0,
+                    content = "content-thinking-field",
+                    thinking = null,
+                ),
+            )
+
+        assertEquals("legacy-thinking-field", legacyThinkingEnd?.thinking)
+        assertEquals("content-thinking-field", contentThinkingEnd?.thinking)
+        assertTrue(legacyThinkingEnd?.isThinkingComplete ?: false)
+        assertTrue(contentThinkingEnd?.isThinkingComplete ?: false)
+    }
+
+    @Test
     fun `evicts oldest message buffers when limit reached`() {
         val assembler = AssistantTextAssembler(maxTrackedMessages = 1)
 

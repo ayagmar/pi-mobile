@@ -73,6 +73,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -112,6 +113,7 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeEntry
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
+import kotlinx.coroutines.delay
 
 private data class ChatCallbacks(
     val onToggleToolExpansion: (String) -> Unit,
@@ -346,6 +348,8 @@ private fun ChatScreenContent(
     ) {
         ChatHeader(
             isStreaming = state.isStreaming,
+            isRetrying = state.isRetrying,
+            timeline = state.timeline,
             extensionTitle = state.extensionTitle,
             connectionState = state.connectionState,
             currentModel = state.currentModel,
@@ -403,10 +407,12 @@ private fun ChatScreenContent(
     }
 }
 
-@Suppress("LongMethod", "LongParameterList")
+@Suppress("LongMethod", "LongParameterList", "CyclomaticComplexMethod")
 @Composable
 private fun ChatHeader(
     isStreaming: Boolean,
+    isRetrying: Boolean,
+    timeline: List<ChatTimelineItem>,
     extensionTitle: String?,
     connectionState: com.ayagmar.pimobile.corenet.ConnectionState,
     currentModel: ModelInfo?,
@@ -415,6 +421,43 @@ private fun ChatHeader(
     callbacks: ChatCallbacks,
 ) {
     val isCompact = isStreaming
+    var runStartedAtMs by remember { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(isStreaming) {
+        if (isStreaming) {
+            if (runStartedAtMs == null) {
+                runStartedAtMs = System.currentTimeMillis()
+            }
+        } else {
+            runStartedAtMs = null
+        }
+    }
+
+    val elapsedSeconds by
+        produceState(
+            initialValue = 0L,
+            key1 = isStreaming,
+            key2 = runStartedAtMs,
+        ) {
+            val startedAt = runStartedAtMs
+            if (!isStreaming || startedAt == null) {
+                value = 0L
+                return@produceState
+            }
+
+            while (true) {
+                value = ((System.currentTimeMillis() - startedAt).coerceAtLeast(0L)) / RUN_PROGRESS_TICK_MS
+                delay(RUN_PROGRESS_TICK_MS)
+            }
+        }
+
+    val runPhase =
+        remember(isRetrying, timeline) {
+            inferLiveRunPhase(
+                isRetrying = isRetrying,
+                timeline = timeline,
+            )
+        }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // Top row: Title and minimal actions
@@ -481,6 +524,13 @@ private fun ChatHeader(
             }
         }
 
+        if (isStreaming) {
+            LiveRunProgressIndicator(
+                phase = runPhase,
+                elapsedSeconds = elapsedSeconds,
+            )
+        }
+
         // Compact model/thinking controls
         ModelThinkingControls(
             currentModel = currentModel,
@@ -497,6 +547,34 @@ private fun ChatHeader(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
+    }
+}
+
+@Composable
+private fun LiveRunProgressIndicator(
+    phase: LiveRunPhase,
+    elapsedSeconds: Long,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp)
+                .testTag(CHAT_RUN_PROGRESS_TAG),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(12.dp),
+            strokeWidth = 2.dp,
+        )
+        Text(
+            text = "Working · ${phase.label} · ${formatRunElapsed(elapsedSeconds)}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1876,6 +1954,7 @@ private fun ExtensionWidgets(
 internal const val CHAT_PROMPT_CONTROLS_TAG = "chat_prompt_controls"
 internal const val CHAT_STREAMING_CONTROLS_TAG = "chat_streaming_controls"
 internal const val CHAT_PROMPT_INPUT_ROW_TAG = "chat_prompt_input_row"
+internal const val CHAT_RUN_PROGRESS_TAG = "chat_run_progress"
 
 private const val COLLAPSED_OUTPUT_LENGTH = 280
 private const val THINKING_COLLAPSE_THRESHOLD = 280
@@ -1884,6 +1963,7 @@ private const val MAX_INLINE_USER_IMAGE_PREVIEWS = 4
 private const val USER_IMAGE_PREVIEW_SIZE_DP = 56
 private const val AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS = 2
 private const val TOOL_HIGHLIGHT_MAX_LENGTH = 1_000
+private const val RUN_PROGRESS_TICK_MS = 1_000L
 private const val STREAMING_FRAME_LOG_TAG = "StreamingFrameMetrics"
 private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")
 private val CODE_FENCE_REGEX = Regex("```([\\w+-]*)\\r?\\n([\\s\\S]*?)```")

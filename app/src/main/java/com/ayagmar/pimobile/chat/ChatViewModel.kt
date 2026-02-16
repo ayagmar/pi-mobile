@@ -69,6 +69,8 @@ class ChatViewModel(
     private var historyWindowAbsoluteOffset: Int = 0
     private var historyParsedStartIndex: Int = 0
     private val pendingLocalUserIds = ArrayDeque<String>()
+    private var thinkingDiagnostics = ThinkingDiagnosticsCounters()
+    private var thinkingDiagnosticsRunActive = false
 
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -487,6 +489,14 @@ class ChatViewModel(
     private fun observeStreamingState() {
         viewModelScope.launch {
             sessionController.isStreaming.collect { isStreaming ->
+                val wasStreaming = _uiState.value.isStreaming
+
+                if (!wasStreaming && isStreaming) {
+                    resetThinkingDiagnostics(startNewRun = true)
+                } else if (wasStreaming && !isStreaming) {
+                    logThinkingDiagnostics(reason = "streaming_state_complete")
+                }
+
                 _uiState.update { current ->
                     current.copy(
                         isStreaming = isStreaming,
@@ -540,8 +550,10 @@ class ChatViewModel(
         viewModelScope.launch {
             sessionController.sessionChanged.collect {
                 // Reset state for new session
+                logThinkingDiagnostics(reason = "session_changed")
                 hasRecordedFirstToken = false
                 resetStreamingUpdateState()
+                resetThinkingDiagnostics(startNewRun = false)
                 fullTimeline = emptyList()
                 visibleTimelineSize = 0
                 pendingLocalUserIds.clear()
@@ -583,7 +595,10 @@ class ChatViewModel(
                     is AutoCompactionEndEvent -> handleCompactionEnd(event)
                     is AutoRetryStartEvent -> handleRetryStart(event)
                     is AutoRetryEndEvent -> handleRetryEnd(event)
-                    is AgentEndEvent -> flushAllPendingStreamUpdates(force = true)
+                    is AgentEndEvent -> {
+                        flushAllPendingStreamUpdates(force = true)
+                        logThinkingDiagnostics(reason = "agent_end")
+                    }
                     else -> Unit
                 }
             }
@@ -798,6 +813,105 @@ class ChatViewModel(
             }
         val type = if (event.success) "info" else "error"
         addSystemNotification(message, type)
+    }
+
+    private fun trackThinkingEventDiagnostics(event: MessageUpdateEvent) {
+        val assistantEvent = event.assistantMessageEvent ?: return
+        when (assistantEvent.type) {
+            "thinking_start" -> {
+                if (!thinkingDiagnosticsRunActive) {
+                    resetThinkingDiagnostics(startNewRun = true)
+                }
+                thinkingDiagnostics = thinkingDiagnostics.copy(startEvents = thinkingDiagnostics.startEvents + 1)
+            }
+
+            "thinking_delta" -> {
+                if (!thinkingDiagnosticsRunActive) {
+                    resetThinkingDiagnostics(startNewRun = true)
+                }
+                val deltaLength = assistantEvent.delta?.length ?: 0
+                thinkingDiagnostics =
+                    thinkingDiagnostics.copy(
+                        deltaEvents = thinkingDiagnostics.deltaEvents + 1,
+                        deltaChars = thinkingDiagnostics.deltaChars + deltaLength,
+                    )
+            }
+
+            "thinking_end" -> {
+                if (!thinkingDiagnosticsRunActive) {
+                    resetThinkingDiagnostics(startNewRun = true)
+                }
+                val payload = assistantEvent.thinking ?: assistantEvent.content
+                thinkingDiagnostics =
+                    thinkingDiagnostics.copy(
+                        endEvents = thinkingDiagnostics.endEvents + 1,
+                        endPayloadEvents =
+                            thinkingDiagnostics.endPayloadEvents +
+                                if (payload != null) {
+                                    1
+                                } else {
+                                    0
+                                },
+                        endPayloadChars = thinkingDiagnostics.endPayloadChars + (payload?.length ?: 0),
+                    )
+            }
+        }
+    }
+
+    private fun trackThinkingRenderDiagnostics(update: AssistantTextUpdate) {
+        if (update.thinking.isNullOrBlank()) return
+        if (!thinkingDiagnosticsRunActive) return
+
+        thinkingDiagnostics =
+            thinkingDiagnostics.copy(
+                renderedThinkingUpdates = thinkingDiagnostics.renderedThinkingUpdates + 1,
+                renderedThinkingCompleteEvents =
+                    thinkingDiagnostics.renderedThinkingCompleteEvents +
+                        if (update.isThinkingComplete) {
+                            1
+                        } else {
+                            0
+                        },
+            )
+    }
+
+    private fun resetThinkingDiagnostics(startNewRun: Boolean) {
+        thinkingDiagnostics = ThinkingDiagnosticsCounters()
+        thinkingDiagnosticsRunActive = startNewRun
+    }
+
+    private fun logThinkingDiagnostics(reason: String) {
+        if (!thinkingDiagnosticsRunActive) return
+
+        val snapshot = thinkingDiagnostics
+        val totalThinkingEvents = snapshot.startEvents + snapshot.deltaEvents + snapshot.endEvents
+        val assessment =
+            when {
+                totalThinkingEvents == 0 -> "provider_no_thinking_events"
+                snapshot.renderedThinkingUpdates == 0 -> "client_rendering_gap_possible"
+                else -> "thinking_rendered"
+            }
+
+        val message =
+            "reason=$reason start=${snapshot.startEvents} " +
+                "delta=${snapshot.deltaEvents} deltaChars=${snapshot.deltaChars} " +
+                "end=${snapshot.endEvents} endPayload=${snapshot.endPayloadEvents} " +
+                "endPayloadChars=${snapshot.endPayloadChars} " +
+                "rendered=${snapshot.renderedThinkingUpdates} " +
+                "renderedComplete=${snapshot.renderedThinkingCompleteEvents} " +
+                "assessment=$assessment"
+
+        emitThinkingDiagnosticsLog(message)
+        resetThinkingDiagnostics(startNewRun = false)
+    }
+
+    private fun emitThinkingDiagnosticsLog(message: String) {
+        val prefixed = "thinking_diagnostics $message"
+        runCatching {
+            android.util.Log.i(THINKING_DIAGNOSTICS_LOG_TAG, prefixed)
+        }.onFailure {
+            println("$THINKING_DIAGNOSTICS_LOG_TAG: $prefixed")
+        }
     }
 
     private fun addSystemNotification(
@@ -1039,6 +1153,8 @@ class ChatViewModel(
             hasRecordedFirstToken = true
         }
 
+        trackThinkingEventDiagnostics(event)
+
         val assistantEventType = event.assistantMessageEvent?.type
         when (assistantEventType) {
             "error" -> {
@@ -1073,6 +1189,8 @@ class ChatViewModel(
     }
 
     private fun applyAssistantUpdate(update: AssistantTextUpdate) {
+        trackThinkingRenderDiagnostics(update)
+
         val itemId = "assistant-stream-${update.messageKey}-${update.contentIndex}"
         val nextItem =
             ChatTimelineItem.Assistant(
@@ -1699,7 +1817,9 @@ class ChatViewModel(
 
     override fun onCleared() {
         initialLoadJob?.cancel()
+        logThinkingDiagnostics(reason = "viewmodel_cleared")
         resetStreamingUpdateState()
+        resetThinkingDiagnostics(startNewRun = false)
         pendingLocalUserIds.clear()
         super.onCleared()
     }
@@ -1779,6 +1899,7 @@ class ChatViewModel(
         private const val BASH_HISTORY_SIZE = 10
         private const val MAX_NOTIFICATIONS = 6
         private const val MAX_PENDING_QUEUE_ITEMS = 20
+        private const val THINKING_DIAGNOSTICS_LOG_TAG = "ThinkingDiagnostics"
     }
 }
 
@@ -1957,6 +2078,17 @@ private data class InitialLoadMetadata(
     val isStreaming: Boolean,
     val steeringMode: String,
     val followUpMode: String,
+)
+
+private data class ThinkingDiagnosticsCounters(
+    val startEvents: Int = 0,
+    val deltaEvents: Int = 0,
+    val deltaChars: Int = 0,
+    val endEvents: Int = 0,
+    val endPayloadEvents: Int = 0,
+    val endPayloadChars: Int = 0,
+    val renderedThinkingUpdates: Int = 0,
+    val renderedThinkingCompleteEvents: Int = 0,
 )
 
 private data class HistoryMessageWindow(
