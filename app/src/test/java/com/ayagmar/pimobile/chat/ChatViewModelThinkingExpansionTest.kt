@@ -2,6 +2,7 @@
 
 package com.ayagmar.pimobile.chat
 
+import com.ayagmar.pimobile.corerpc.AgentEndEvent
 import com.ayagmar.pimobile.corerpc.AssistantMessageEvent
 import com.ayagmar.pimobile.corerpc.MessageEndEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
@@ -201,6 +202,46 @@ class ChatViewModelThinkingExpansionTest {
 
             val item = viewModel.singleAssistantItem()
             assertEquals("Hello world", item.text)
+        }
+
+    @Test
+    fun pendingAssistantDeltaIsFlushedWhenAgentEnds() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_start",
+                    messageTimestamp = "1733234567902",
+                ),
+            )
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = "Streaming",
+                    messageTimestamp = "1733234567902",
+                ),
+            )
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = " integrity",
+                    messageTimestamp = "1733234567902",
+                ),
+            )
+            controller.emitEvent(
+                AgentEndEvent(
+                    type = "agent_end",
+                    messages = null,
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val item = viewModel.singleAssistantItem()
+            assertEquals("Streaming integrity", item.text)
         }
 
     @Test

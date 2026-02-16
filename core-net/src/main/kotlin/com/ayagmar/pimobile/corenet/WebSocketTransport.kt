@@ -6,7 +6,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -26,26 +25,33 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import java.util.logging.Logger
 import kotlin.math.min
 
 class WebSocketTransport(
     client: OkHttpClient? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val inboundBufferCapacity: Int = DEFAULT_INBOUND_BUFFER_CAPACITY,
 ) : SocketTransport {
     private val client: OkHttpClient = client ?: createDefaultClient()
     private val lifecycleMutex = Mutex()
     private val outboundQueue = Channel<String>(DEFAULT_OUTBOUND_BUFFER_CAPACITY)
-    private val inbound =
-        MutableSharedFlow<String>(
-            extraBufferCapacity = DEFAULT_INBOUND_BUFFER_CAPACITY,
-            onBufferOverflow = BufferOverflow.DROP_OLDEST,
-        )
+    private val inbound = MutableSharedFlow<String>(extraBufferCapacity = inboundBufferCapacity)
     private val state = MutableStateFlow(ConnectionState.DISCONNECTED)
+    private val logger = Logger.getLogger(WebSocketTransport::class.java.name)
+    private val inboundReceivedCount = AtomicLong(0)
+    private val inboundDroppedCount = AtomicLong(0)
+    private val inboundBackpressureReconnectCount = AtomicLong(0)
 
     private var activeConnection: ActiveConnection? = null
     private var connectionJob: Job? = null
     private var target: WebSocketTarget? = null
     private var explicitDisconnect = false
+
+    init {
+        require(inboundBufferCapacity > 0) { "inboundBufferCapacity must be greater than 0" }
+    }
 
     override val inboundMessages: Flow<String> = inbound.asSharedFlow()
     override val connectionState = state.asStateFlow()
@@ -101,6 +107,7 @@ class WebSocketTransport(
         jobToCancel?.join()
         clearOutboundQueue()
         state.value = ConnectionState.DISCONNECTED
+        logInboundDiagnostics(reason = "disconnect")
     }
 
     override suspend fun send(message: String) {
@@ -188,8 +195,14 @@ class WebSocketTransport(
         val opened = CompletableDeferred<WebSocket>()
         val closed = CompletableDeferred<Unit>()
 
+        val receivedAtConnectionStart = inboundReceivedCount.get()
+        val droppedAtConnectionStart = inboundDroppedCount.get()
+        val reconnectsAtConnectionStart = inboundBackpressureReconnectCount.get()
+
         val listener =
             object : WebSocketListener() {
+                private var backpressureRecoveryTriggered = false
+
                 override fun onOpen(
                     webSocket: WebSocket,
                     response: Response,
@@ -201,14 +214,28 @@ class WebSocketTransport(
                     webSocket: WebSocket,
                     text: String,
                 ) {
-                    inbound.tryEmit(text)
+                    emitInboundOrRecover(
+                        webSocket = webSocket,
+                        payload = text,
+                        markBackpressureTriggered = {
+                            backpressureRecoveryTriggered = true
+                        },
+                        isBackpressureTriggered = { backpressureRecoveryTriggered },
+                    )
                 }
 
                 override fun onMessage(
                     webSocket: WebSocket,
                     bytes: ByteString,
                 ) {
-                    inbound.tryEmit(bytes.utf8())
+                    emitInboundOrRecover(
+                        webSocket = webSocket,
+                        payload = bytes.utf8(),
+                        markBackpressureTriggered = {
+                            backpressureRecoveryTriggered = true
+                        },
+                        isBackpressureTriggered = { backpressureRecoveryTriggered },
+                    )
                 }
 
                 override fun onClosing(
@@ -224,6 +251,12 @@ class WebSocketTransport(
                     code: Int,
                     reason: String,
                 ) {
+                    logInboundDiagnostics(
+                        reason = "socket_closed:$code:$reason",
+                        receivedAtStart = receivedAtConnectionStart,
+                        droppedAtStart = droppedAtConnectionStart,
+                        reconnectsAtStart = reconnectsAtConnectionStart,
+                    )
                     closed.complete(Unit)
                 }
 
@@ -232,6 +265,12 @@ class WebSocketTransport(
                     t: Throwable,
                     response: Response?,
                 ) {
+                    logInboundDiagnostics(
+                        reason = "socket_failure:${t.message ?: "unknown"}",
+                        receivedAtStart = receivedAtConnectionStart,
+                        droppedAtStart = droppedAtConnectionStart,
+                        reconnectsAtStart = reconnectsAtConnectionStart,
+                    )
                     if (!opened.isCompleted) {
                         opened.completeExceptionally(t)
                     }
@@ -284,6 +323,46 @@ class WebSocketTransport(
         }
     }
 
+    private fun emitInboundOrRecover(
+        webSocket: WebSocket,
+        payload: String,
+        markBackpressureTriggered: () -> Unit,
+        isBackpressureTriggered: () -> Boolean,
+    ) {
+        inboundReceivedCount.incrementAndGet()
+
+        if (inbound.tryEmit(payload)) {
+            return
+        }
+
+        inboundDroppedCount.incrementAndGet()
+
+        if (!isBackpressureTriggered()) {
+            markBackpressureTriggered()
+            inboundBackpressureReconnectCount.incrementAndGet()
+            logger.warning("Inbound buffer saturated; restarting websocket to force deterministic resync")
+            val closed = webSocket.close(BACKPRESSURE_CLOSE_CODE, BACKPRESSURE_CLOSE_REASON)
+            if (!closed) {
+                webSocket.cancel()
+            }
+        }
+    }
+
+    private fun logInboundDiagnostics(
+        reason: String,
+        receivedAtStart: Long = 0,
+        droppedAtStart: Long = 0,
+        reconnectsAtStart: Long = 0,
+    ) {
+        val received = inboundReceivedCount.get() - receivedAtStart
+        val dropped = inboundDroppedCount.get() - droppedAtStart
+        val reconnects = inboundBackpressureReconnectCount.get() - reconnectsAtStart
+        logger.info(
+            "ws_inbound_diagnostics reason=$reason " +
+                "received=$received dropped=$dropped backpressureReconnects=$reconnects",
+        )
+    }
+
     private data class ActiveConnection(
         val socket: WebSocket,
         val closed: CompletableDeferred<Unit>,
@@ -298,7 +377,9 @@ class WebSocketTransport(
     companion object {
         private const val CLIENT_DISCONNECT_REASON = "client disconnect"
         private const val NORMAL_CLOSE_CODE = 1000
-        private const val DEFAULT_INBOUND_BUFFER_CAPACITY = 256
+        private const val BACKPRESSURE_CLOSE_CODE = 1013
+        private const val BACKPRESSURE_CLOSE_REASON = "inbound backpressure"
+        private const val DEFAULT_INBOUND_BUFFER_CAPACITY = 1024
         private const val DEFAULT_OUTBOUND_BUFFER_CAPACITY = 256
 
         private fun createDefaultClient(): OkHttpClient {

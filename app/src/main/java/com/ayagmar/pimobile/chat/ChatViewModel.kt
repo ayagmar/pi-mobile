@@ -71,6 +71,9 @@ class ChatViewModel(
     private val pendingLocalUserIds = ArrayDeque<String>()
     private var thinkingDiagnostics = ThinkingDiagnosticsCounters()
     private var thinkingDiagnosticsRunActive = false
+    private var streamingDiagnostics = StreamingDeltaDiagnosticsCounters()
+    private var streamingDiagnosticsRunActive = false
+    private var streamingDiagnosticsRunStartedAtMs: Long = 0
 
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -493,8 +496,10 @@ class ChatViewModel(
 
                 if (!wasStreaming && isStreaming) {
                     resetThinkingDiagnostics(startNewRun = true)
+                    resetStreamingDiagnostics(startNewRun = true)
                 } else if (wasStreaming && !isStreaming) {
                     logThinkingDiagnostics(reason = "streaming_state_complete")
+                    logStreamingDiagnostics(reason = "streaming_state_complete")
                 }
 
                 _uiState.update { current ->
@@ -551,9 +556,11 @@ class ChatViewModel(
             sessionController.sessionChanged.collect {
                 // Reset state for new session
                 logThinkingDiagnostics(reason = "session_changed")
+                logStreamingDiagnostics(reason = "session_changed")
                 hasRecordedFirstToken = false
                 resetStreamingUpdateState()
                 resetThinkingDiagnostics(startNewRun = false)
+                resetStreamingDiagnostics(startNewRun = false)
                 fullTimeline = emptyList()
                 visibleTimelineSize = 0
                 pendingLocalUserIds.clear()
@@ -598,6 +605,7 @@ class ChatViewModel(
                     is AgentEndEvent -> {
                         flushAllPendingStreamUpdates(force = true)
                         logThinkingDiagnostics(reason = "agent_end")
+                        logStreamingDiagnostics(reason = "agent_end")
                     }
                     else -> Unit
                 }
@@ -914,6 +922,119 @@ class ChatViewModel(
         }
     }
 
+    private fun trackStreamingEventDiagnostics(event: MessageUpdateEvent) {
+        val assistantEventType = event.assistantMessageEvent?.type
+        if (!streamingDiagnosticsRunActive) {
+            if (assistantEventType == null) return
+            resetStreamingDiagnostics(startNewRun = true)
+        }
+
+        incrementStreamingDiagnostics { counters ->
+            counters.copy(messageUpdateEvents = counters.messageUpdateEvents + 1)
+        }
+
+        when (assistantEventType) {
+            "text_delta" ->
+                incrementStreamingDiagnostics { counters ->
+                    counters.copy(
+                        assistantDeltaEvents = counters.assistantDeltaEvents + 1,
+                        textDeltaEvents = counters.textDeltaEvents + 1,
+                    )
+                }
+
+            "thinking_delta" ->
+                incrementStreamingDiagnostics { counters ->
+                    counters.copy(
+                        assistantDeltaEvents = counters.assistantDeltaEvents + 1,
+                        thinkingDeltaEvents = counters.thinkingDeltaEvents + 1,
+                    )
+                }
+
+            "text_start",
+            "text_end",
+            "thinking_start",
+            "thinking_end",
+            ->
+                incrementStreamingDiagnostics { counters ->
+                    counters.copy(assistantNonDeltaEvents = counters.assistantNonDeltaEvents + 1)
+                }
+        }
+    }
+
+    private fun trackStreamingRenderDiagnostics(source: AssistantUpdateSource) {
+        if (!streamingDiagnosticsRunActive) return
+
+        when (source) {
+            AssistantUpdateSource.IMMEDIATE_DELTA ->
+                incrementStreamingDiagnostics { counters ->
+                    counters.copy(emittedImmediateDeltaEvents = counters.emittedImmediateDeltaEvents + 1)
+                }
+
+            AssistantUpdateSource.FLUSHED_DELTA ->
+                incrementStreamingDiagnostics { counters ->
+                    counters.copy(emittedFlushedDeltaEvents = counters.emittedFlushedDeltaEvents + 1)
+                }
+
+            AssistantUpdateSource.NON_DELTA -> Unit
+        }
+    }
+
+    private fun incrementStreamingDiagnostics(
+        update: (StreamingDeltaDiagnosticsCounters) -> StreamingDeltaDiagnosticsCounters,
+    ) {
+        streamingDiagnostics = update(streamingDiagnostics)
+    }
+
+    private fun resetStreamingDiagnostics(startNewRun: Boolean) {
+        streamingDiagnostics = StreamingDeltaDiagnosticsCounters()
+        streamingDiagnosticsRunActive = startNewRun
+        streamingDiagnosticsRunStartedAtMs = if (startNewRun) System.currentTimeMillis() else 0L
+    }
+
+    private fun logStreamingDiagnostics(reason: String) {
+        if (!streamingDiagnosticsRunActive) return
+
+        val snapshot = streamingDiagnostics
+        val durationMs =
+            if (streamingDiagnosticsRunStartedAtMs > 0L) {
+                (System.currentTimeMillis() - streamingDiagnosticsRunStartedAtMs).coerceAtLeast(0L)
+            } else {
+                0L
+            }
+        val emittedDeltaEvents = snapshot.emittedImmediateDeltaEvents + snapshot.emittedFlushedDeltaEvents
+        val assessment =
+            when {
+                snapshot.assistantDeltaEvents == 0 -> "provider_sparse_or_chunked"
+                snapshot.coalescedDeltaEvents > 0 -> "delta_coalesced"
+                else -> "delta_live"
+            }
+
+        val message =
+            "reason=$reason durationMs=$durationMs " +
+                "messageUpdates=${snapshot.messageUpdateEvents} " +
+                "assistantDelta=${snapshot.assistantDeltaEvents} " +
+                "textDelta=${snapshot.textDeltaEvents} " +
+                "thinkingDelta=${snapshot.thinkingDeltaEvents} " +
+                "assistantNonDelta=${snapshot.assistantNonDeltaEvents} " +
+                "coalescedDelta=${snapshot.coalescedDeltaEvents} " +
+                "emittedImmediateDelta=${snapshot.emittedImmediateDeltaEvents} " +
+                "emittedFlushedDelta=${snapshot.emittedFlushedDeltaEvents} " +
+                "emittedDelta=$emittedDeltaEvents " +
+                "assessment=$assessment"
+
+        emitStreamingDiagnosticsLog(message)
+        resetStreamingDiagnostics(startNewRun = false)
+    }
+
+    private fun emitStreamingDiagnosticsLog(message: String) {
+        val prefixed = "streaming_diagnostics $message"
+        runCatching {
+            android.util.Log.i(STREAMING_DIAGNOSTICS_LOG_TAG, prefixed)
+        }.onFailure {
+            println("$STREAMING_DIAGNOSTICS_LOG_TAG: $prefixed")
+        }
+    }
+
     private fun addSystemNotification(
         message: String,
         type: String,
@@ -1154,6 +1275,7 @@ class ChatViewModel(
         }
 
         trackThinkingEventDiagnostics(event)
+        trackStreamingEventDiagnostics(event)
 
         val assistantEventType = event.assistantMessageEvent?.type
         when (assistantEventType) {
@@ -1177,19 +1299,44 @@ class ChatViewModel(
                             assistantEventType == "thinking_delta"
 
                     if (isHighFrequencyDelta) {
-                        assistantUpdateThrottler.offer(update)?.let(::applyAssistantUpdate)
-                            ?: scheduleAssistantUpdateFlush()
+                        handleHighFrequencyAssistantUpdate(update)
                     } else {
                         flushPendingAssistantUpdate(force = true)
-                        applyAssistantUpdate(update)
+                        applyAssistantUpdate(update, source = AssistantUpdateSource.NON_DELTA)
                     }
                 }
             }
         }
     }
 
-    private fun applyAssistantUpdate(update: AssistantTextUpdate) {
+    private fun handleHighFrequencyAssistantUpdate(update: AssistantTextUpdate) {
+        val hadPending = assistantUpdateThrottler.hasPending()
+        val immediateUpdate = assistantUpdateThrottler.offer(update)
+
+        if (immediateUpdate != null) {
+            applyAssistantUpdate(
+                update = immediateUpdate,
+                source = AssistantUpdateSource.IMMEDIATE_DELTA,
+            )
+            return
+        }
+
+        if (hadPending) {
+            incrementStreamingDiagnostics { counters ->
+                counters.copy(
+                    coalescedDeltaEvents = counters.coalescedDeltaEvents + 1,
+                )
+            }
+        }
+        scheduleAssistantUpdateFlush()
+    }
+
+    private fun applyAssistantUpdate(
+        update: AssistantTextUpdate,
+        source: AssistantUpdateSource,
+    ) {
         trackThinkingRenderDiagnostics(update)
+        trackStreamingRenderDiagnostics(source)
 
         val itemId = "assistant-stream-${update.messageKey}-${update.contentIndex}"
         val nextItem =
@@ -1584,7 +1731,10 @@ class ChatViewModel(
             }
 
         if (update != null) {
-            applyAssistantUpdate(update)
+            applyAssistantUpdate(
+                update = update,
+                source = AssistantUpdateSource.FLUSHED_DELTA,
+            )
         }
 
         if (!assistantUpdateThrottler.hasPending()) {
@@ -1815,11 +1965,19 @@ class ChatViewModel(
         }
     }
 
+    private enum class AssistantUpdateSource {
+        IMMEDIATE_DELTA,
+        FLUSHED_DELTA,
+        NON_DELTA,
+    }
+
     override fun onCleared() {
         initialLoadJob?.cancel()
         logThinkingDiagnostics(reason = "viewmodel_cleared")
+        logStreamingDiagnostics(reason = "viewmodel_cleared")
         resetStreamingUpdateState()
         resetThinkingDiagnostics(startNewRun = false)
+        resetStreamingDiagnostics(startNewRun = false)
         pendingLocalUserIds.clear()
         super.onCleared()
     }
@@ -1900,6 +2058,7 @@ class ChatViewModel(
         private const val MAX_NOTIFICATIONS = 6
         private const val MAX_PENDING_QUEUE_ITEMS = 20
         private const val THINKING_DIAGNOSTICS_LOG_TAG = "ThinkingDiagnostics"
+        private const val STREAMING_DIAGNOSTICS_LOG_TAG = "StreamingDiagnostics"
     }
 }
 
@@ -2089,6 +2248,17 @@ private data class ThinkingDiagnosticsCounters(
     val endPayloadChars: Int = 0,
     val renderedThinkingUpdates: Int = 0,
     val renderedThinkingCompleteEvents: Int = 0,
+)
+
+private data class StreamingDeltaDiagnosticsCounters(
+    val messageUpdateEvents: Int = 0,
+    val assistantDeltaEvents: Int = 0,
+    val textDeltaEvents: Int = 0,
+    val thinkingDeltaEvents: Int = 0,
+    val assistantNonDeltaEvents: Int = 0,
+    val coalescedDeltaEvents: Int = 0,
+    val emittedImmediateDeltaEvents: Int = 0,
+    val emittedFlushedDeltaEvents: Int = 0,
 )
 
 private data class HistoryMessageWindow(

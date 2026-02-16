@@ -11,7 +11,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -47,16 +46,8 @@ class PiRpcConnection(
     private val pendingResponses = ConcurrentHashMap<String, CompletableDeferred<RpcResponse>>()
     private val bridgeChannels = ConcurrentHashMap<String, Channel<BridgeMessage>>()
 
-    private val _rpcEvents =
-        MutableSharedFlow<RpcIncomingMessage>(
-            extraBufferCapacity = DEFAULT_BUFFER_CAPACITY,
-            onBufferOverflow = BufferOverflow.DROP_OLDEST,
-        )
-    private val _bridgeEvents =
-        MutableSharedFlow<BridgeMessage>(
-            extraBufferCapacity = DEFAULT_BUFFER_CAPACITY,
-            onBufferOverflow = BufferOverflow.DROP_OLDEST,
-        )
+    private val _rpcEvents = MutableSharedFlow<RpcIncomingMessage>(extraBufferCapacity = RPC_EVENT_BUFFER_CAPACITY)
+    private val _bridgeEvents = MutableSharedFlow<BridgeMessage>(extraBufferCapacity = BRIDGE_EVENT_BUFFER_CAPACITY)
     private val _resyncEvents = MutableSharedFlow<RpcResyncSnapshot>(replay = 1, extraBufferCapacity = 1)
 
     private var inboundJob: Job? = null
@@ -223,14 +214,14 @@ class PiRpcConnection(
                     }.getOrNull()
                         ?: return
 
-                _rpcEvents.emit(rpcMessage)
-
                 if (rpcMessage is RpcResponse) {
                     val responseId = rpcMessage.id
                     if (responseId != null) {
                         pendingResponses.remove(responseId)?.complete(rpcMessage)
                     }
                 }
+
+                _rpcEvents.emit(rpcMessage)
             }
 
             BRIDGE_CHANNEL -> {
@@ -239,8 +230,8 @@ class PiRpcConnection(
                         type = envelope.payload.stringField("type") ?: UNKNOWN_BRIDGE_TYPE,
                         payload = envelope.payload,
                     )
-                _bridgeEvents.emit(bridgeMessage)
                 bridgeChannels[bridgeMessage.type]?.trySend(bridgeMessage)
+                _bridgeEvents.emit(bridgeMessage)
             }
         }
     }
@@ -353,7 +344,8 @@ class PiRpcConnection(
         private const val RPC_CHANNEL = "rpc"
         private const val UNKNOWN_BRIDGE_TYPE = "unknown"
         private const val BRIDGE_HELLO_TYPE = "bridge_hello"
-        private const val DEFAULT_BUFFER_CAPACITY = 128
+        private const val RPC_EVENT_BUFFER_CAPACITY = 256
+        private const val BRIDGE_EVENT_BUFFER_CAPACITY = 128
         private const val DEFAULT_REQUEST_TIMEOUT_MS = 10_000L
 
         val defaultJson: Json =
