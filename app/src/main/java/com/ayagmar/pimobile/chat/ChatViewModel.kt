@@ -48,6 +48,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -90,6 +91,7 @@ class ChatViewModel(
         observeStreamingState()
         observeEvents()
         loadInitialMessages(reason = TimelineReloadReason.INITIAL)
+        loadSessionStats()
     }
 
     fun onInputTextChanged(text: String) {
@@ -938,7 +940,8 @@ class ChatViewModel(
     }
 
     private fun handleTurnEnd() {
-        // Silently track turn end - no UI notification to reduce spam
+        // Refresh stats at turn end so context/cost indicators stay current.
+        loadSessionStats()
     }
 
     private fun handleExtensionError(event: ExtensionErrorEvent) {
@@ -1288,6 +1291,19 @@ class ChatViewModel(
             )
         }
         loadInitialMessages(reason = TimelineReloadReason.MANUAL_SYNC)
+    }
+
+    fun compactNow() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.compactSession()
+            if (result.isSuccess) {
+                addSystemNotification("Compaction requested", "info")
+                loadSessionStats()
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
     }
 
     fun loadOlderMessages() {
@@ -2724,6 +2740,10 @@ private fun JsonObject.booleanField(fieldName: String): Boolean? {
     return this[fieldName]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
 }
 
+private fun JsonObject.intField(fieldName: String): Int? {
+    return this[fieldName]?.jsonPrimitive?.intOrNull
+}
+
 private fun JsonObject?.deliveryModeField(
     camelCaseKey: String,
     snakeCaseKey: String,
@@ -2744,6 +2764,7 @@ private fun parseModelInfo(data: JsonObject?): ModelInfo? {
         name = model.stringField("name") ?: "Unknown Model",
         provider = model.stringField("provider") ?: "unknown",
         thinkingLevel = data.stringField("thinkingLevel") ?: "off",
+        contextWindow = model.intField("contextWindow"),
     )
 }
 

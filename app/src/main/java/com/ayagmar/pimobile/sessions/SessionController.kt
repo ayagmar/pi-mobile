@@ -189,6 +189,7 @@ data class ModelInfo(
     val name: String,
     val provider: String,
     val thinkingLevel: String,
+    val contextWindow: Int? = null,
 )
 
 /**

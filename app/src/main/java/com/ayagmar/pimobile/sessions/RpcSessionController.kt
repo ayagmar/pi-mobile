@@ -1111,6 +1111,7 @@ private fun parseModelInfo(data: JsonObject?): ModelInfo? {
         name = model.stringField("name") ?: "Unknown Model",
         provider = model.stringField("provider") ?: "unknown",
         thinkingLevel = data.stringField("thinkingLevel") ?: "off",
+        contextWindow = model.intField("contextWindow"),
     )
 }
 

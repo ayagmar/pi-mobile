@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -328,17 +327,16 @@ fun piMobileApp(appGraph: AppGraph) {
 
                     Surface(
                         shape = CircleShape,
-                        tonalElevation = 5.dp,
-                        shadowElevation = 8.dp,
-                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 3.dp,
+                        shadowElevation = 6.dp,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
                         modifier =
                             Modifier
-                                .align(Alignment.TopStart)
-                                .statusBarsPadding()
-                                .offset(x = (-6).dp, y = 2.dp),
+                                .align(Alignment.CenterStart)
+                                .offset(x = (-8).dp),
                     ) {
                         FilledTonalIconButton(
-                            modifier = Modifier.size(42.dp),
+                            modifier = Modifier.size(34.dp),
                             onClick = {
                                 scope.launch {
                                     if (drawerState.isOpen) {

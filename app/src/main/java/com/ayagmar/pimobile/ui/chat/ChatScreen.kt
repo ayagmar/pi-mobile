@@ -155,6 +155,7 @@ private data class ChatCallbacks(
     val onModelsQueryChanged: (String) -> Unit,
     val onSelectModel: (AvailableModel) -> Unit,
     val onSyncNow: () -> Unit,
+    val onCompactSession: () -> Unit,
     // Tree navigation callbacks
     val onShowTreeSheet: () -> Unit,
     val onHideTreeSheet: () -> Unit,
@@ -236,6 +237,7 @@ fun ChatRoute(
                 onModelsQueryChanged = chatViewModel::onModelsQueryChanged,
                 onSelectModel = chatViewModel::selectModel,
                 onSyncNow = chatViewModel::syncNow,
+                onCompactSession = chatViewModel::compactNow,
                 onShowTreeSheet = chatViewModel::showTreeSheet,
                 onHideTreeSheet = chatViewModel::hideTreeSheet,
                 onForkFromTreeEntry = chatViewModel::forkFromTreeEntry,
@@ -415,6 +417,7 @@ private fun ChatScreenContent(
             connectionState = state.connectionState,
             currentModel = state.currentModel,
             thinkingLevel = state.thinkingLevel,
+            contextUsageLabel = formatContextUsageLabel(state.sessionStats, state.currentModel),
             errorMessage = state.errorMessage,
             callbacks = callbacks,
         )
@@ -485,6 +488,7 @@ private fun ChatHeader(
     connectionState: com.ayagmar.pimobile.corenet.ConnectionState,
     currentModel: ModelInfo?,
     thinkingLevel: String?,
+    contextUsageLabel: String,
     errorMessage: String?,
     callbacks: ChatCallbacks,
 ) {
@@ -582,6 +586,13 @@ private fun ChatHeader(
                             callbacks.onShowStatsSheet()
                         },
                     )
+                    DropdownMenuItem(
+                        text = { Text("Compact now") },
+                        onClick = {
+                            showSecondaryActionsMenu = false
+                            callbacks.onCompactSession()
+                        },
+                    )
                 }
             }
         }
@@ -601,6 +612,20 @@ private fun ChatHeader(
             onSetThinkingLevel = callbacks.onSetThinkingLevel,
             onShowModelPicker = callbacks.onShowModelPicker,
         )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AssistChip(
+                onClick = callbacks.onShowStatsSheet,
+                label = { Text(contextUsageLabel) },
+            )
+            TextButton(onClick = callbacks.onRefreshStats) {
+                Text("Refresh")
+            }
+        }
 
         // Error message if any
         errorMessage?.let { message ->
@@ -2350,6 +2375,8 @@ private const val TOOL_HIGHLIGHT_MAX_LENGTH = 1_000
 private const val STATUS_VALUE_MAX_LENGTH = 180
 private const val EXTENSION_STATUS_PILL_MAX_LENGTH = 56
 private const val MAX_COMPACT_EXTENSION_STATUS_ITEMS = 2
+private const val CONTEXT_PERCENT_FACTOR = 100.0
+private const val MODEL_PICKER_SCROLL_OFFSET_ITEMS = 1
 private const val RUN_PROGRESS_TICK_MS = 1_000L
 private const val STREAMING_FRAME_LOG_TAG = "StreamingFrameMetrics"
 private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")
@@ -2795,12 +2822,28 @@ private fun formatNumber(value: Long): String {
     }
 }
 
+private fun formatContextUsageLabel(
+    stats: SessionStats?,
+    currentModel: ModelInfo?,
+): String {
+    val statsSnapshot = stats ?: return "Ctx --"
+    val consumedTokens = (statsSnapshot.inputTokens + statsSnapshot.outputTokens).coerceAtLeast(0L)
+    val contextWindow = currentModel?.contextWindow?.takeIf { it > 0 }
+
+    return if (contextWindow == null) {
+        "Ctx ${formatNumber(consumedTokens)}"
+    } else {
+        val percent = ((consumedTokens * CONTEXT_PERCENT_FACTOR) / contextWindow.toDouble()).toInt().coerceAtLeast(0)
+        "Ctx $percent% · ${formatNumber(consumedTokens)}/${formatNumber(contextWindow.toLong())}"
+    }
+}
+
 @Suppress("MagicNumber")
 private fun formatCost(value: Double): String {
     return String.format(java.util.Locale.US, "$%.4f", value)
 }
 
-@Suppress("LongParameterList", "LongMethod")
+@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")
 @Composable
 private fun ModelPickerSheet(
     isVisible: Boolean,
@@ -2831,6 +2874,36 @@ private fun ModelPickerSheet(
         remember(filteredModels) {
             filteredModels.groupBy { it.provider }
         }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val selectedModelIndex =
+        remember(groupedModels, currentModel) {
+            if (currentModel == null) {
+                -1
+            } else {
+                var index = 0
+                var foundIndex = -1
+                groupedModels.forEach { (_, modelsInGroup) ->
+                    index += 1 // provider header item
+                    modelsInGroup.forEach { model ->
+                        if (
+                            foundIndex < 0 &&
+                            model.id == currentModel.id &&
+                            model.provider == currentModel.provider
+                        ) {
+                            foundIndex = index
+                        }
+                        index += 1
+                    }
+                }
+                foundIndex
+            }
+        }
+
+    LaunchedEffect(selectedModelIndex, isVisible) {
+        if (isVisible && selectedModelIndex >= 0) {
+            listState.scrollToItem((selectedModelIndex - MODEL_PICKER_SCROLL_OFFSET_ITEMS).coerceAtLeast(0))
+        }
+    }
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
@@ -2868,6 +2941,7 @@ private fun ModelPickerSheet(
                     )
                 } else {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         groupedModels.forEach { (provider, modelsInGroup) ->
