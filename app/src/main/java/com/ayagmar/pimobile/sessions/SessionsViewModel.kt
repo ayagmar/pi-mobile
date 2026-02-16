@@ -695,6 +695,7 @@ sealed interface SessionAction {
     }
 }
 
+@Suppress("LongParameterList")
 internal fun resolveConnectionCwd(
     hostId: String,
     selectedCwd: String?,

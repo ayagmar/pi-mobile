@@ -403,7 +403,7 @@ private fun ChatScreenContent(
     }
 }
 
-@Suppress("LongMethod")
+@Suppress("LongMethod", "LongParameterList")
 @Composable
 private fun ChatHeader(
     isStreaming: Boolean,
@@ -500,6 +500,7 @@ private fun ChatHeader(
     }
 }
 
+@Suppress("LongParameterList")
 @Composable
 private fun ChatBody(
     isLoading: Boolean,
@@ -537,7 +538,7 @@ private fun ChatBody(
     }
 }
 
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "LongMethod")
 @Composable
 private fun ChatTimeline(
     timeline: List<ChatTimelineItem>,
@@ -622,6 +623,7 @@ private fun ChatTimeline(
     }
 }
 
+@Suppress("LongMethod")
 @Composable
 private fun UserCard(
     text: String,
@@ -1011,7 +1013,7 @@ private fun ThinkingBlock(
     }
 }
 
-@Suppress("LongMethod")
+@Suppress("LongMethod", "CyclomaticComplexMethod")
 @Composable
 private fun ToolCard(
     item: ChatTimelineItem.Tool,
@@ -1272,6 +1274,7 @@ private fun inferLanguageFromToolContext(item: ChatTimelineItem.Tool): String? {
     return TOOL_OUTPUT_LANGUAGE_BY_EXTENSION[extension]
 }
 
+@Suppress("LongParameterList", "LongMethod")
 @Composable
 internal fun PromptControls(
     isStreaming: Boolean,

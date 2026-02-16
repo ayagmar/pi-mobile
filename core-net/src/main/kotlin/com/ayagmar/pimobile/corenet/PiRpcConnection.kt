@@ -26,7 +26,6 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -507,11 +506,6 @@ private fun appendClientId(
 private fun JsonObject.stringField(name: String): String? {
     val primitive = this[name]?.jsonPrimitive ?: return null
     return primitive.contentOrNull
-}
-
-private fun JsonObject.booleanField(name: String): Boolean? {
-    val primitive = this[name]?.jsonPrimitive ?: return null
-    return primitive.booleanOrNull
 }
 
 private fun bridgeChannel(

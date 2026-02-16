@@ -347,6 +347,7 @@ class RpcSessionControllerTest {
         return method.invoke(null, data) as T
     }
 
+    @Suppress("SwallowedException")
     private fun invokeRequireNotCancelled(
         response: RpcResponse,
         defaultError: String,

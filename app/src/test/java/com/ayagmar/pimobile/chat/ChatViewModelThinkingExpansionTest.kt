@@ -1,4 +1,4 @@
-@file:Suppress("TooManyFunctions")
+@file:Suppress("TooManyFunctions", "LargeClass")
 
 package com.ayagmar.pimobile.chat
 

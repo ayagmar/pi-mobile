@@ -45,6 +45,7 @@ import com.ayagmar.pimobile.ui.components.PiTextField
 import com.ayagmar.pimobile.ui.components.PiTopBar
 import kotlinx.coroutines.delay
 
+@Suppress("LongParameterList")
 @Composable
 fun SessionsRoute(
     profileStore: HostProfileStore,
