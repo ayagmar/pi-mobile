@@ -431,7 +431,7 @@ private fun SessionsList(
 }
 
 @Composable
-private fun CwdChipSelector(
+internal fun CwdChipSelector(
     groups: List<CwdSessionGroupUiState>,
     selectedCwd: String?,
     onCwdSelected: (String) -> Unit,

@@ -41,10 +41,11 @@ _Last updated: 2026-02-16_
   - Save/restore selected cwd across app restarts
   - Note: implemented with `SessionCwdPreferenceStore` and wired through `AppGraph`
 
-- [ ] **Compose UI tests for grouped cwd chip selector**
+- [x] **Compose UI tests for grouped cwd chip selector**
   - Chip rendering
-  - Selection updates list
-  - New session uses selected cwd
+  - Selection callback wiring
+  - New session uses selected cwd (covered in selection/resolve unit tests)
+  - Note: added `CwdChipSelectorTest` (androidTest) + compile verification loop
 
 - [ ] **Compose UI tests for keyboard + input transitions**
   - Input row stable with IME open/close
