@@ -519,6 +519,64 @@ describe("createSessionIndexer", () => {
         }
     });
 
+    it("computes session freshness fingerprints and reuses cache for unchanged files", async () => {
+        const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-session-freshness-cache-"));
+        const projectDir = path.join(tempRoot, "--tmp-project-freshness--");
+        await fs.mkdir(projectDir, { recursive: true });
+
+        const sessionPath = path.join(projectDir, "2026-02-03T00-00-00-000Z_f1111111.jsonl");
+        const lines = [
+            JSON.stringify({
+                type: "session",
+                version: 3,
+                id: "f1111111",
+                timestamp: "2026-02-03T00:00:00.000Z",
+                cwd: "/tmp/project-freshness",
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "m1",
+                parentId: null,
+                timestamp: "2026-02-03T00:00:01.000Z",
+                message: { role: "user", content: "hello" },
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "m2",
+                parentId: "m1",
+                timestamp: "2026-02-03T00:00:02.000Z",
+                message: { role: "assistant", content: [{ type: "text", text: "reply" }] },
+            }),
+        ];
+        await fs.writeFile(sessionPath, lines.join("\n"), "utf-8");
+
+        const sessionIndexer = createSessionIndexer({
+            sessionsDirectory: tempRoot,
+            logger: createLogger("silent"),
+        });
+
+        const readFileSpy = vi.spyOn(fs, "readFile");
+
+        try {
+            const freshness = await sessionIndexer.getSessionFreshness(sessionPath);
+            expect(freshness.sessionPath).toBe(sessionPath);
+            expect(freshness.cwd).toBe("/tmp/project-freshness");
+            expect(freshness.fingerprint.sizeBytes).toBeGreaterThan(0);
+            expect(freshness.fingerprint.entryCount).toBe(2);
+            expect(freshness.fingerprint.lastEntryId).toBe("m2");
+            expect(freshness.fingerprint.lastEntriesHash.length).toBe(64);
+
+            readFileSpy.mockClear();
+
+            const cachedFreshness = await sessionIndexer.getSessionFreshness(sessionPath);
+            expect(cachedFreshness.fingerprint.lastEntriesHash).toBe(freshness.fingerprint.lastEntriesHash);
+            expect(readFileSpy).not.toHaveBeenCalled();
+        } finally {
+            readFileSpy.mockRestore();
+            await fs.rm(tempRoot, { recursive: true, force: true });
+        }
+    });
+
     it("returns an empty list if session directory does not exist", async () => {
         const sessionIndexer = createSessionIndexer({
             sessionsDirectory: "/tmp/path-does-not-exist-for-tests",

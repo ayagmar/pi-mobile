@@ -72,6 +72,8 @@ const TREE_NAVIGATION_COMMAND = "pi-mobile-tree";
 const TREE_NAVIGATION_STATUS_PREFIX = "pi_mobile_tree_result:";
 const BRIDGE_NAVIGATE_TREE_TYPE = "bridge_navigate_tree";
 const BRIDGE_TREE_NAVIGATION_RESULT_TYPE = "bridge_tree_navigation_result";
+const BRIDGE_GET_SESSION_FRESHNESS_TYPE = "bridge_get_session_freshness";
+const BRIDGE_SESSION_FRESHNESS_TYPE = "bridge_session_freshness";
 const BRIDGE_INTERNAL_RPC_TIMEOUT_MS = 10_000;
 
 export function createBridgeServer(
@@ -537,6 +539,55 @@ async function handleBridgeControlMessage(
                     createBridgeErrorEnvelope(
                         "session_tree_failed",
                         "Failed to build session tree",
+                    ),
+                ),
+            );
+        }
+
+        return;
+    }
+
+    if (messageType === BRIDGE_GET_SESSION_FRESHNESS_TYPE) {
+        const sessionPath = typeof payload.sessionPath === "string" ? payload.sessionPath : undefined;
+        if (!sessionPath) {
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "invalid_session_path",
+                        "sessionPath must be a non-empty string",
+                    ),
+                ),
+            );
+            return;
+        }
+
+        try {
+            const freshness = await sessionIndexer.getSessionFreshness(sessionPath);
+            const lock = processManager.getControlSnapshot(freshness.cwd, freshness.sessionPath);
+
+            client.send(
+                JSON.stringify(
+                    createBridgeEnvelope({
+                        type: BRIDGE_SESSION_FRESHNESS_TYPE,
+                        sessionPath: freshness.sessionPath,
+                        cwd: freshness.cwd,
+                        fingerprint: freshness.fingerprint,
+                        lock: {
+                            cwdOwnerClientId: lock.cwdOwnerClientId ?? null,
+                            sessionOwnerClientId: lock.sessionOwnerClientId ?? null,
+                            isCurrentClientCwdOwner: lock.cwdOwnerClientId === context.clientId,
+                            isCurrentClientSessionOwner: lock.sessionOwnerClientId === context.clientId,
+                        },
+                    }),
+                ),
+            );
+        } catch (error: unknown) {
+            logger.error({ error, sessionPath }, "Failed to read session freshness");
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "session_freshness_failed",
+                        "Failed to read session freshness",
                     ),
                 ),
             );

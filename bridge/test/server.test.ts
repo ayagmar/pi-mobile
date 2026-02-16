@@ -14,7 +14,12 @@ import type {
 import type { PiRpcForwarder } from "../src/rpc-forwarder.js";
 import type { BridgeServer } from "../src/server.js";
 import { createBridgeServer } from "../src/server.js";
-import type { SessionIndexGroup, SessionIndexer, SessionTreeSnapshot } from "../src/session-indexer.js";
+import type {
+    SessionFreshnessSnapshot,
+    SessionIndexGroup,
+    SessionIndexer,
+    SessionTreeSnapshot,
+} from "../src/session-indexer.js";
 
 describe("bridge websocket server", () => {
     let bridgeServer: BridgeServer | undefined;
@@ -236,6 +241,81 @@ describe("bridge websocket server", () => {
             : [];
         expect(entries[1]?.label).toBe("checkpoint");
         expect(entries[1]?.isBookmarked).toBe(true);
+
+        ws.close();
+    });
+
+    it("returns session freshness fingerprint with lock metadata", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        const fakeSessionIndexer = new FakeSessionIndexer();
+        const { baseUrl, server } = await startBridgeServer({
+            processManager: fakeProcessManager,
+            sessionIndexer: fakeSessionIndexer,
+        });
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const waitForCwdSet = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_set_cwd",
+                    cwd: "/tmp/project",
+                },
+            }),
+        );
+        await waitForCwdSet;
+
+        const waitForControl = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_control_acquired");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                    cwd: "/tmp/project",
+                    sessionPath: "/tmp/session-tree.jsonl",
+                },
+            }),
+        );
+        await waitForControl;
+
+        const waitForFreshness =
+            waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_session_freshness");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_get_session_freshness",
+                    sessionPath: "/tmp/session-tree.jsonl",
+                },
+            }),
+        );
+
+        const freshnessEnvelope = await waitForFreshness;
+        expect(fakeSessionIndexer.freshnessCalls).toBe(1);
+        expect(fakeSessionIndexer.requestedSessionPath).toBe("/tmp/session-tree.jsonl");
+        expect(freshnessEnvelope.payload?.type).toBe("bridge_session_freshness");
+        expect(freshnessEnvelope.payload?.sessionPath).toBe("/tmp/session-tree.jsonl");
+        expect(freshnessEnvelope.payload?.cwd).toBe("/tmp/project");
+
+        const fingerprint = freshnessEnvelope.payload?.fingerprint as Record<string, unknown>;
+        expect(fingerprint.mtimeMs).toBe(1730000000000);
+        expect(fingerprint.sizeBytes).toBe(1024);
+        expect(fingerprint.entryCount).toBe(3);
+        expect(fingerprint.lastEntryId).toBe("m3");
+        expect(fingerprint.lastEntriesHash).toBe("abc123");
+
+        const lock = freshnessEnvelope.payload?.lock as Record<string, unknown>;
+        expect(lock.cwdOwnerClientId).toBeTypeOf("string");
+        expect(lock.sessionOwnerClientId).toBeTypeOf("string");
+        expect(lock.isCurrentClientCwdOwner).toBe(true);
+        expect(lock.isCurrentClientSessionOwner).toBe(true);
 
         ws.close();
     });
@@ -1229,6 +1309,7 @@ function isEnvelopeLike(value: unknown): value is EnvelopeLike {
 class FakeSessionIndexer implements SessionIndexer {
     listCalls = 0;
     treeCalls = 0;
+    freshnessCalls = 0;
     requestedSessionPath: string | undefined;
     requestedFilter: string | undefined;
 
@@ -1238,6 +1319,17 @@ class FakeSessionIndexer implements SessionIndexer {
             sessionPath: "/tmp/test-session.jsonl",
             rootIds: [],
             entries: [],
+        },
+        private readonly freshness: SessionFreshnessSnapshot = {
+            sessionPath: "/tmp/session-tree.jsonl",
+            cwd: "/tmp/project",
+            fingerprint: {
+                mtimeMs: 1730000000000,
+                sizeBytes: 1024,
+                entryCount: 3,
+                lastEntryId: "m3",
+                lastEntriesHash: "abc123",
+            },
         },
     ) {}
 
@@ -1255,6 +1347,12 @@ class FakeSessionIndexer implements SessionIndexer {
         this.requestedFilter = filter;
         return this.tree;
     }
+
+    async getSessionFreshness(sessionPath: string): Promise<SessionFreshnessSnapshot> {
+        this.freshnessCalls += 1;
+        this.requestedSessionPath = sessionPath;
+        return this.freshness;
+    }
 }
 
 class FakeProcessManager implements PiProcessManager {
@@ -1269,6 +1367,7 @@ class FakeProcessManager implements PiProcessManager {
 
     private messageHandler: (event: ProcessManagerEvent) => void = () => {};
     private lockByCwd = new Map<string, string>();
+    private lockBySession = new Map<string, string>();
 
     emitRpcEvent(cwd: string, payload: Record<string, unknown>): void {
         this.messageHandler({ cwd, payload });
@@ -1355,7 +1454,20 @@ class FakeProcessManager implements PiProcessManager {
             };
         }
 
+        if (request.sessionPath) {
+            const sessionOwner = this.lockBySession.get(request.sessionPath);
+            if (sessionOwner && sessionOwner !== request.clientId) {
+                return {
+                    success: false,
+                    reason: `session is controlled by another client: ${request.sessionPath}`,
+                };
+            }
+        }
+
         this.lockByCwd.set(request.cwd, request.clientId);
+        if (request.sessionPath) {
+            this.lockBySession.set(request.sessionPath, request.clientId);
+        }
         return { success: true };
     }
 
@@ -1363,9 +1475,29 @@ class FakeProcessManager implements PiProcessManager {
         return this.lockByCwd.get(cwd) === clientId;
     }
 
-    releaseControl(clientId: string, cwd: string): void {
+    getControlSnapshot(cwd: string, sessionPath?: string): { cwdOwnerClientId?: string; sessionOwnerClientId?: string } {
+        return {
+            cwdOwnerClientId: this.lockByCwd.get(cwd),
+            sessionOwnerClientId: sessionPath ? this.lockBySession.get(sessionPath) : undefined,
+        };
+    }
+
+    releaseControl(clientId: string, cwd: string, sessionPath?: string): void {
         if (this.lockByCwd.get(cwd) === clientId) {
             this.lockByCwd.delete(cwd);
+        }
+
+        if (sessionPath) {
+            if (this.lockBySession.get(sessionPath) === clientId) {
+                this.lockBySession.delete(sessionPath);
+            }
+            return;
+        }
+
+        for (const [lockedSessionPath, owner] of this.lockBySession.entries()) {
+            if (owner === clientId) {
+                this.lockBySession.delete(lockedSessionPath);
+            }
         }
     }
 
@@ -1375,13 +1507,19 @@ class FakeProcessManager implements PiProcessManager {
                 this.lockByCwd.delete(cwd);
             }
         }
+
+        for (const [sessionPath, owner] of this.lockBySession.entries()) {
+            if (owner === clientId) {
+                this.lockBySession.delete(sessionPath);
+            }
+        }
     }
 
     getStats(): { activeProcessCount: number; lockedCwdCount: number; lockedSessionCount: number } {
         return {
             activeProcessCount: 0,
             lockedCwdCount: this.lockByCwd.size,
-            lockedSessionCount: 0,
+            lockedSessionCount: this.lockBySession.size,
         };
     }
 
@@ -1391,5 +1529,6 @@ class FakeProcessManager implements PiProcessManager {
 
     async stop(): Promise<void> {
         this.lockByCwd.clear();
+        this.lockBySession.clear();
     }
 }

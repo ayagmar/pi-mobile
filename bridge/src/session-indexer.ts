@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -40,9 +41,24 @@ export interface SessionTreeSnapshot {
     entries: SessionTreeEntry[];
 }
 
+export interface SessionFreshnessFingerprint {
+    mtimeMs: number;
+    sizeBytes: number;
+    entryCount: number;
+    lastEntryId?: string;
+    lastEntriesHash: string;
+}
+
+export interface SessionFreshnessSnapshot {
+    sessionPath: string;
+    cwd: string;
+    fingerprint: SessionFreshnessFingerprint;
+}
+
 export interface SessionIndexer {
     listSessions(): Promise<SessionIndexGroup[]>;
     getSessionTree(sessionPath: string, filter?: SessionTreeFilter): Promise<SessionTreeSnapshot>;
+    getSessionFreshness(sessionPath: string): Promise<SessionFreshnessSnapshot>;
 }
 
 export interface SessionIndexerOptions {
@@ -56,9 +72,16 @@ interface CachedSessionMetadata {
     entry: SessionIndexEntry | undefined;
 }
 
+interface CachedSessionFreshness {
+    mtimeMs: number;
+    size: number;
+    freshness: SessionFreshnessSnapshot;
+}
+
 export function createSessionIndexer(options: SessionIndexerOptions): SessionIndexer {
     const sessionsRoot = path.resolve(options.sessionsDirectory);
     const sessionMetadataCache = new Map<string, CachedSessionMetadata>();
+    const sessionFreshnessCache = new Map<string, CachedSessionFreshness>();
 
     return {
         async listSessions(): Promise<SessionIndexGroup[]> {
@@ -69,6 +92,11 @@ export function createSessionIndexer(options: SessionIndexerOptions): SessionInd
             for (const cachedPath of sessionMetadataCache.keys()) {
                 if (!sessionFileSet.has(cachedPath)) {
                     sessionMetadataCache.delete(cachedPath);
+                }
+            }
+            for (const cachedPath of sessionFreshnessCache.keys()) {
+                if (!sessionFileSet.has(cachedPath)) {
+                    sessionFreshnessCache.delete(cachedPath);
                 }
             }
 
@@ -99,6 +127,11 @@ export function createSessionIndexer(options: SessionIndexerOptions): SessionInd
         async getSessionTree(sessionPath: string, filter?: SessionTreeFilter): Promise<SessionTreeSnapshot> {
             const resolvedSessionPath = await resolveSessionPath(sessionPath, sessionsRoot);
             return parseSessionTreeFile(resolvedSessionPath, options.logger, filter);
+        },
+
+        async getSessionFreshness(sessionPath: string): Promise<SessionFreshnessSnapshot> {
+            const resolvedSessionPath = await resolveSessionPath(sessionPath, sessionsRoot);
+            return parseSessionFreshnessWithCache(resolvedSessionPath, options.logger, sessionFreshnessCache);
         },
     };
 }
@@ -197,6 +230,83 @@ async function parseSessionFileWithCache(
     });
 
     return entry;
+}
+
+async function parseSessionFreshnessWithCache(
+    sessionPath: string,
+    logger: Logger,
+    cache: Map<string, CachedSessionFreshness>,
+): Promise<SessionFreshnessSnapshot> {
+    let fileStats: Awaited<ReturnType<typeof fs.stat>>;
+
+    try {
+        fileStats = await fs.stat(sessionPath);
+    } catch (error: unknown) {
+        cache.delete(sessionPath);
+        logger.warn({ sessionPath, error }, "Failed to stat session file for freshness");
+        throw new Error(`Failed to read session freshness for ${sessionPath}`);
+    }
+
+    const cached = cache.get(sessionPath);
+    if (cached && cached.mtimeMs === fileStats.mtimeMs && cached.size === fileStats.size) {
+        return cached.freshness;
+    }
+
+    const freshness = await parseSessionFreshness(sessionPath, fileStats, logger);
+    cache.set(sessionPath, {
+        mtimeMs: fileStats.mtimeMs,
+        size: fileStats.size,
+        freshness,
+    });
+
+    return freshness;
+}
+
+async function parseSessionFreshness(
+    sessionPath: string,
+    fileStats: Awaited<ReturnType<typeof fs.stat>>,
+    logger: Logger,
+): Promise<SessionFreshnessSnapshot> {
+    let fileContent: string;
+
+    try {
+        fileContent = await fs.readFile(sessionPath, "utf-8");
+    } catch (error: unknown) {
+        logger.warn({ sessionPath, error }, "Failed to read session file for freshness");
+        throw new Error(`Failed to read session file: ${sessionPath}`);
+    }
+
+    const lines = fileContent
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+    if (lines.length === 0) {
+        throw new Error("Session file is empty");
+    }
+
+    const header = tryParseJson(lines[0]);
+    if (!header || header.type !== "session" || typeof header.cwd !== "string") {
+        logger.warn({ sessionPath }, "Invalid session header while computing freshness");
+        throw new Error("Invalid session header");
+    }
+
+    const entryLines = lines.slice(1);
+    const parsedEntries = entryLines.map(tryParseJson).filter((entry): entry is Record<string, unknown> => !!entry);
+    const lastEntryId = findLastEntryId(parsedEntries);
+    const lastEntriesHash = computeLastEntriesHash(entryLines);
+
+    return {
+        sessionPath,
+        cwd: header.cwd,
+        fingerprint: {
+            mtimeMs: Number(fileStats.mtimeMs),
+            sizeBytes: Number(fileStats.size),
+            entryCount: parsedEntries.length,
+            lastEntryId,
+            lastEntriesHash,
+        },
+    };
 }
 
 async function parseSessionFile(
@@ -550,6 +660,24 @@ function normalizePreview(value: string): string | undefined {
     return `${compact.slice(0, maxLength - 1)}…`;
 }
 
+function findLastEntryId(entries: Record<string, unknown>[]): string | undefined {
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const entry = entries[index];
+        if (typeof entry.id === "string" && entry.id.length > 0) {
+            return entry.id;
+        }
+    }
+
+    return undefined;
+}
+
+function computeLastEntriesHash(entryLines: string[]): string {
+    const tail = entryLines.slice(-FRESHNESS_HASH_LINE_WINDOW);
+    return createHash("sha256")
+        .update(tail.join("\n"))
+        .digest("hex");
+}
+
 function tryParseJson(value: string): Record<string, unknown> | undefined {
     let parsed: unknown;
 
@@ -616,3 +744,5 @@ function isErrorWithCode(error: unknown, code: string): boolean {
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+const FRESHNESS_HASH_LINE_WINDOW = 16;

@@ -287,6 +287,27 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun getSessionFreshness(sessionPath: String): Result<SessionFreshnessSnapshot> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val bridgePayload =
+                    buildJsonObject {
+                        put("type", BRIDGE_GET_SESSION_FRESHNESS_TYPE)
+                        put("sessionPath", sessionPath)
+                    }
+
+                val bridgeResponse =
+                    connection.requestBridge(
+                        payload = bridgePayload,
+                        expectedType = BRIDGE_SESSION_FRESHNESS_TYPE,
+                    )
+
+                parseSessionFreshnessSnapshot(bridgeResponse.payload)
+            }
+        }
+    }
+
     override suspend fun navigateTreeToEntry(entryId: String): Result<TreeNavigationResult> {
         return mutex.withLock {
             runCatching {
@@ -924,6 +945,8 @@ class RpcSessionController(
         private const val SET_FOLLOW_UP_MODE_COMMAND = "set_follow_up_mode"
         private const val BRIDGE_GET_SESSION_TREE_TYPE = "bridge_get_session_tree"
         private const val BRIDGE_SESSION_TREE_TYPE = "bridge_session_tree"
+        private const val BRIDGE_GET_SESSION_FRESHNESS_TYPE = "bridge_get_session_freshness"
+        private const val BRIDGE_SESSION_FRESHNESS_TYPE = "bridge_session_freshness"
         private const val BRIDGE_NAVIGATE_TREE_TYPE = "bridge_navigate_tree"
         private const val BRIDGE_TREE_NAVIGATION_RESULT_TYPE = "bridge_tree_navigation_result"
         private const val EVENT_BUFFER_CAPACITY = 256
@@ -1025,6 +1048,38 @@ private fun parseSessionTreeSnapshot(payload: JsonObject): SessionTreeSnapshot {
         rootIds = rootIds,
         currentLeafId = payload.stringField("currentLeafId"),
         entries = entries,
+    )
+}
+
+private fun parseSessionFreshnessSnapshot(payload: JsonObject): SessionFreshnessSnapshot {
+    val sessionPath = payload.stringField("sessionPath") ?: error("Session freshness response missing sessionPath")
+    val cwd = payload.stringField("cwd") ?: error("Session freshness response missing cwd")
+
+    val fingerprintPayload = runCatching { payload["fingerprint"]?.jsonObject }.getOrNull()
+    val lockPayload = runCatching { payload["lock"]?.jsonObject }.getOrNull()
+
+    val fingerprint =
+        SessionFreshnessFingerprint(
+            mtimeMs = fingerprintPayload.longField("mtimeMs") ?: 0L,
+            sizeBytes = fingerprintPayload.longField("sizeBytes") ?: 0L,
+            entryCount = fingerprintPayload.intField("entryCount") ?: 0,
+            lastEntryId = fingerprintPayload.stringField("lastEntryId"),
+            lastEntriesHash = fingerprintPayload.stringField("lastEntriesHash"),
+        )
+
+    val lock =
+        SessionLockMetadata(
+            cwdOwnerClientId = lockPayload.stringField("cwdOwnerClientId"),
+            sessionOwnerClientId = lockPayload.stringField("sessionOwnerClientId"),
+            isCurrentClientCwdOwner = lockPayload.booleanField("isCurrentClientCwdOwner") ?: false,
+            isCurrentClientSessionOwner = lockPayload.booleanField("isCurrentClientSessionOwner") ?: false,
+        )
+
+    return SessionFreshnessSnapshot(
+        sessionPath = sessionPath,
+        cwd = cwd,
+        fingerprint = fingerprint,
+        lock = lock,
     )
 }
 

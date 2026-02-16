@@ -28,6 +28,8 @@ import com.ayagmar.pimobile.corerpc.UiUpdateThrottler
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionController
+import com.ayagmar.pimobile.sessions.SessionFreshnessFingerprint
+import com.ayagmar.pimobile.sessions.SessionFreshnessSnapshot
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +40,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -74,6 +77,11 @@ class ChatViewModel(
     private var streamingDiagnostics = StreamingDeltaDiagnosticsCounters()
     private var streamingDiagnosticsRunActive = false
     private var streamingDiagnosticsRunStartedAtMs: Long = 0
+    private var sessionFreshnessMonitorJob: Job? = null
+    private var latestSessionPath: String? = null
+    private var lastKnownSessionFreshness: SessionFreshnessFingerprint? = null
+    private var localSessionMutationGraceUntilMs: Long = 0
+    private var isSessionFreshnessUnsupported = false
 
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -134,6 +142,7 @@ class ChatViewModel(
         // Record prompt send for TTFT tracking
         recordMetricsSafely { PerformanceMetrics.recordPromptSend() }
         hasRecordedFirstToken = false
+        markLocalSessionMutationExpected()
 
         val optimisticUserId = "$LOCAL_USER_ITEM_PREFIX${UUID.randomUUID()}"
         upsertTimelineItem(
@@ -193,6 +202,7 @@ class ChatViewModel(
 
         viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
+            markLocalSessionMutationExpected()
             val queueItemId = maybeTrackStreamingQueueItem(PendingQueueType.STEER, trimmedMessage)
             val result = sessionController.steer(trimmedMessage)
             if (result.isFailure) {
@@ -208,6 +218,7 @@ class ChatViewModel(
 
         viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
+            markLocalSessionMutationExpected()
             val queueItemId = maybeTrackStreamingQueueItem(PendingQueueType.FOLLOW_UP, trimmedMessage)
             val result = sessionController.followUp(trimmedMessage)
             if (result.isFailure) {
@@ -483,12 +494,131 @@ class ChatViewModel(
                 _uiState.update { current ->
                     current.copy(connectionState = state)
                 }
+
+                if (state == ConnectionState.CONNECTED && previousState != ConnectionState.CONNECTED) {
+                    startSessionFreshnessMonitor()
+                } else if (state != ConnectionState.CONNECTED && previousState == ConnectionState.CONNECTED) {
+                    stopSessionFreshnessMonitor()
+                }
+
                 // Reload messages when connection becomes active and timeline is empty
                 if (state == ConnectionState.CONNECTED && previousState != ConnectionState.CONNECTED && timelineEmpty) {
                     loadInitialMessages(reason = TimelineReloadReason.CONNECTION_RECOVERY)
                 }
             }
         }
+    }
+
+    private fun startSessionFreshnessMonitor() {
+        if (sessionFreshnessMonitorJob?.isActive == true || isSessionFreshnessUnsupported) {
+            return
+        }
+
+        sessionFreshnessMonitorJob =
+            viewModelScope.launch {
+                while (isActive) {
+                    refreshSessionFreshness(trigger = FreshnessCheckTrigger.POLL)
+                    delay(SESSION_FRESHNESS_POLL_INTERVAL_MS)
+                }
+            }
+    }
+
+    private fun stopSessionFreshnessMonitor() {
+        sessionFreshnessMonitorJob?.cancel()
+        sessionFreshnessMonitorJob = null
+    }
+
+    private suspend fun refreshSessionFreshness(trigger: FreshnessCheckTrigger) {
+        if (isSessionFreshnessUnsupported) {
+            return
+        }
+
+        val sessionPath = latestSessionPath
+        if (sessionPath == null) {
+            return
+        }
+
+        val freshnessResult = sessionController.getSessionFreshness(sessionPath)
+        val freshness = freshnessResult.getOrNull()
+
+        if (freshness == null) {
+            val errorMessage = freshnessResult.exceptionOrNull()?.message.orEmpty()
+            if (errorMessage.contains("unsupported_bridge_message", ignoreCase = true)) {
+                isSessionFreshnessUnsupported = true
+                stopSessionFreshnessMonitor()
+            }
+        } else {
+            latestSessionPath = freshness.sessionPath
+            val previous = lastKnownSessionFreshness
+
+            when {
+                previous == null -> {
+                    lastKnownSessionFreshness = freshness.fingerprint
+                }
+
+                previous == freshness.fingerprint -> {
+                    // No-op
+                }
+
+                isWithinLocalMutationGraceWindow() -> {
+                    lastKnownSessionFreshness = freshness.fingerprint
+                }
+
+                else -> {
+                    handleSessionFreshnessMismatch(freshness, trigger)
+                    lastKnownSessionFreshness = freshness.fingerprint
+                }
+            }
+        }
+    }
+
+    private fun handleSessionFreshnessMismatch(
+        freshness: SessionFreshnessSnapshot,
+        trigger: FreshnessCheckTrigger,
+    ) {
+        val state = _uiState.value
+        val isEditing = state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()
+        val isBusy = state.isStreaming || isEditing || state.isRetrying || state.isSyncingSession
+
+        if (!isBusy && initialLoadJob?.isActive != true) {
+            loadInitialMessages(reason = TimelineReloadReason.AUTO_FRESHNESS_REFRESH)
+            return
+        }
+
+        _uiState.update {
+            it.copy(sessionCoherencyWarning = SESSION_COHERENCY_WARNING_MESSAGE)
+        }
+
+        if (trigger == FreshnessCheckTrigger.POLL) {
+            addSystemNotification(
+                message = buildSessionFreshnessWarningMessage(freshness),
+                type = "warning",
+            )
+        }
+    }
+
+    private fun buildSessionFreshnessWarningMessage(freshness: SessionFreshnessSnapshot): String {
+        val lock = freshness.lock
+        val ownerHint =
+            when {
+                !lock.sessionOwnerClientId.isNullOrBlank() && !lock.isCurrentClientSessionOwner ->
+                    " (owner=${lock.sessionOwnerClientId})"
+
+                !lock.cwdOwnerClientId.isNullOrBlank() && !lock.isCurrentClientCwdOwner ->
+                    " (owner=${lock.cwdOwnerClientId})"
+
+                else -> ""
+            }
+
+        return "Potential cross-device edits detected$ownerHint. Use Sync now before continuing."
+    }
+
+    private fun markLocalSessionMutationExpected() {
+        localSessionMutationGraceUntilMs = System.currentTimeMillis() + LOCAL_SESSION_MUTATION_GRACE_MS
+    }
+
+    private fun isWithinLocalMutationGraceWindow(): Boolean {
+        return System.currentTimeMillis() <= localSessionMutationGraceUntilMs
     }
 
     private fun observeStreamingState() {
@@ -567,6 +697,9 @@ class ChatViewModel(
                 visibleTimelineSize = 0
                 pendingLocalUserIds.clear()
                 resetHistoryWindow()
+                latestSessionPath = null
+                lastKnownSessionFreshness = null
+                localSessionMutationGraceUntilMs = 0
                 _uiState.update {
                     it.copy(
                         sessionCoherencyWarning = null,
@@ -1189,7 +1322,8 @@ class ChatViewModel(
         val previousHistorySignature =
             if (
                 reason == TimelineReloadReason.MANUAL_SYNC ||
-                reason == TimelineReloadReason.CONNECTION_RECOVERY
+                reason == TimelineReloadReason.CONNECTION_RECOVERY ||
+                reason == TimelineReloadReason.AUTO_FRESHNESS_REFRESH
             ) {
                 historyWindowSignature(historyWindowMessages)
             } else {
@@ -1214,6 +1348,7 @@ class ChatViewModel(
                         isStreaming = stateData?.booleanField("isStreaming") ?: false,
                         steeringMode = stateData.deliveryModeField("steeringMode", "steering_mode"),
                         followUpMode = stateData.deliveryModeField("followUpMode", "follow_up_mode"),
+                        sessionPath = stateData?.stringField("sessionFile"),
                     )
 
                 _uiState.update { state ->
@@ -1231,6 +1366,9 @@ class ChatViewModel(
                         )
                     }
                 }
+
+                latestSessionPath = metadata.sessionPath ?: latestSessionPath
+                refreshSessionFreshness(trigger = FreshnessCheckTrigger.POST_LOAD)
 
                 val refreshedHistorySignature = historyWindowSignature(historyWindowMessages)
                 val hasPotentialExternalChanges =
@@ -1260,6 +1398,20 @@ class ChatViewModel(
                             }
                         val type = if (hasPotentialExternalChanges) "warning" else "info"
                         addSystemNotification(message = message, type = type)
+                    }
+                } else if (reason == TimelineReloadReason.AUTO_FRESHNESS_REFRESH) {
+                    _uiState.update {
+                        it.copy(sessionCoherencyWarning = null)
+                    }
+
+                    if (messagesResult.isSuccess) {
+                        val message =
+                            if (hasPotentialExternalChanges) {
+                                "Session changed externally. Timeline auto-refreshed."
+                            } else {
+                                "Session freshness changed. Timeline refreshed."
+                            }
+                        addSystemNotification(message = message, type = "info")
                     }
                 } else if (hasPotentialExternalChanges) {
                     _uiState.update {
@@ -2056,10 +2208,17 @@ class ChatViewModel(
         SESSION_CHANGED,
         TREE_NAVIGATION,
         MANUAL_SYNC,
+        AUTO_FRESHNESS_REFRESH,
+    }
+
+    private enum class FreshnessCheckTrigger {
+        POLL,
+        POST_LOAD,
     }
 
     override fun onCleared() {
         initialLoadJob?.cancel()
+        stopSessionFreshnessMonitor()
         logThinkingDiagnostics(reason = "viewmodel_cleared")
         logStreamingDiagnostics(reason = "viewmodel_cleared")
         resetStreamingUpdateState()
@@ -2148,6 +2307,8 @@ class ChatViewModel(
         private const val STREAMING_DIAGNOSTICS_LOG_TAG = "StreamingDiagnostics"
         private const val SESSION_COHERENCY_WARNING_MESSAGE =
             "Potential cross-device session edits detected. Use Sync now before continuing."
+        private const val SESSION_FRESHNESS_POLL_INTERVAL_MS = 4_000L
+        private const val LOCAL_SESSION_MUTATION_GRACE_MS = 90_000L
     }
 }
 
@@ -2329,6 +2490,7 @@ private data class InitialLoadMetadata(
     val isStreaming: Boolean,
     val steeringMode: String,
     val followUpMode: String,
+    val sessionPath: String?,
 )
 
 private data class ThinkingDiagnosticsCounters(

@@ -229,6 +229,50 @@ class RpcSessionControllerTest {
     }
 
     @Test
+    fun parseSessionFreshnessSnapshotMapsBridgePayload() {
+        val snapshot =
+            invokeParser<SessionFreshnessSnapshot>(
+                functionName = "parseSessionFreshnessSnapshot",
+                data =
+                    buildJsonObject {
+                        put("sessionPath", "/tmp/session-tree.jsonl")
+                        put("cwd", "/tmp/project")
+                        put(
+                            "fingerprint",
+                            buildJsonObject {
+                                put("mtimeMs", 1730000000000)
+                                put("sizeBytes", 2048)
+                                put("entryCount", 42)
+                                put("lastEntryId", "m42")
+                                put("lastEntriesHash", "abc123")
+                            },
+                        )
+                        put(
+                            "lock",
+                            buildJsonObject {
+                                put("cwdOwnerClientId", "client-a")
+                                put("sessionOwnerClientId", "client-b")
+                                put("isCurrentClientCwdOwner", false)
+                                put("isCurrentClientSessionOwner", false)
+                            },
+                        )
+                    },
+            )
+
+        assertEquals("/tmp/session-tree.jsonl", snapshot.sessionPath)
+        assertEquals("/tmp/project", snapshot.cwd)
+        assertEquals(1730000000000L, snapshot.fingerprint.mtimeMs)
+        assertEquals(2048L, snapshot.fingerprint.sizeBytes)
+        assertEquals(42, snapshot.fingerprint.entryCount)
+        assertEquals("m42", snapshot.fingerprint.lastEntryId)
+        assertEquals("abc123", snapshot.fingerprint.lastEntriesHash)
+        assertEquals("client-a", snapshot.lock.cwdOwnerClientId)
+        assertEquals("client-b", snapshot.lock.sessionOwnerClientId)
+        assertEquals(false, snapshot.lock.isCurrentClientCwdOwner)
+        assertEquals(false, snapshot.lock.isCurrentClientSessionOwner)
+    }
+
+    @Test
     fun parseForkableMessagesUsesTextFieldWithPreviewFallback() {
         val messages =
             invokeParser<List<ForkableMessage>>(

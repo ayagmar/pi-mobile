@@ -12,6 +12,7 @@ import com.ayagmar.pimobile.hosts.HostProfile
 import com.ayagmar.pimobile.sessions.ForkableMessage
 import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionController
+import com.ayagmar.pimobile.sessions.SessionFreshnessSnapshot
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import com.ayagmar.pimobile.sessions.TransportPreference
@@ -26,14 +27,21 @@ import kotlinx.serialization.json.JsonObject
 class FakeSessionController : SessionController {
     private val events = MutableSharedFlow<RpcIncomingMessage>(extraBufferCapacity = 16)
     private val streamingState = MutableStateFlow(false)
+    private val connectionStateFlow = MutableStateFlow(ConnectionState.DISCONNECTED)
     private val _sessionChanged = MutableSharedFlow<String?>(extraBufferCapacity = 16)
 
     var availableCommands: List<SlashCommandInfo> = emptyList()
     var getCommandsCallCount: Int = 0
     var sendPromptCallCount: Int = 0
+    var getMessagesCallCount: Int = 0
+    var getStateCallCount: Int = 0
+    var getSessionFreshnessCallCount: Int = 0
     var lastPromptMessage: String? = null
+    var lastFreshnessSessionPath: String? = null
     var sendPromptResult: Result<Unit> = Result.success(Unit)
     var messagesPayload: JsonObject? = null
+    var sessionFreshnessResult: Result<SessionFreshnessSnapshot> =
+        Result.failure(IllegalStateException("Not used"))
     var treeNavigationResult: Result<TreeNavigationResult> =
         Result.success(
             TreeNavigationResult(
@@ -52,7 +60,7 @@ class FakeSessionController : SessionController {
     var lastTransportPreference: TransportPreference = TransportPreference.AUTO
 
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = events
-    override val connectionState: StateFlow<ConnectionState> = MutableStateFlow(ConnectionState.DISCONNECTED)
+    override val connectionState: StateFlow<ConnectionState> = connectionStateFlow
     override val isStreaming: StateFlow<Boolean> = streamingState
     override val sessionChanged: SharedFlow<String?> = _sessionChanged
 
@@ -66,6 +74,10 @@ class FakeSessionController : SessionController {
 
     fun setStreaming(isStreaming: Boolean) {
         streamingState.value = isStreaming
+    }
+
+    fun setConnectionState(state: ConnectionState) {
+        connectionStateFlow.value = state
     }
 
     override fun setTransportPreference(preference: TransportPreference) {
@@ -90,8 +102,9 @@ class FakeSessionController : SessionController {
         session: SessionRecord,
     ): Result<String?> = Result.success(null)
 
-    override suspend fun getMessages(): Result<RpcResponse> =
-        Result.success(
+    override suspend fun getMessages(): Result<RpcResponse> {
+        getMessagesCallCount += 1
+        return Result.success(
             RpcResponse(
                 type = "response",
                 command = "get_messages",
@@ -99,15 +112,18 @@ class FakeSessionController : SessionController {
                 data = messagesPayload,
             ),
         )
+    }
 
-    override suspend fun getState(): Result<RpcResponse> =
-        Result.success(
+    override suspend fun getState(): Result<RpcResponse> {
+        getStateCallCount += 1
+        return Result.success(
             RpcResponse(
                 type = "response",
                 command = "get_state",
                 success = true,
             ),
         )
+    }
 
     override suspend fun sendPrompt(
         message: String,
@@ -138,6 +154,12 @@ class FakeSessionController : SessionController {
         sessionPath: String?,
         filter: String?,
     ): Result<SessionTreeSnapshot> = Result.failure(IllegalStateException("Not used"))
+
+    override suspend fun getSessionFreshness(sessionPath: String): Result<SessionFreshnessSnapshot> {
+        getSessionFreshnessCallCount += 1
+        lastFreshnessSessionPath = sessionPath
+        return sessionFreshnessResult
+    }
 
     override suspend fun navigateTreeToEntry(entryId: String): Result<TreeNavigationResult> {
         lastNavigatedEntryId = entryId
