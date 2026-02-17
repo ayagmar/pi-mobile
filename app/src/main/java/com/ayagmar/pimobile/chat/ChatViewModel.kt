@@ -14,6 +14,7 @@ import com.ayagmar.pimobile.corerpc.AutoRetryStartEvent
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.ExtensionErrorEvent
 import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
+import com.ayagmar.pimobile.corerpc.ImagePayload
 import com.ayagmar.pimobile.corerpc.MessageEndEvent
 import com.ayagmar.pimobile.corerpc.MessageStartEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
@@ -28,6 +29,8 @@ import com.ayagmar.pimobile.corerpc.UiUpdateThrottler
 import com.ayagmar.pimobile.perf.PerformanceMetrics
 import com.ayagmar.pimobile.sessions.ModelInfo
 import com.ayagmar.pimobile.sessions.SessionController
+import com.ayagmar.pimobile.sessions.SessionFreshnessFingerprint
+import com.ayagmar.pimobile.sessions.SessionFreshnessSnapshot
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -45,6 +49,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -69,6 +74,17 @@ class ChatViewModel(
     private var historyWindowAbsoluteOffset: Int = 0
     private var historyParsedStartIndex: Int = 0
     private val pendingLocalUserIds = ArrayDeque<String>()
+    private var thinkingDiagnostics = ThinkingDiagnosticsCounters()
+    private var thinkingDiagnosticsRunActive = false
+    private var streamingDiagnostics = StreamingDeltaDiagnosticsCounters()
+    private var streamingDiagnosticsRunActive = false
+    private var streamingDiagnosticsRunStartedAtMs: Long = 0
+    private var sessionFreshnessMonitorJob: Job? = null
+    private var latestSessionPath: String? = null
+    private var lastKnownSessionFreshness: SessionFreshnessFingerprint? = null
+    private var localSessionMutationGraceUntilMs: Long = 0
+    private var isSessionFreshnessUnsupported = false
+    private var lastFreshnessWarningAtMs: Long = 0
 
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -76,7 +92,8 @@ class ChatViewModel(
         observeConnection()
         observeStreamingState()
         observeEvents()
-        loadInitialMessages()
+        loadInitialMessages(reason = TimelineReloadReason.INITIAL)
+        loadSessionStats()
     }
 
     fun onInputTextChanged(text: String) {
@@ -112,22 +129,72 @@ class ChatViewModel(
         }
     }
 
+    @Suppress("ReturnCount")
     fun sendPrompt() {
         val currentState = _uiState.value
         val message = currentState.inputText.trim()
         val pendingImages = currentState.pendingImages
         if (message.isEmpty() && pendingImages.isEmpty()) return
 
-        val builtinCommand = message.extractBuiltinCommand()
-        if (builtinCommand != null) {
-            handleNonRpcBuiltinCommand(builtinCommand)
+        if (handleSlashInvocationIfNeeded(message = message, pendingImages = pendingImages)) {
             return
         }
+
+        preparePromptDispatch()
+        val optimisticUserId = addOptimisticUserMessage(message = message, pendingImages = pendingImages)
+
+        viewModelScope.launch {
+            val imagePayloads = encodePendingImages(pendingImages)
+
+            if (message.isEmpty() && imagePayloads.isEmpty()) {
+                handleImageEncodingFailure(optimisticUserId)
+                return@launch
+            }
+
+            val clearedDraftState = clearDraftAfterPromptDispatch(currentState)
+
+            val result = sessionController.sendPrompt(message, imagePayloads)
+            if (result.isFailure) {
+                handleSendPromptFailure(
+                    result = result,
+                    optimisticUserId = optimisticUserId,
+                    currentState = currentState,
+                    clearedDraftState = clearedDraftState,
+                )
+            }
+        }
+    }
+
+    private fun handleSlashInvocationIfNeeded(
+        message: String,
+        pendingImages: List<PendingImage>,
+    ): Boolean {
+        val slashInvocation = message.extractKnownSlashInvocation() ?: return false
+
+        if (pendingImages.isNotEmpty()) {
+            _uiState.update {
+                it.copy(errorMessage = "Image attachments are only supported for normal prompts")
+            }
+        } else {
+            handleKnownSlashCommand(slashInvocation)
+        }
+
+        return true
+    }
+
+    private fun preparePromptDispatch() {
+        _uiState.update { it.copy(sessionCoherencyWarning = null) }
 
         // Record prompt send for TTFT tracking
         recordMetricsSafely { PerformanceMetrics.recordPromptSend() }
         hasRecordedFirstToken = false
+        markLocalSessionMutationExpected()
+    }
 
+    private fun addOptimisticUserMessage(
+        message: String,
+        pendingImages: List<PendingImage>,
+    ): String {
         val optimisticUserId = "$LOCAL_USER_ITEM_PREFIX${UUID.randomUUID()}"
         upsertTimelineItem(
             ChatTimelineItem.User(
@@ -138,44 +205,88 @@ class ChatViewModel(
             ),
         )
         pendingLocalUserIds.addLast(optimisticUserId)
+        return optimisticUserId
+    }
 
-        viewModelScope.launch {
-            val imagePayloads =
-                withContext(Dispatchers.Default) {
-                    pendingImages.mapNotNull { pending ->
-                        imageEncoder?.encodeToPayload(pending)
-                    }
-                }
-
-            if (message.isEmpty() && imagePayloads.isEmpty()) {
-                discardPendingLocalUserItem(optimisticUserId)
-                _uiState.update {
-                    it.copy(errorMessage = "Unable to attach image. Please try again.")
-                }
-                return@launch
+    private suspend fun encodePendingImages(pendingImages: List<PendingImage>): List<ImagePayload> {
+        return withContext(Dispatchers.Default) {
+            pendingImages.mapNotNull { pending ->
+                imageEncoder?.encodeToPayload(pending)
             }
+        }
+    }
 
-            _uiState.update { it.copy(inputText = "", pendingImages = emptyList(), errorMessage = null) }
-            val result = sessionController.sendPrompt(message, imagePayloads)
-            if (result.isFailure) {
-                discardPendingLocalUserItem(optimisticUserId)
-                _uiState.update {
-                    it.copy(
-                        inputText = currentState.inputText,
-                        pendingImages = currentState.pendingImages,
-                        errorMessage = result.exceptionOrNull()?.message,
-                    )
-                }
-            }
+    private fun handleImageEncodingFailure(optimisticUserId: String) {
+        discardPendingLocalUserItem(optimisticUserId)
+        _uiState.update {
+            it.copy(errorMessage = "Unable to attach image. Please try again.")
+        }
+    }
+
+    private fun clearDraftAfterPromptDispatch(currentState: ChatUiState): DraftClearState {
+        var inputWasCleared = false
+        var imagesWereCleared = false
+
+        _uiState.update { state ->
+            val shouldClearInput = state.inputText == currentState.inputText
+            val shouldClearImages = state.pendingImages == currentState.pendingImages
+            inputWasCleared = shouldClearInput
+            imagesWereCleared = shouldClearImages
+
+            state.copy(
+                inputText = if (shouldClearInput) "" else state.inputText,
+                pendingImages = if (shouldClearImages) emptyList() else state.pendingImages,
+                errorMessage = null,
+            )
+        }
+
+        return DraftClearState(
+            inputWasCleared = inputWasCleared,
+            imagesWereCleared = imagesWereCleared,
+        )
+    }
+
+    private fun handleSendPromptFailure(
+        result: Result<Unit>,
+        optimisticUserId: String,
+        currentState: ChatUiState,
+        clearedDraftState: DraftClearState,
+    ) {
+        discardPendingLocalUserItem(optimisticUserId)
+        _uiState.update { state ->
+            val shouldRestoreDraft =
+                (clearedDraftState.inputWasCleared || clearedDraftState.imagesWereCleared) &&
+                    state.inputText.isEmpty() &&
+                    state.pendingImages.isEmpty()
+            state.copy(
+                inputText = if (shouldRestoreDraft) currentState.inputText else state.inputText,
+                pendingImages = if (shouldRestoreDraft) currentState.pendingImages else state.pendingImages,
+                errorMessage = result.exceptionOrNull()?.message,
+            )
         }
     }
 
     fun abort() {
         viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
-            val result = sessionController.abort()
-            if (result.isFailure) {
-                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+
+            val abortResult = sessionController.abort()
+            val shouldAttemptAbortRetry = _uiState.value.isRetrying || abortResult.isFailure
+            val abortRetryResult =
+                if (shouldAttemptAbortRetry) {
+                    sessionController.abortRetry()
+                } else {
+                    Result.success(Unit)
+                }
+
+            if (abortResult.isFailure && abortRetryResult.isFailure) {
+                _uiState.update {
+                    it.copy(
+                        errorMessage =
+                            abortResult.exceptionOrNull()?.message
+                                ?: abortRetryResult.exceptionOrNull()?.message,
+                    )
+                }
             }
         }
     }
@@ -186,6 +297,7 @@ class ChatViewModel(
 
         viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
+            markLocalSessionMutationExpected()
             val queueItemId = maybeTrackStreamingQueueItem(PendingQueueType.STEER, trimmedMessage)
             val result = sessionController.steer(trimmedMessage)
             if (result.isFailure) {
@@ -201,6 +313,7 @@ class ChatViewModel(
 
         viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
+            markLocalSessionMutationExpected()
             val queueItemId = maybeTrackStreamingQueueItem(PendingQueueType.FOLLOW_UP, trimmedMessage)
             val result = sessionController.followUp(trimmedMessage)
             if (result.isFailure) {
@@ -288,7 +401,7 @@ class ChatViewModel(
         when (command.source) {
             COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
             COMMAND_SOURCE_BUILTIN_UNSUPPORTED,
-            -> handleNonRpcBuiltinCommand(command.name)
+            -> handleKnownSlashCommand(SlashCommandInvocation(name = command.name, args = null))
 
             else -> {
                 val currentText = _uiState.value.inputText
@@ -331,41 +444,119 @@ class ChatViewModel(
         }
     }
 
-    private fun handleNonRpcBuiltinCommand(commandName: String) {
-        val normalized = commandName.lowercase()
+    @Suppress("ReturnCount")
+    private fun String.extractKnownSlashInvocation(): SlashCommandInvocation? {
+        val trimmed = trim()
+        if (!trimmed.startsWith('/')) return null
 
+        val token = trimmed.removePrefix("/")
+        val name = token.substringBefore(' ').trim().lowercase()
+        if (name.isBlank() || name !in KNOWN_SLASH_COMMAND_NAMES) return null
+
+        val args = token.substringAfter(' ', missingDelimiterValue = "").trim().ifBlank { null }
+        return SlashCommandInvocation(name = name, args = args)
+    }
+
+    private fun handleKnownSlashCommand(invocation: SlashCommandInvocation) {
         _uiState.update {
             it.copy(
                 isCommandPaletteVisible = false,
                 isCommandPaletteAutoOpened = false,
                 commandsQuery = "",
+                errorMessage = null,
             )
         }
 
-        when (normalized) {
+        when (invocation.name) {
             BUILTIN_TREE_COMMAND -> showTreeSheet()
             BUILTIN_STATS_COMMAND -> {
                 invokeInternalWorkflowCommand(INTERNAL_STATS_WORKFLOW_COMMAND) {
                     showStatsSheet()
                 }
             }
-
+            BUILTIN_MODEL_COMMAND -> showModelPicker()
+            BUILTIN_SESSION_COMMAND -> showStatsSheet()
+            BUILTIN_COMPACT_COMMAND -> compactNow()
+            BUILTIN_FORK_COMMAND -> {
+                showTreeSheet()
+                addSystemNotification(
+                    message = "Select an entry and tap Fork to create a new branch session",
+                    type = "info",
+                )
+            }
+            BUILTIN_EXPORT_COMMAND -> runExportSlashCommand()
+            BUILTIN_NEW_COMMAND -> runNewSessionSlashCommand()
+            BUILTIN_NAME_COMMAND -> runRenameSlashCommand(invocation.args)
             BUILTIN_SETTINGS_COMMAND -> {
                 _uiState.update {
                     it.copy(errorMessage = "Use the Settings tab for /settings on mobile")
                 }
             }
-
             BUILTIN_HOTKEYS_COMMAND -> {
                 _uiState.update {
                     it.copy(errorMessage = "/hotkeys is not supported on mobile yet")
                 }
             }
-
+            BUILTIN_RESUME_COMMAND,
+            BUILTIN_COPY_COMMAND,
+            BUILTIN_SHARE_COMMAND,
+            BUILTIN_RELOAD_COMMAND,
+            BUILTIN_CHANGELOG_COMMAND,
+            BUILTIN_SCOPED_MODELS_COMMAND,
+            -> {
+                _uiState.update {
+                    it.copy(errorMessage = "/${invocation.name} is not available on mobile yet")
+                }
+            }
             else -> {
                 _uiState.update {
-                    it.copy(errorMessage = "/$normalized is interactive-only and unavailable via RPC prompt")
+                    it.copy(errorMessage = "/${invocation.name} is interactive-only and unavailable via RPC prompt")
                 }
+            }
+        }
+    }
+
+    private fun runRenameSlashCommand(args: String?) {
+        val newName = args?.trim().orEmpty()
+        if (newName.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Usage: /name <session name>") }
+            return
+        }
+
+        viewModelScope.launch {
+            markLocalSessionMutationExpected()
+            val result = sessionController.renameSession(newName)
+            if (result.isSuccess) {
+                addSystemNotification(message = "Session renamed to \"$newName\"", type = "info")
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    private fun runExportSlashCommand() {
+        viewModelScope.launch {
+            val result = sessionController.exportSession()
+            if (result.isSuccess) {
+                val exportPath = result.getOrNull()
+                addSystemNotification(
+                    message = "Session exported${if (exportPath.isNullOrBlank()) "" else " to $exportPath"}",
+                    type = "info",
+                )
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    private fun runNewSessionSlashCommand() {
+        viewModelScope.launch {
+            markLocalSessionMutationExpected()
+            val result = sessionController.newSession()
+            if (result.isSuccess) {
+                addSystemNotification(message = "Started a new session", type = "info")
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
             }
         }
     }
@@ -444,18 +635,6 @@ class ChatViewModel(
         return visibleRpcCommands + missingBuiltins
     }
 
-    private fun String.extractBuiltinCommand(): String? {
-        val commandName =
-            trim().substringBefore(' ')
-                .takeIf { token -> token.startsWith('/') }
-                ?.removePrefix("/")
-                ?.trim()
-                ?.lowercase()
-                .orEmpty()
-
-        return commandName.takeIf { name -> name.isNotBlank() && BUILTIN_COMMAND_NAMES.contains(name) }
-    }
-
     fun toggleToolExpansion(itemId: String) {
         updateTimelineState { state ->
             ChatTimelineReducer.toggleToolExpansion(state, itemId)
@@ -476,17 +655,165 @@ class ChatViewModel(
                 _uiState.update { current ->
                     current.copy(connectionState = state)
                 }
+
+                if (state == ConnectionState.CONNECTED && previousState != ConnectionState.CONNECTED) {
+                    startSessionFreshnessMonitor()
+                } else if (state != ConnectionState.CONNECTED && previousState == ConnectionState.CONNECTED) {
+                    stopSessionFreshnessMonitor()
+                }
+
                 // Reload messages when connection becomes active and timeline is empty
                 if (state == ConnectionState.CONNECTED && previousState != ConnectionState.CONNECTED && timelineEmpty) {
-                    loadInitialMessages()
+                    loadInitialMessages(reason = TimelineReloadReason.CONNECTION_RECOVERY)
                 }
             }
         }
     }
 
+    private fun startSessionFreshnessMonitor() {
+        if (sessionFreshnessMonitorJob?.isActive == true || isSessionFreshnessUnsupported) {
+            return
+        }
+
+        sessionFreshnessMonitorJob =
+            viewModelScope.launch {
+                while (isActive) {
+                    refreshSessionFreshness(trigger = FreshnessCheckTrigger.POLL)
+                    delay(SESSION_FRESHNESS_POLL_INTERVAL_MS)
+                }
+            }
+    }
+
+    private fun stopSessionFreshnessMonitor() {
+        sessionFreshnessMonitorJob?.cancel()
+        sessionFreshnessMonitorJob = null
+    }
+
+    private suspend fun refreshSessionFreshness(trigger: FreshnessCheckTrigger) {
+        if (isSessionFreshnessUnsupported) {
+            return
+        }
+
+        val sessionPath = latestSessionPath
+        if (sessionPath == null) {
+            return
+        }
+
+        val freshnessResult = sessionController.getSessionFreshness(sessionPath)
+        val freshness = freshnessResult.getOrNull()
+
+        if (freshness == null) {
+            val errorMessage = freshnessResult.exceptionOrNull()?.message.orEmpty()
+            if (errorMessage.contains("unsupported_bridge_message", ignoreCase = true)) {
+                isSessionFreshnessUnsupported = true
+                stopSessionFreshnessMonitor()
+            }
+        } else {
+            latestSessionPath = freshness.sessionPath
+            val previous = lastKnownSessionFreshness
+
+            when {
+                previous == null -> {
+                    lastKnownSessionFreshness = freshness.fingerprint
+                }
+
+                previous == freshness.fingerprint -> {
+                    // No-op
+                }
+
+                isWithinLocalMutationGraceWindow() -> {
+                    lastKnownSessionFreshness = freshness.fingerprint
+                }
+
+                else -> {
+                    handleSessionFreshnessMismatch(freshness, trigger)
+                    lastKnownSessionFreshness = freshness.fingerprint
+                }
+            }
+        }
+    }
+
+    private fun handleSessionFreshnessMismatch(
+        freshness: SessionFreshnessSnapshot,
+        trigger: FreshnessCheckTrigger,
+    ) {
+        val state = _uiState.value
+        val isEditing = state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()
+        val isBusy = state.isStreaming || isEditing || state.isRetrying || state.isSyncingSession
+
+        if (!isBusy && initialLoadJob?.isActive != true) {
+            loadInitialMessages(reason = TimelineReloadReason.AUTO_FRESHNESS_REFRESH)
+            return
+        }
+
+        _uiState.update {
+            it.copy(sessionCoherencyWarning = SESSION_COHERENCY_WARNING_MESSAGE)
+        }
+
+        if (trigger == FreshnessCheckTrigger.POLL && shouldEmitFreshnessWarning()) {
+            addSystemNotification(
+                message = buildSessionFreshnessWarningMessage(freshness),
+                type = "warning",
+            )
+        }
+    }
+
+    private fun buildSessionFreshnessWarningMessage(freshness: SessionFreshnessSnapshot): String {
+        val lock = freshness.lock
+        val ownerHint =
+            when {
+                !lock.sessionOwnerClientId.isNullOrBlank() && !lock.isCurrentClientSessionOwner ->
+                    " (owner=${lock.sessionOwnerClientId})"
+
+                !lock.cwdOwnerClientId.isNullOrBlank() && !lock.isCurrentClientCwdOwner ->
+                    " (owner=${lock.cwdOwnerClientId})"
+
+                else -> ""
+            }
+
+        return "Potential cross-device edits detected$ownerHint. Use Sync now before continuing."
+    }
+
+    private fun shouldEmitFreshnessWarning(): Boolean {
+        val now = System.currentTimeMillis()
+
+        val elapsedMs = now - lastFreshnessWarningAtMs
+        val shouldEmit =
+            lastFreshnessWarningAtMs == 0L || elapsedMs >= SESSION_FRESHNESS_WARNING_COOLDOWN_MS
+
+        if (shouldEmit) {
+            lastFreshnessWarningAtMs = now
+        }
+
+        return shouldEmit
+    }
+
+    private fun resetFreshnessWarningThrottle() {
+        lastFreshnessWarningAtMs = 0L
+    }
+
+    private fun markLocalSessionMutationExpected() {
+        localSessionMutationGraceUntilMs = System.currentTimeMillis() + LOCAL_SESSION_MUTATION_GRACE_MS
+    }
+
+    private fun isWithinLocalMutationGraceWindow(): Boolean {
+        return System.currentTimeMillis() <= localSessionMutationGraceUntilMs
+    }
+
     private fun observeStreamingState() {
         viewModelScope.launch {
             sessionController.isStreaming.collect { isStreaming ->
+                val wasStreaming = _uiState.value.isStreaming
+
+                if (!wasStreaming && isStreaming) {
+                    resetThinkingDiagnostics(startNewRun = true)
+                    resetStreamingDiagnostics(startNewRun = true)
+                } else if (wasStreaming && !isStreaming) {
+                    logThinkingDiagnostics(reason = "streaming_state_complete")
+                    logStreamingDiagnostics(reason = "streaming_state_complete")
+                    clearStreamingTimelineFlags()
+                }
+
                 _uiState.update { current ->
                     current.copy(
                         isStreaming = isStreaming,
@@ -534,19 +861,34 @@ class ChatViewModel(
         runCatching(record)
     }
 
-    @Suppress("CyclomaticComplexMethod")
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun observeEvents() {
         // Observe session changes and reload timeline
         viewModelScope.launch {
             sessionController.sessionChanged.collect {
                 // Reset state for new session
+                logThinkingDiagnostics(reason = "session_changed")
+                logStreamingDiagnostics(reason = "session_changed")
                 hasRecordedFirstToken = false
                 resetStreamingUpdateState()
+                resetThinkingDiagnostics(startNewRun = false)
+                resetStreamingDiagnostics(startNewRun = false)
                 fullTimeline = emptyList()
                 visibleTimelineSize = 0
                 pendingLocalUserIds.clear()
                 resetHistoryWindow()
-                loadInitialMessages()
+                latestSessionPath = null
+                lastKnownSessionFreshness = null
+                localSessionMutationGraceUntilMs = 0
+                resetFreshnessWarningThrottle()
+                _uiState.update {
+                    it.copy(
+                        sessionCoherencyWarning = null,
+                        isSyncingSession = false,
+                        extensionStatuses = emptyMap(),
+                    )
+                }
+                loadInitialMessages(reason = TimelineReloadReason.SESSION_CHANGED)
             }
         }
 
@@ -583,7 +925,11 @@ class ChatViewModel(
                     is AutoCompactionEndEvent -> handleCompactionEnd(event)
                     is AutoRetryStartEvent -> handleRetryStart(event)
                     is AutoRetryEndEvent -> handleRetryEnd(event)
-                    is AgentEndEvent -> flushAllPendingStreamUpdates(force = true)
+                    is AgentEndEvent -> {
+                        flushAllPendingStreamUpdates(force = true)
+                        logThinkingDiagnostics(reason = "agent_end")
+                        logStreamingDiagnostics(reason = "agent_end")
+                    }
                     else -> Unit
                 }
             }
@@ -676,7 +1022,15 @@ class ChatViewModel(
             return
         }
 
-        // Ignore non-workflow status messages to avoid UI clutter/noise.
+        _uiState.update { state ->
+            val updatedStatuses = state.extensionStatuses.toMutableMap()
+            if (text == null) {
+                updatedStatuses.remove(key)
+            } else {
+                updatedStatuses[key] = text
+            }
+            state.copy(extensionStatuses = updatedStatuses)
+        }
     }
 
     private fun handleInternalWorkflowStatus(payloadText: String) {
@@ -750,7 +1104,16 @@ class ChatViewModel(
     }
 
     private fun handleTurnEnd() {
-        // Silently track turn end - no UI notification to reduce spam
+        clearStreamingTimelineFlags()
+        _uiState.update {
+            it.copy(
+                isStreaming = false,
+                pendingQueueItems = emptyList(),
+            )
+        }
+
+        // Refresh stats at turn end so context/cost indicators stay current.
+        loadSessionStats()
     }
 
     private fun handleExtensionError(event: ExtensionErrorEvent) {
@@ -798,6 +1161,218 @@ class ChatViewModel(
             }
         val type = if (event.success) "info" else "error"
         addSystemNotification(message, type)
+    }
+
+    private fun trackThinkingEventDiagnostics(event: MessageUpdateEvent) {
+        val assistantEvent = event.assistantMessageEvent ?: return
+        when (assistantEvent.type) {
+            "thinking_start" -> {
+                if (!thinkingDiagnosticsRunActive) {
+                    resetThinkingDiagnostics(startNewRun = true)
+                }
+                thinkingDiagnostics = thinkingDiagnostics.copy(startEvents = thinkingDiagnostics.startEvents + 1)
+            }
+
+            "thinking_delta" -> {
+                if (!thinkingDiagnosticsRunActive) {
+                    resetThinkingDiagnostics(startNewRun = true)
+                }
+                val deltaLength = assistantEvent.delta?.length ?: 0
+                thinkingDiagnostics =
+                    thinkingDiagnostics.copy(
+                        deltaEvents = thinkingDiagnostics.deltaEvents + 1,
+                        deltaChars = thinkingDiagnostics.deltaChars + deltaLength,
+                    )
+            }
+
+            "thinking_end" -> {
+                if (!thinkingDiagnosticsRunActive) {
+                    resetThinkingDiagnostics(startNewRun = true)
+                }
+                val payload = assistantEvent.thinking ?: assistantEvent.content
+                thinkingDiagnostics =
+                    thinkingDiagnostics.copy(
+                        endEvents = thinkingDiagnostics.endEvents + 1,
+                        endPayloadEvents =
+                            thinkingDiagnostics.endPayloadEvents +
+                                if (payload != null) {
+                                    1
+                                } else {
+                                    0
+                                },
+                        endPayloadChars = thinkingDiagnostics.endPayloadChars + (payload?.length ?: 0),
+                    )
+            }
+        }
+    }
+
+    private fun trackThinkingRenderDiagnostics(update: AssistantTextUpdate) {
+        if (update.thinking.isNullOrBlank()) return
+        if (!thinkingDiagnosticsRunActive) return
+
+        thinkingDiagnostics =
+            thinkingDiagnostics.copy(
+                renderedThinkingUpdates = thinkingDiagnostics.renderedThinkingUpdates + 1,
+                renderedThinkingCompleteEvents =
+                    thinkingDiagnostics.renderedThinkingCompleteEvents +
+                        if (update.isThinkingComplete) {
+                            1
+                        } else {
+                            0
+                        },
+            )
+    }
+
+    private fun resetThinkingDiagnostics(startNewRun: Boolean) {
+        thinkingDiagnostics = ThinkingDiagnosticsCounters()
+        thinkingDiagnosticsRunActive = startNewRun
+    }
+
+    private fun logThinkingDiagnostics(reason: String) {
+        if (!thinkingDiagnosticsRunActive) return
+
+        val snapshot = thinkingDiagnostics
+        val totalThinkingEvents = snapshot.startEvents + snapshot.deltaEvents + snapshot.endEvents
+        val assessment =
+            when {
+                totalThinkingEvents == 0 -> "provider_no_thinking_events"
+                snapshot.renderedThinkingUpdates == 0 -> "client_rendering_gap_possible"
+                else -> "thinking_rendered"
+            }
+
+        val message =
+            "reason=$reason start=${snapshot.startEvents} " +
+                "delta=${snapshot.deltaEvents} deltaChars=${snapshot.deltaChars} " +
+                "end=${snapshot.endEvents} endPayload=${snapshot.endPayloadEvents} " +
+                "endPayloadChars=${snapshot.endPayloadChars} " +
+                "rendered=${snapshot.renderedThinkingUpdates} " +
+                "renderedComplete=${snapshot.renderedThinkingCompleteEvents} " +
+                "assessment=$assessment"
+
+        emitThinkingDiagnosticsLog(message)
+        resetThinkingDiagnostics(startNewRun = false)
+    }
+
+    private fun emitThinkingDiagnosticsLog(message: String) {
+        val prefixed = "thinking_diagnostics $message"
+        runCatching {
+            android.util.Log.i(THINKING_DIAGNOSTICS_LOG_TAG, prefixed)
+        }.onFailure {
+            println("$THINKING_DIAGNOSTICS_LOG_TAG: $prefixed")
+        }
+    }
+
+    private fun trackStreamingEventDiagnostics(event: MessageUpdateEvent) {
+        val assistantEventType = event.assistantMessageEvent?.type
+        if (!streamingDiagnosticsRunActive) {
+            if (assistantEventType == null) return
+            resetStreamingDiagnostics(startNewRun = true)
+        }
+
+        incrementStreamingDiagnostics { counters ->
+            counters.copy(messageUpdateEvents = counters.messageUpdateEvents + 1)
+        }
+
+        when (assistantEventType) {
+            "text_delta" ->
+                incrementStreamingDiagnostics { counters ->
+                    counters.copy(
+                        assistantDeltaEvents = counters.assistantDeltaEvents + 1,
+                        textDeltaEvents = counters.textDeltaEvents + 1,
+                    )
+                }
+
+            "thinking_delta" ->
+                incrementStreamingDiagnostics { counters ->
+                    counters.copy(
+                        assistantDeltaEvents = counters.assistantDeltaEvents + 1,
+                        thinkingDeltaEvents = counters.thinkingDeltaEvents + 1,
+                    )
+                }
+
+            "text_start",
+            "text_end",
+            "thinking_start",
+            "thinking_end",
+            ->
+                incrementStreamingDiagnostics { counters ->
+                    counters.copy(assistantNonDeltaEvents = counters.assistantNonDeltaEvents + 1)
+                }
+        }
+    }
+
+    private fun trackStreamingRenderDiagnostics(source: AssistantUpdateSource) {
+        if (!streamingDiagnosticsRunActive) return
+
+        when (source) {
+            AssistantUpdateSource.IMMEDIATE_DELTA ->
+                incrementStreamingDiagnostics { counters ->
+                    counters.copy(emittedImmediateDeltaEvents = counters.emittedImmediateDeltaEvents + 1)
+                }
+
+            AssistantUpdateSource.FLUSHED_DELTA ->
+                incrementStreamingDiagnostics { counters ->
+                    counters.copy(emittedFlushedDeltaEvents = counters.emittedFlushedDeltaEvents + 1)
+                }
+
+            AssistantUpdateSource.NON_DELTA -> Unit
+        }
+    }
+
+    private fun incrementStreamingDiagnostics(
+        update: (StreamingDeltaDiagnosticsCounters) -> StreamingDeltaDiagnosticsCounters,
+    ) {
+        streamingDiagnostics = update(streamingDiagnostics)
+    }
+
+    private fun resetStreamingDiagnostics(startNewRun: Boolean) {
+        streamingDiagnostics = StreamingDeltaDiagnosticsCounters()
+        streamingDiagnosticsRunActive = startNewRun
+        streamingDiagnosticsRunStartedAtMs = if (startNewRun) System.currentTimeMillis() else 0L
+    }
+
+    private fun logStreamingDiagnostics(reason: String) {
+        if (!streamingDiagnosticsRunActive) return
+
+        val snapshot = streamingDiagnostics
+        val durationMs =
+            if (streamingDiagnosticsRunStartedAtMs > 0L) {
+                (System.currentTimeMillis() - streamingDiagnosticsRunStartedAtMs).coerceAtLeast(0L)
+            } else {
+                0L
+            }
+        val emittedDeltaEvents = snapshot.emittedImmediateDeltaEvents + snapshot.emittedFlushedDeltaEvents
+        val assessment =
+            when {
+                snapshot.assistantDeltaEvents == 0 -> "provider_sparse_or_chunked"
+                snapshot.coalescedDeltaEvents > 0 -> "delta_coalesced"
+                else -> "delta_live"
+            }
+
+        val message =
+            "reason=$reason durationMs=$durationMs " +
+                "messageUpdates=${snapshot.messageUpdateEvents} " +
+                "assistantDelta=${snapshot.assistantDeltaEvents} " +
+                "textDelta=${snapshot.textDeltaEvents} " +
+                "thinkingDelta=${snapshot.thinkingDeltaEvents} " +
+                "assistantNonDelta=${snapshot.assistantNonDeltaEvents} " +
+                "coalescedDelta=${snapshot.coalescedDeltaEvents} " +
+                "emittedImmediateDelta=${snapshot.emittedImmediateDeltaEvents} " +
+                "emittedFlushedDelta=${snapshot.emittedFlushedDeltaEvents} " +
+                "emittedDelta=$emittedDeltaEvents " +
+                "assessment=$assessment"
+
+        emitStreamingDiagnosticsLog(message)
+        resetStreamingDiagnostics(startNewRun = false)
+    }
+
+    private fun emitStreamingDiagnosticsLog(message: String) {
+        val prefixed = "streaming_diagnostics $message"
+        runCatching {
+            android.util.Log.i(STREAMING_DIAGNOSTICS_LOG_TAG, prefixed)
+        }.onFailure {
+            println("$STREAMING_DIAGNOSTICS_LOG_TAG: $prefixed")
+        }
     }
 
     private fun addSystemNotification(
@@ -878,6 +1453,31 @@ class ChatViewModel(
         _uiState.update { it.copy(pendingQueueItems = emptyList()) }
     }
 
+    fun syncNow() {
+        if (_uiState.value.isSyncingSession) return
+
+        _uiState.update {
+            it.copy(
+                isSyncingSession = true,
+                errorMessage = null,
+            )
+        }
+        loadInitialMessages(reason = TimelineReloadReason.MANUAL_SYNC)
+    }
+
+    fun compactNow() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.compactSession()
+            if (result.isSuccess) {
+                addSystemNotification("Compaction requested", "info")
+                loadSessionStats()
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
     fun loadOlderMessages() {
         when {
             visibleTimelineSize < fullTimeline.size -> {
@@ -920,7 +1520,19 @@ class ChatViewModel(
         }
     }
 
-    private fun loadInitialMessages() {
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
+    private fun loadInitialMessages(reason: TimelineReloadReason) {
+        val previousHistorySignature =
+            if (
+                reason == TimelineReloadReason.MANUAL_SYNC ||
+                reason == TimelineReloadReason.CONNECTION_RECOVERY ||
+                reason == TimelineReloadReason.AUTO_FRESHNESS_REFRESH
+            ) {
+                historyWindowSignature(historyWindowMessages)
+            } else {
+                null
+            }
+
         initialLoadJob?.cancel()
         initialLoadJob =
             viewModelScope.launch(Dispatchers.IO) {
@@ -939,6 +1551,7 @@ class ChatViewModel(
                         isStreaming = stateData?.booleanField("isStreaming") ?: false,
                         steeringMode = stateData.deliveryModeField("steeringMode", "steering_mode"),
                         followUpMode = stateData.deliveryModeField("followUpMode", "follow_up_mode"),
+                        sessionPath = stateData?.stringField("sessionFile"),
                     )
 
                 _uiState.update { state ->
@@ -955,6 +1568,64 @@ class ChatViewModel(
                             metadata = metadata,
                         )
                     }
+                }
+
+                latestSessionPath = metadata.sessionPath ?: latestSessionPath
+                refreshSessionFreshness(trigger = FreshnessCheckTrigger.POST_LOAD)
+
+                val refreshedHistorySignature = historyWindowSignature(historyWindowMessages)
+                val hasPotentialExternalChanges =
+                    messagesResult.isSuccess &&
+                        previousHistorySignature != null &&
+                        previousHistorySignature != refreshedHistorySignature
+
+                if (reason == TimelineReloadReason.MANUAL_SYNC) {
+                    _uiState.update { state ->
+                        state.copy(
+                            isSyncingSession = false,
+                            sessionCoherencyWarning =
+                                if (hasPotentialExternalChanges) {
+                                    SESSION_COHERENCY_WARNING_MESSAGE
+                                } else {
+                                    null
+                                },
+                        )
+                    }
+
+                    if (messagesResult.isSuccess) {
+                        resetFreshnessWarningThrottle()
+                        val message =
+                            if (hasPotentialExternalChanges) {
+                                "Potential cross-device edits detected. Timeline refreshed."
+                            } else {
+                                "Session sync complete"
+                            }
+                        val type = if (hasPotentialExternalChanges) "warning" else "info"
+                        addSystemNotification(message = message, type = type)
+                    }
+                } else if (reason == TimelineReloadReason.AUTO_FRESHNESS_REFRESH) {
+                    _uiState.update {
+                        it.copy(sessionCoherencyWarning = null)
+                    }
+
+                    if (messagesResult.isSuccess) {
+                        resetFreshnessWarningThrottle()
+                        val message =
+                            if (hasPotentialExternalChanges) {
+                                "Session changed externally. Timeline auto-refreshed."
+                            } else {
+                                "Session freshness changed. Timeline refreshed."
+                            }
+                        addSystemNotification(message = message, type = "info")
+                    }
+                } else if (hasPotentialExternalChanges) {
+                    _uiState.update {
+                        it.copy(sessionCoherencyWarning = SESSION_COHERENCY_WARNING_MESSAGE)
+                    }
+                    addSystemNotification(
+                        message = "Session changed while disconnected or edited elsewhere. Review before continuing.",
+                        type = "warning",
+                    )
                 }
             }
     }
@@ -1039,6 +1710,9 @@ class ChatViewModel(
             hasRecordedFirstToken = true
         }
 
+        trackThinkingEventDiagnostics(event)
+        trackStreamingEventDiagnostics(event)
+
         val assistantEventType = event.assistantMessageEvent?.type
         when (assistantEventType) {
             "error" -> {
@@ -1061,18 +1735,45 @@ class ChatViewModel(
                             assistantEventType == "thinking_delta"
 
                     if (isHighFrequencyDelta) {
-                        assistantUpdateThrottler.offer(update)?.let(::applyAssistantUpdate)
-                            ?: scheduleAssistantUpdateFlush()
+                        handleHighFrequencyAssistantUpdate(update)
                     } else {
                         flushPendingAssistantUpdate(force = true)
-                        applyAssistantUpdate(update)
+                        applyAssistantUpdate(update, source = AssistantUpdateSource.NON_DELTA)
                     }
                 }
             }
         }
     }
 
-    private fun applyAssistantUpdate(update: AssistantTextUpdate) {
+    private fun handleHighFrequencyAssistantUpdate(update: AssistantTextUpdate) {
+        val hadPending = assistantUpdateThrottler.hasPending()
+        val immediateUpdate = assistantUpdateThrottler.offer(update)
+
+        if (immediateUpdate != null) {
+            applyAssistantUpdate(
+                update = immediateUpdate,
+                source = AssistantUpdateSource.IMMEDIATE_DELTA,
+            )
+            return
+        }
+
+        if (hadPending) {
+            incrementStreamingDiagnostics { counters ->
+                counters.copy(
+                    coalescedDeltaEvents = counters.coalescedDeltaEvents + 1,
+                )
+            }
+        }
+        scheduleAssistantUpdateFlush()
+    }
+
+    private fun applyAssistantUpdate(
+        update: AssistantTextUpdate,
+        source: AssistantUpdateSource,
+    ) {
+        trackThinkingRenderDiagnostics(update)
+        trackStreamingRenderDiagnostics(source)
+
         val itemId = "assistant-stream-${update.messageKey}-${update.contentIndex}"
         val nextItem =
             ChatTimelineItem.Assistant(
@@ -1325,7 +2026,7 @@ class ChatViewModel(
                         sessionTree = updatedTree,
                     )
                 }
-                loadInitialMessages()
+                loadInitialMessages(reason = TimelineReloadReason.TREE_NAVIGATION)
             } else {
                 _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
             }
@@ -1466,7 +2167,10 @@ class ChatViewModel(
             }
 
         if (update != null) {
-            applyAssistantUpdate(update)
+            applyAssistantUpdate(
+                update = update,
+                source = AssistantUpdateSource.FLUSHED_DELTA,
+            )
         }
 
         if (!assistantUpdateThrottler.hasPending()) {
@@ -1528,6 +2232,45 @@ class ChatViewModel(
         toolUpdateFlushJobs.clear()
         toolUpdateThrottlers.values.forEach { throttler -> throttler.reset() }
         toolUpdateThrottlers.clear()
+    }
+
+    private fun clearStreamingTimelineFlags() {
+        if (
+            fullTimeline.none { item ->
+                when (item) {
+                    is ChatTimelineItem.Assistant -> item.isStreaming
+                    is ChatTimelineItem.Tool -> item.isStreaming
+                    is ChatTimelineItem.User -> false
+                }
+            }
+        ) {
+            return
+        }
+
+        fullTimeline =
+            fullTimeline.map { item ->
+                when (item) {
+                    is ChatTimelineItem.Assistant -> {
+                        if (item.isStreaming) {
+                            item.copy(isStreaming = false)
+                        } else {
+                            item
+                        }
+                    }
+
+                    is ChatTimelineItem.Tool -> {
+                        if (item.isStreaming) {
+                            item.copy(isStreaming = false)
+                        } else {
+                            item
+                        }
+                    }
+
+                    is ChatTimelineItem.User -> item
+                }
+            }
+
+        publishVisibleTimeline()
     }
 
     private fun upsertTimelineItem(item: ChatTimelineItem) {
@@ -1697,9 +2440,40 @@ class ChatViewModel(
         }
     }
 
+    private data class SlashCommandInvocation(
+        val name: String,
+        val args: String?,
+    )
+
+    private enum class AssistantUpdateSource {
+        IMMEDIATE_DELTA,
+        FLUSHED_DELTA,
+        NON_DELTA,
+    }
+
+    private enum class TimelineReloadReason {
+        INITIAL,
+        CONNECTION_RECOVERY,
+        SESSION_CHANGED,
+        TREE_NAVIGATION,
+        MANUAL_SYNC,
+        AUTO_FRESHNESS_REFRESH,
+    }
+
+    private enum class FreshnessCheckTrigger {
+        POLL,
+        POST_LOAD,
+    }
+
     override fun onCleared() {
         initialLoadJob?.cancel()
+        stopSessionFreshnessMonitor()
+        logThinkingDiagnostics(reason = "viewmodel_cleared")
+        logStreamingDiagnostics(reason = "viewmodel_cleared")
         resetStreamingUpdateState()
+        resetThinkingDiagnostics(startNewRun = false)
+        resetStreamingDiagnostics(startNewRun = false)
+        resetFreshnessWarningThrottle()
         pendingLocalUserIds.clear()
         super.onCleared()
     }
@@ -1720,6 +2494,19 @@ class ChatViewModel(
         private const val BUILTIN_SETTINGS_COMMAND = "settings"
         private const val BUILTIN_TREE_COMMAND = "tree"
         private const val BUILTIN_STATS_COMMAND = "stats"
+        private const val BUILTIN_MODEL_COMMAND = "model"
+        private const val BUILTIN_SESSION_COMMAND = "session"
+        private const val BUILTIN_COMPACT_COMMAND = "compact"
+        private const val BUILTIN_EXPORT_COMMAND = "export"
+        private const val BUILTIN_FORK_COMMAND = "fork"
+        private const val BUILTIN_NEW_COMMAND = "new"
+        private const val BUILTIN_NAME_COMMAND = "name"
+        private const val BUILTIN_RESUME_COMMAND = "resume"
+        private const val BUILTIN_COPY_COMMAND = "copy"
+        private const val BUILTIN_SHARE_COMMAND = "share"
+        private const val BUILTIN_RELOAD_COMMAND = "reload"
+        private const val BUILTIN_CHANGELOG_COMMAND = "changelog"
+        private const val BUILTIN_SCOPED_MODELS_COMMAND = "scoped-models"
         private const val BUILTIN_HOTKEYS_COMMAND = "hotkeys"
 
         private const val INTERNAL_TREE_NAVIGATION_COMMAND = "pi-mobile-tree"
@@ -1731,22 +2518,71 @@ class ChatViewModel(
             listOf(
                 SlashCommandInfo(
                     name = BUILTIN_SETTINGS_COMMAND,
-                    description = "Open mobile settings UI (interactive-only in TUI)",
+                    description = "Open mobile settings tab",
                     source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
                     location = null,
                     path = null,
                 ),
                 SlashCommandInfo(
                     name = BUILTIN_TREE_COMMAND,
-                    description = "Open session tree sheet (interactive-only in TUI)",
+                    description = "Open session tree sheet",
                     source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
                     location = null,
                     path = null,
                 ),
                 SlashCommandInfo(
                     name = BUILTIN_STATS_COMMAND,
-                    description = "Open session stats sheet (interactive-only in TUI)",
+                    description = "Open session stats sheet",
                     source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_MODEL_COMMAND,
+                    description = "Open model picker",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_SESSION_COMMAND,
+                    description = "Open session stats overview",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_COMPACT_COMMAND,
+                    description = "Compact the active session context",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_EXPORT_COMMAND,
+                    description = "Export session to HTML",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_FORK_COMMAND,
+                    description = "Open tree and fork from a selected entry",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_NEW_COMMAND,
+                    description = "Start a new session",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_RESUME_COMMAND,
+                    description = "Not available in chat on mobile (use Sessions tab)",
+                    source = COMMAND_SOURCE_BUILTIN_UNSUPPORTED,
                     location = null,
                     path = null,
                 ),
@@ -1760,6 +2596,16 @@ class ChatViewModel(
             )
 
         private val BUILTIN_COMMAND_NAMES = BUILTIN_COMMANDS.map { it.name }.toSet()
+        private val KNOWN_SLASH_COMMAND_NAMES =
+            BUILTIN_COMMAND_NAMES +
+                setOf(
+                    BUILTIN_NAME_COMMAND,
+                    BUILTIN_COPY_COMMAND,
+                    BUILTIN_SHARE_COMMAND,
+                    BUILTIN_RELOAD_COMMAND,
+                    BUILTIN_CHANGELOG_COMMAND,
+                    BUILTIN_SCOPED_MODELS_COMMAND,
+                )
         private val INTERNAL_HIDDEN_COMMAND_NAMES =
             setOf(
                 INTERNAL_TREE_NAVIGATION_COMMAND,
@@ -1779,6 +2625,13 @@ class ChatViewModel(
         private const val BASH_HISTORY_SIZE = 10
         private const val MAX_NOTIFICATIONS = 6
         private const val MAX_PENDING_QUEUE_ITEMS = 20
+        private const val THINKING_DIAGNOSTICS_LOG_TAG = "ThinkingDiagnostics"
+        private const val STREAMING_DIAGNOSTICS_LOG_TAG = "StreamingDiagnostics"
+        private const val SESSION_COHERENCY_WARNING_MESSAGE =
+            "Potential cross-device session edits detected. Use Sync now before continuing."
+        private const val SESSION_FRESHNESS_POLL_INTERVAL_MS = 4_000L
+        private const val SESSION_FRESHNESS_WARNING_COOLDOWN_MS = 20_000L
+        private const val LOCAL_SESSION_MUTATION_GRACE_MS = 90_000L
     }
 }
 
@@ -1797,6 +2650,7 @@ data class ChatUiState(
     val activeExtensionRequest: ExtensionUiRequest? = null,
     val notifications: List<ExtensionNotification> = emptyList(),
     val extensionWidgets: Map<String, ExtensionWidget> = emptyMap(),
+    val extensionStatuses: Map<String, String> = emptyMap(),
     val extensionTitle: String? = null,
     val isCommandPaletteVisible: Boolean = false,
     val isCommandPaletteAutoOpened: Boolean = false,
@@ -1806,6 +2660,8 @@ data class ChatUiState(
     val steeringMode: String = ChatViewModel.DELIVERY_MODE_ALL,
     val followUpMode: String = ChatViewModel.DELIVERY_MODE_ALL,
     val pendingQueueItems: List<PendingQueueItem> = emptyList(),
+    val isSyncingSession: Boolean = false,
+    val sessionCoherencyWarning: String? = null,
     // Bash dialog state
     val isBashDialogVisible: Boolean = false,
     val bashCommand: String = "",
@@ -1957,12 +2813,54 @@ private data class InitialLoadMetadata(
     val isStreaming: Boolean,
     val steeringMode: String,
     val followUpMode: String,
+    val sessionPath: String?,
+)
+
+private data class DraftClearState(
+    val inputWasCleared: Boolean,
+    val imagesWereCleared: Boolean,
+)
+
+private data class ThinkingDiagnosticsCounters(
+    val startEvents: Int = 0,
+    val deltaEvents: Int = 0,
+    val deltaChars: Int = 0,
+    val endEvents: Int = 0,
+    val endPayloadEvents: Int = 0,
+    val endPayloadChars: Int = 0,
+    val renderedThinkingUpdates: Int = 0,
+    val renderedThinkingCompleteEvents: Int = 0,
+)
+
+private data class StreamingDeltaDiagnosticsCounters(
+    val messageUpdateEvents: Int = 0,
+    val assistantDeltaEvents: Int = 0,
+    val textDeltaEvents: Int = 0,
+    val thinkingDeltaEvents: Int = 0,
+    val assistantNonDeltaEvents: Int = 0,
+    val coalescedDeltaEvents: Int = 0,
+    val emittedImmediateDeltaEvents: Int = 0,
+    val emittedFlushedDeltaEvents: Int = 0,
 )
 
 private data class HistoryMessageWindow(
     val messages: List<JsonObject>,
     val absoluteOffset: Int,
 )
+
+private fun historyWindowSignature(messages: List<JsonObject>): String {
+    if (messages.isEmpty()) return "empty"
+
+    val marker =
+        messages
+            .joinToString(separator = "|") { message ->
+                val role = message.stringField("role").orEmpty()
+                val entryId = message.stringField("entryId").orEmpty()
+                "$role:$entryId:${message.toString().hashCode()}"
+            }
+
+    return "${messages.size}:$marker"
+}
 
 private fun extractHistoryMessageWindow(data: JsonObject?): HistoryMessageWindow {
     val rawMessages = runCatching { data?.get("messages")?.jsonArray }.getOrNull() ?: JsonArray(emptyList())
@@ -2139,6 +3037,10 @@ private fun JsonObject.booleanField(fieldName: String): Boolean? {
     return this[fieldName]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
 }
 
+private fun JsonObject.intField(fieldName: String): Int? {
+    return this[fieldName]?.jsonPrimitive?.intOrNull
+}
+
 private fun JsonObject?.deliveryModeField(
     camelCaseKey: String,
     snakeCaseKey: String,
@@ -2159,6 +3061,7 @@ private fun parseModelInfo(data: JsonObject?): ModelInfo? {
         name = model.stringField("name") ?: "Unknown Model",
         provider = model.stringField("provider") ?: "unknown",
         thinkingLevel = data.stringField("thinkingLevel") ?: "off",
+        contextWindow = model.intField("contextWindow"),
     )
 }
 

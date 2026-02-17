@@ -77,6 +77,8 @@ interface SessionController {
         filter: String? = null,
     ): Result<SessionTreeSnapshot>
 
+    suspend fun getSessionFreshness(sessionPath: String): Result<SessionFreshnessSnapshot>
+
     suspend fun navigateTreeToEntry(entryId: String): Result<TreeNavigationResult>
 
     suspend fun cycleModel(): Result<ModelInfo?>
@@ -139,6 +141,28 @@ data class SessionTreeSnapshot(
     val entries: List<SessionTreeEntry>,
 )
 
+data class SessionFreshnessSnapshot(
+    val sessionPath: String,
+    val cwd: String,
+    val fingerprint: SessionFreshnessFingerprint,
+    val lock: SessionLockMetadata,
+)
+
+data class SessionFreshnessFingerprint(
+    val mtimeMs: Long,
+    val sizeBytes: Long,
+    val entryCount: Int,
+    val lastEntryId: String?,
+    val lastEntriesHash: String?,
+)
+
+data class SessionLockMetadata(
+    val cwdOwnerClientId: String?,
+    val sessionOwnerClientId: String?,
+    val isCurrentClientCwdOwner: Boolean,
+    val isCurrentClientSessionOwner: Boolean,
+)
+
 data class SessionTreeEntry(
     val entryId: String,
     val parentId: String?,
@@ -165,6 +189,7 @@ data class ModelInfo(
     val name: String,
     val provider: String,
     val thinkingLevel: String,
+    val contextWindow: Int? = null,
 )
 
 /**

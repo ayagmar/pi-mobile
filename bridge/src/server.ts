@@ -61,6 +61,11 @@ interface PendingRpcEventWaiter {
     timeoutHandle: NodeJS.Timeout;
 }
 
+interface RuntimeLeafOverride {
+    currentLeafId: string | null;
+    cwd: string;
+}
+
 const PI_MOBILE_TREE_EXTENSION_PATH = path.resolve(
     fileURLToPath(new URL("./extensions/pi-mobile-tree.ts", import.meta.url)),
 );
@@ -72,6 +77,8 @@ const TREE_NAVIGATION_COMMAND = "pi-mobile-tree";
 const TREE_NAVIGATION_STATUS_PREFIX = "pi_mobile_tree_result:";
 const BRIDGE_NAVIGATE_TREE_TYPE = "bridge_navigate_tree";
 const BRIDGE_TREE_NAVIGATION_RESULT_TYPE = "bridge_tree_navigation_result";
+const BRIDGE_GET_SESSION_FRESHNESS_TYPE = "bridge_get_session_freshness";
+const BRIDGE_SESSION_FRESHNESS_TYPE = "bridge_session_freshness";
 const BRIDGE_INTERNAL_RPC_TIMEOUT_MS = 10_000;
 
 export function createBridgeServer(
@@ -112,8 +119,16 @@ export function createBridgeServer(
 
     const clientContexts = new Map<WebSocket, ClientConnectionContext>();
     const disconnectedClients = new Map<string, DisconnectedClientState>();
-    const runtimeLeafBySessionPath = new Map<string, string | null>();
+    const runtimeLeafBySessionPath = new Map<string, RuntimeLeafOverride>();
     const pendingRpcWaiters = new Set<PendingRpcEventWaiter>();
+
+    const clearRuntimeLeafOverridesForCwd = (cwd: string): void => {
+        for (const [sessionPath, override] of runtimeLeafBySessionPath.entries()) {
+            if (override.cwd === cwd) {
+                runtimeLeafBySessionPath.delete(sessionPath);
+            }
+        }
+    };
 
     const awaitRpcEvent = (
         cwd: string,
@@ -210,6 +225,10 @@ export function createBridgeServer(
             isSuccessfulRpcResponse(event.payload, "new_session") ||
             isSuccessfulRpcResponse(event.payload, "fork")) {
             runtimeLeafBySessionPath.clear();
+        }
+
+        if (isSuccessfulRpcResponse(event.payload, "prompt")) {
+            clearRuntimeLeafOverridesForCwd(event.cwd);
         }
 
         if (consumedByInternalWaiter) {
@@ -387,7 +406,7 @@ async function handleClientMessage(
         predicate: (payload: Record<string, unknown>) => boolean,
         options?: { timeoutMs?: number; consume?: boolean },
     ) => Promise<Record<string, unknown>>,
-    runtimeLeafBySessionPath: Map<string, string | null>,
+    runtimeLeafBySessionPath: Map<string, RuntimeLeafOverride>,
 ): Promise<void> {
     const dataAsString = asUtf8String(data);
     const parsedEnvelope = parseBridgeEnvelope(dataAsString);
@@ -443,7 +462,7 @@ async function handleBridgeControlMessage(
         predicate: (payload: Record<string, unknown>) => boolean,
         options?: { timeoutMs?: number; consume?: boolean },
     ) => Promise<Record<string, unknown>>,
-    runtimeLeafBySessionPath: Map<string, string | null>,
+    runtimeLeafBySessionPath: Map<string, RuntimeLeafOverride>,
 ): Promise<void> {
     const messageType = payload.type;
 
@@ -517,7 +536,8 @@ async function handleBridgeControlMessage(
 
         try {
             const tree = await sessionIndexer.getSessionTree(sessionPath, requestedFilter);
-            const runtimeLeafId = runtimeLeafBySessionPath.get(tree.sessionPath);
+            const runtimeLeafOverride = runtimeLeafBySessionPath.get(tree.sessionPath);
+            const runtimeLeafId = runtimeLeafOverride?.currentLeafId;
 
             client.send(
                 JSON.stringify(
@@ -537,6 +557,55 @@ async function handleBridgeControlMessage(
                     createBridgeErrorEnvelope(
                         "session_tree_failed",
                         "Failed to build session tree",
+                    ),
+                ),
+            );
+        }
+
+        return;
+    }
+
+    if (messageType === BRIDGE_GET_SESSION_FRESHNESS_TYPE) {
+        const sessionPath = typeof payload.sessionPath === "string" ? payload.sessionPath : undefined;
+        if (!sessionPath) {
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "invalid_session_path",
+                        "sessionPath must be a non-empty string",
+                    ),
+                ),
+            );
+            return;
+        }
+
+        try {
+            const freshness = await sessionIndexer.getSessionFreshness(sessionPath);
+            const lock = processManager.getControlSnapshot(freshness.cwd, freshness.sessionPath);
+
+            client.send(
+                JSON.stringify(
+                    createBridgeEnvelope({
+                        type: BRIDGE_SESSION_FRESHNESS_TYPE,
+                        sessionPath: freshness.sessionPath,
+                        cwd: freshness.cwd,
+                        fingerprint: freshness.fingerprint,
+                        lock: {
+                            cwdOwnerClientId: lock.cwdOwnerClientId ?? null,
+                            sessionOwnerClientId: lock.sessionOwnerClientId ?? null,
+                            isCurrentClientCwdOwner: lock.cwdOwnerClientId === context.clientId,
+                            isCurrentClientSessionOwner: lock.sessionOwnerClientId === context.clientId,
+                        },
+                    }),
+                ),
+            );
+        } catch (error: unknown) {
+            logger.error({ error, sessionPath }, "Failed to read session freshness");
+            client.send(
+                JSON.stringify(
+                    createBridgeErrorEnvelope(
+                        "session_freshness_failed",
+                        "Failed to read session freshness",
                     ),
                 ),
             );
@@ -595,7 +664,10 @@ async function handleBridgeControlMessage(
             if (navigationResult.sessionPath) {
                 runtimeLeafBySessionPath.set(
                     navigationResult.sessionPath,
-                    navigationResult.currentLeafId,
+                    {
+                        currentLeafId: navigationResult.currentLeafId,
+                        cwd,
+                    },
                 );
             }
 

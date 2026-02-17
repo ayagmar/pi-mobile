@@ -2,14 +2,18 @@
 
 package com.ayagmar.pimobile.chat
 
+import androidx.lifecycle.viewModelScope
+import com.ayagmar.pimobile.corerpc.AgentEndEvent
 import com.ayagmar.pimobile.corerpc.AssistantMessageEvent
 import com.ayagmar.pimobile.corerpc.MessageEndEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
+import com.ayagmar.pimobile.corerpc.TurnEndEvent
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import com.ayagmar.pimobile.sessions.TreeNavigationResult
 import com.ayagmar.pimobile.testutil.FakeSessionController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -28,22 +32,30 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelThinkingExpansionTest {
     private val dispatcher = StandardTestDispatcher()
+    private val viewModels = mutableListOf<ChatViewModel>()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
+        viewModels.clear()
     }
 
     @After
     fun tearDown() {
+        viewModels.forEach { it.viewModelScope.cancel() }
+        viewModels.clear()
         Dispatchers.resetMain()
+    }
+
+    private fun createViewModel(controller: FakeSessionController): ChatViewModel {
+        return ChatViewModel(sessionController = controller).also { viewModels.add(it) }
     }
 
     @Test
     fun thinkingExpansionStatePersistsAcrossStreamingUpdatesWhenMessageKeyChanges() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -107,7 +119,7 @@ class ChatViewModelThinkingExpansionTest {
     fun thinkingExpansionStateRemainsStableOnFinalStreamingUpdate() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -164,7 +176,7 @@ class ChatViewModelThinkingExpansionTest {
     fun pendingAssistantDeltaIsFlushedWhenMessageEnds() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -204,10 +216,50 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun pendingAssistantDeltaIsFlushedWhenAgentEnds() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_start",
+                    messageTimestamp = "1733234567902",
+                ),
+            )
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = "Streaming",
+                    messageTimestamp = "1733234567902",
+                ),
+            )
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = " integrity",
+                    messageTimestamp = "1733234567902",
+                ),
+            )
+            controller.emitEvent(
+                AgentEndEvent(
+                    type = "agent_end",
+                    messages = null,
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val item = viewModel.singleAssistantItem()
+            assertEquals("Streaming integrity", item.text)
+        }
+
+    @Test
     fun sessionChangeDropsPendingAssistantDeltaFromPreviousSession() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -278,7 +330,7 @@ class ChatViewModelThinkingExpansionTest {
                     ),
                 )
 
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -302,7 +354,7 @@ class ChatViewModelThinkingExpansionTest {
     fun slashPaletteDoesNotAutoOpenForRegularTextContexts() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -323,7 +375,7 @@ class ChatViewModelThinkingExpansionTest {
     fun selectingCommandReplacesTrailingSlashToken() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -360,7 +412,7 @@ class ChatViewModelThinkingExpansionTest {
                     ),
                 )
 
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -387,7 +439,7 @@ class ChatViewModelThinkingExpansionTest {
     fun sendingInteractiveBuiltinShowsExplicitMessageWithoutRpcSend() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -400,10 +452,81 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun sendingModelSlashCommandOpensModelPickerWithoutRpcPrompt() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("/model")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(0, controller.sendPromptCallCount)
+            assertTrue(viewModel.uiState.value.isModelPickerVisible)
+        }
+
+    @Test
+    fun sendingNameSlashCommandRenamesSessionWithoutRpcPrompt() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("/name Sprint planning")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(0, controller.sendPromptCallCount)
+            assertEquals(1, controller.renameSessionCallCount)
+            assertEquals("Sprint planning", controller.lastRenamedSessionName)
+        }
+
+    @Test
+    fun slashCommandsClearExistingErrorsOnSuccessfulExecution() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController()
+                    .apply {
+                        abortResult = Result.failure(IllegalStateException("abort failed"))
+                        abortRetryResult = Result.failure(IllegalStateException("abort retry failed"))
+                    }
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.abort()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals("abort failed", viewModel.uiState.value.errorMessage)
+
+            viewModel.onInputTextChanged("/model")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+
+            viewModel.onInputTextChanged("/name Sprint planning")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+
+            viewModel.onInputTextChanged("/export")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+
+            viewModel.onInputTextChanged("/new")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
     fun selectingBridgeBackedBuiltinTreeOpensTreeSheet() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -425,7 +548,7 @@ class ChatViewModelThinkingExpansionTest {
     fun streamingSteerAndFollowUpAreVisibleInPendingQueueInspectorState() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -446,7 +569,7 @@ class ChatViewModelThinkingExpansionTest {
     fun pendingQueueCanBeRemovedClearedAndResetsWhenStreamingStops() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -476,12 +599,85 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun turnEndClearsStreamingIndicatorsAndPendingQueue() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.setStreaming(true)
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = "Streaming reply",
+                    messageTimestamp = "1733234567000",
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.steer("Keep concise")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(viewModel.singleAssistantItem().isStreaming)
+            assertTrue(viewModel.uiState.value.pendingQueueItems.isNotEmpty())
+
+            controller.emitEvent(TurnEndEvent(type = "turn_end"))
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val finalState = viewModel.uiState.value
+            assertFalse(finalState.isStreaming)
+            assertTrue(finalState.pendingQueueItems.isEmpty())
+            assertFalse(viewModel.singleAssistantItem().isStreaming)
+        }
+
+    @Test
+    fun abortFallsBackToAbortRetryWhenAbortFails() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController().apply {
+                    abortResult = Result.failure(IllegalStateException("abort failed"))
+                    abortRetryResult = Result.success(Unit)
+                }
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.abort()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(1, controller.abortCallCount)
+            assertEquals(1, controller.abortRetryCallCount)
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
+    fun abortReportsErrorWhenAbortAndAbortRetryFail() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController().apply {
+                    abortResult = Result.failure(IllegalStateException("abort failed"))
+                    abortRetryResult = Result.failure(IllegalStateException("abort retry failed"))
+                }
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.abort()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(1, controller.abortCallCount)
+            assertEquals(1, controller.abortRetryCallCount)
+            assertEquals("abort failed", viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
     fun initialHistoryLoadsWithWindowAndCanPageOlderMessages() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
             controller.messagesPayload = historyWithUserMessages(count = 260)
 
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -513,7 +709,7 @@ class ChatViewModelThinkingExpansionTest {
             val controller = FakeSessionController()
             controller.messagesPayload = historyWithUserMessages(count = 1_500)
 
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -534,6 +730,49 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun syncNowFlagsPotentialCrossDeviceEditsWhenHistoryChanges() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.messagesPayload = historyWithMessageTexts(listOf("baseline"))
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.messagesPayload = historyWithMessageTexts(listOf("baseline", "external-change"))
+            viewModel.syncNow()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            waitForState(viewModel) { state -> !state.isSyncingSession }
+            val state = viewModel.uiState.value
+            assertEquals(
+                "Potential cross-device session edits detected. Use Sync now before continuing.",
+                state.sessionCoherencyWarning,
+            )
+        }
+
+    @Test
+    fun syncNowClearsCoherencyWarningWhenNoExternalDiffIsFound() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.messagesPayload = historyWithMessageTexts(listOf("unchanged"))
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.messagesPayload = historyWithMessageTexts(listOf("unchanged", "changed"))
+            viewModel.syncNow()
+            dispatcher.scheduler.advanceUntilIdle()
+            waitForState(viewModel) { state -> !state.isSyncingSession && state.sessionCoherencyWarning != null }
+
+            controller.messagesPayload = historyWithMessageTexts(listOf("unchanged", "changed"))
+            viewModel.syncNow()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            waitForState(viewModel) { state -> !state.isSyncingSession }
+            assertEquals(null, viewModel.uiState.value.sessionCoherencyWarning)
+        }
+
+    @Test
     fun jumpAndContinueUsesInPlaceTreeNavigationResult() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
@@ -546,7 +785,7 @@ class ChatViewModelThinkingExpansionTest {
                         sessionPath = "/tmp/session.jsonl",
                     ),
                 )
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -561,7 +800,7 @@ class ChatViewModelThinkingExpansionTest {
     fun repeatedPromptTextReplacesOptimisticUserItemsInOrder() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -613,7 +852,7 @@ class ChatViewModelThinkingExpansionTest {
         runTest(dispatcher) {
             val controller = FakeSessionController()
             controller.sendPromptResult = Result.failure(IllegalStateException("rpc failed"))
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -629,10 +868,70 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun sendPromptFailureDoesNotOverwriteNewerDraftInput() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController()
+                    .apply {
+                        sendPromptResult = Result.failure(IllegalStateException("rpc failed"))
+                        sendPromptDelayMs = 50L
+                    }
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("original draft")
+            viewModel.sendPrompt()
+
+            viewModel.onInputTextChanged("new draft")
+
+            waitForState(viewModel) { state ->
+                state.errorMessage == "rpc failed"
+            }
+
+            assertEquals("new draft", viewModel.uiState.value.inputText)
+            assertEquals("rpc failed", viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
+    fun successfulPromptClearsSentImagesEvenWhenUserTypesNewDraftMidFlight() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController()
+                    .apply {
+                        sendPromptDelayMs = 50L
+                    }
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.addImage(
+                PendingImage(
+                    uri = "content://test/image-mid-flight",
+                    mimeType = "image/png",
+                    sizeBytes = 128,
+                    displayName = "mid-flight.png",
+                ),
+            )
+            viewModel.onInputTextChanged("first prompt")
+            viewModel.sendPrompt()
+
+            viewModel.onInputTextChanged("new draft")
+
+            waitForState(viewModel) { state ->
+                state.inputText == "new draft" && state.pendingImages.isEmpty()
+            }
+
+            assertEquals("new draft", viewModel.uiState.value.inputText)
+            assertTrue(viewModel.uiState.value.pendingImages.isEmpty())
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
     fun serverUserMessagePreservesPendingImageUris() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -774,6 +1073,24 @@ class ChatViewModelThinkingExpansionTest {
                             buildJsonObject {
                                 put("role", "user")
                                 put("content", "message-$index")
+                            },
+                        )
+                    }
+                },
+            )
+        }
+
+    private fun historyWithMessageTexts(messages: List<String>): JsonObject =
+        buildJsonObject {
+            put(
+                "messages",
+                buildJsonArray {
+                    messages.forEachIndexed { index, text ->
+                        add(
+                            buildJsonObject {
+                                put("role", "user")
+                                put("entryId", "entry-$index")
+                                put("content", text)
                             },
                         )
                     }

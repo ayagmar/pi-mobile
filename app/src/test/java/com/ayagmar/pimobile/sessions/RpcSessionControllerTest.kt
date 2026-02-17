@@ -36,6 +36,15 @@ class RpcSessionControllerTest {
                         put("userMessages", 4)
                         put("assistantMessages", 5)
                         put("toolResults", 3)
+                        put("compactions", 2)
+                        put(
+                            "context",
+                            buildJsonObject {
+                                put("used", 3072)
+                                put("window", 128000)
+                                put("percent", 2)
+                            },
+                        )
                         put("sessionFile", "/tmp/current.session.jsonl")
                     },
             )
@@ -55,10 +64,71 @@ class RpcSessionControllerTest {
                         put("userMessageCount", 3)
                         put("assistantMessageCount", 4)
                         put("toolResultCount", 2)
+                        put("compactionCount", 1)
+                        put("contextTokens", 4096)
+                        put("contextWindow", 200000)
+                        put("contextPercent", 2)
                         put("sessionPath", "/tmp/legacy.session.jsonl")
                     },
             )
         assertLegacyStats(legacy)
+    }
+
+    @Test
+    fun parseSessionStatsFallsBackToToolCallsWhenToolResultsMissing() {
+        val stats =
+            invokeParser<SessionStats>(
+                functionName = "parseSessionStats",
+                data =
+                    buildJsonObject {
+                        put("totalMessages", 3)
+                        put("toolCalls", 7)
+                    },
+            )
+
+        assertEquals(3, stats.messageCount)
+        assertEquals(7, stats.toolResultCount)
+    }
+
+    @Test
+    fun parseSessionStatsIgnoresMalformedNestedTokenAndContextObjects() {
+        val stats =
+            invokeParser<SessionStats>(
+                functionName = "parseSessionStats",
+                data =
+                    buildJsonObject {
+                        put("tokens", JsonPrimitive("not-an-object"))
+                        put("context", JsonPrimitive("not-an-object"))
+                        put("inputTokens", 12)
+                        put("outputTokens", 34)
+                        put("contextTokens", 2222)
+                        put("contextWindow", 128000)
+                    },
+            )
+
+        assertEquals(12L, stats.inputTokens)
+        assertEquals(34L, stats.outputTokens)
+        assertEquals(2222L, stats.contextUsedTokens)
+        assertEquals(128000L, stats.contextWindowTokens)
+    }
+
+    @Test
+    fun parseSessionStatsRoundsDecimalContextPercent() {
+        val stats =
+            invokeParser<SessionStats>(
+                functionName = "parseSessionStats",
+                data =
+                    buildJsonObject {
+                        put(
+                            "context",
+                            buildJsonObject {
+                                put("percent", 2.6)
+                            },
+                        )
+                    },
+            )
+
+        assertEquals(3, stats.contextUsagePercent)
     }
 
     @Test
@@ -160,6 +230,63 @@ class RpcSessionControllerTest {
     }
 
     @Test
+    fun parseAvailableModelsIgnoresMalformedCostObjectAndUsesLegacyCostFields() {
+        val models =
+            invokeParser<List<AvailableModel>>(
+                functionName = "parseAvailableModels",
+                data =
+                    buildJsonObject {
+                        put(
+                            "models",
+                            buildJsonArray {
+                                add(
+                                    buildJsonObject {
+                                        put("id", "model-with-bad-cost")
+                                        put("name", "Model With Bad Cost")
+                                        put("provider", "openai")
+                                        put("cost", JsonPrimitive("invalid-shape"))
+                                        put("inputCostPer1k", 0.004)
+                                        put("outputCostPer1k", 0.012)
+                                    },
+                                )
+                            },
+                        )
+                    },
+            )
+
+        assertEquals(1, models.size)
+        assertEquals(0.004, models.single().inputCostPer1k)
+        assertEquals(0.012, models.single().outputCostPer1k)
+    }
+
+    @Test
+    fun parseAvailableModelsSkipsMalformedEntriesAndKeepsValidModels() {
+        val models =
+            invokeParser<List<AvailableModel>>(
+                functionName = "parseAvailableModels",
+                data =
+                    buildJsonObject {
+                        put(
+                            "models",
+                            buildJsonArray {
+                                add(JsonPrimitive("malformed"))
+                                add(
+                                    buildJsonObject {
+                                        put("id", "valid-model")
+                                        put("name", "Valid Model")
+                                        put("provider", "openai")
+                                    },
+                                )
+                            },
+                        )
+                    },
+            )
+
+        assertEquals(1, models.size)
+        assertEquals("valid-model", models.single().id)
+    }
+
+    @Test
     fun parseModelInfoSupportsSetModelDirectPayload() {
         val model =
             invokeParser<ModelInfo>(
@@ -226,6 +353,50 @@ class RpcSessionControllerTest {
         assertEquals("m1", tree.entries[1].parentId)
         assertEquals("checkpoint", tree.entries[1].label)
         assertEquals(true, tree.entries[1].isBookmarked)
+    }
+
+    @Test
+    fun parseSessionFreshnessSnapshotMapsBridgePayload() {
+        val snapshot =
+            invokeParser<SessionFreshnessSnapshot>(
+                functionName = "parseSessionFreshnessSnapshot",
+                data =
+                    buildJsonObject {
+                        put("sessionPath", "/tmp/session-tree.jsonl")
+                        put("cwd", "/tmp/project")
+                        put(
+                            "fingerprint",
+                            buildJsonObject {
+                                put("mtimeMs", 1730000000000)
+                                put("sizeBytes", 2048)
+                                put("entryCount", 42)
+                                put("lastEntryId", "m42")
+                                put("lastEntriesHash", "abc123")
+                            },
+                        )
+                        put(
+                            "lock",
+                            buildJsonObject {
+                                put("cwdOwnerClientId", "client-a")
+                                put("sessionOwnerClientId", "client-b")
+                                put("isCurrentClientCwdOwner", false)
+                                put("isCurrentClientSessionOwner", false)
+                            },
+                        )
+                    },
+            )
+
+        assertEquals("/tmp/session-tree.jsonl", snapshot.sessionPath)
+        assertEquals("/tmp/project", snapshot.cwd)
+        assertEquals(1730000000000L, snapshot.fingerprint.mtimeMs)
+        assertEquals(2048L, snapshot.fingerprint.sizeBytes)
+        assertEquals(42, snapshot.fingerprint.entryCount)
+        assertEquals("m42", snapshot.fingerprint.lastEntryId)
+        assertEquals("abc123", snapshot.fingerprint.lastEntriesHash)
+        assertEquals("client-a", snapshot.lock.cwdOwnerClientId)
+        assertEquals("client-b", snapshot.lock.sessionOwnerClientId)
+        assertEquals(false, snapshot.lock.isCurrentClientCwdOwner)
+        assertEquals(false, snapshot.lock.isCurrentClientSessionOwner)
     }
 
     @Test
@@ -322,6 +493,10 @@ class RpcSessionControllerTest {
         assertEquals(5, current.assistantMessageCount)
         assertEquals(3, current.toolResultCount)
         assertEquals("/tmp/current.session.jsonl", current.sessionPath)
+        assertEquals(2, current.compactionCount)
+        assertEquals(3072L, current.contextUsedTokens)
+        assertEquals(128000L, current.contextWindowTokens)
+        assertEquals(2, current.contextUsagePercent)
     }
 
     private fun assertLegacyStats(legacy: SessionStats) {
@@ -335,6 +510,10 @@ class RpcSessionControllerTest {
         assertEquals(4, legacy.assistantMessageCount)
         assertEquals(2, legacy.toolResultCount)
         assertEquals("/tmp/legacy.session.jsonl", legacy.sessionPath)
+        assertEquals(1, legacy.compactionCount)
+        assertEquals(4096L, legacy.contextUsedTokens)
+        assertEquals(200000L, legacy.contextWindowTokens)
+        assertEquals(2, legacy.contextUsagePercent)
     }
 
     @Suppress("UNCHECKED_CAST")

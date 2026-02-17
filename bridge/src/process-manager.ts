@@ -24,12 +24,18 @@ export interface ProcessManagerStats {
     lockedSessionCount: number;
 }
 
+export interface ControlSnapshot {
+    cwdOwnerClientId?: string;
+    sessionOwnerClientId?: string;
+}
+
 export interface PiProcessManager {
     setMessageHandler(handler: (event: ProcessManagerEvent) => void): void;
     getOrStart(cwd: string): PiRpcForwarder;
     sendRpc(cwd: string, payload: Record<string, unknown>): void;
     acquireControl(request: AcquireControlRequest): AcquireControlResult;
     hasControl(clientId: string, cwd: string, sessionPath?: string): boolean;
+    getControlSnapshot(cwd: string, sessionPath?: string): ControlSnapshot;
     releaseControl(clientId: string, cwd: string, sessionPath?: string): void;
     releaseClient(clientId: string): void;
     getStats(): ProcessManagerStats;
@@ -171,6 +177,12 @@ export function createPiProcessManager(options: ProcessManagerOptions): PiProces
             }
 
             return true;
+        },
+        getControlSnapshot(cwd: string, sessionPath?: string): ControlSnapshot {
+            return {
+                cwdOwnerClientId: lockByCwd.get(cwd),
+                sessionOwnerClientId: sessionPath ? lockBySession.get(sessionPath)?.clientId : undefined,
+            };
         },
         releaseControl(clientId: string, cwd: string, sessionPath?: string): void {
             if (lockByCwd.get(cwd) === clientId) {

@@ -101,6 +101,44 @@ describe("createPiProcessManager", () => {
         expect(secondResult.success).toBe(true);
     });
 
+    it("exposes lock owners via getControlSnapshot", () => {
+        const manager = createPiProcessManager({
+            idleTtlMs: 60_000,
+            logger: createLogger("silent"),
+            enableEvictionTimer: false,
+            forwarderFactory: () => new FakeRpcForwarder(),
+        });
+
+        const acquired = manager.acquireControl({
+            clientId: "client-a",
+            cwd: "/tmp/project-a",
+            sessionPath: "/tmp/session-a.jsonl",
+        });
+        expect(acquired.success).toBe(true);
+
+        expect(
+            manager.getControlSnapshot(
+                "/tmp/project-a",
+                "/tmp/session-a.jsonl",
+            ),
+        ).toEqual({
+            cwdOwnerClientId: "client-a",
+            sessionOwnerClientId: "client-a",
+        });
+
+        manager.releaseClient("client-a");
+
+        expect(
+            manager.getControlSnapshot(
+                "/tmp/project-a",
+                "/tmp/session-a.jsonl",
+            ),
+        ).toEqual({
+            cwdOwnerClientId: undefined,
+            sessionOwnerClientId: undefined,
+        });
+    });
+
     it("evicts idle RPC forwarders based on ttl", async () => {
         let nowMs = 0;
         const fakeForwarder = new FakeRpcForwarder();

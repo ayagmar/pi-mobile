@@ -17,8 +17,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -31,14 +33,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -73,6 +74,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -92,6 +94,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -112,6 +116,8 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeEntry
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private data class ChatCallbacks(
     val onToggleToolExpansion: (String) -> Unit,
@@ -151,6 +157,8 @@ private data class ChatCallbacks(
     val onHideModelPicker: () -> Unit,
     val onModelsQueryChanged: (String) -> Unit,
     val onSelectModel: (AvailableModel) -> Unit,
+    val onSyncNow: () -> Unit,
+    val onCompactSession: () -> Unit,
     // Tree navigation callbacks
     val onShowTreeSheet: () -> Unit,
     val onHideTreeSheet: () -> Unit,
@@ -178,7 +186,10 @@ internal data class PromptControlsCallbacks(
 
 @Suppress("LongMethod")
 @Composable
-fun ChatRoute(sessionController: SessionController) {
+fun ChatRoute(
+    sessionController: SessionController,
+    showExtensionStatusStrip: Boolean,
+) {
     val context = LocalContext.current
     val imageEncoder = remember { ImageEncoder(context) }
     val factory =
@@ -228,6 +239,8 @@ fun ChatRoute(sessionController: SessionController) {
                 onHideModelPicker = chatViewModel::hideModelPicker,
                 onModelsQueryChanged = chatViewModel::onModelsQueryChanged,
                 onSelectModel = chatViewModel::selectModel,
+                onSyncNow = chatViewModel::syncNow,
+                onCompactSession = chatViewModel::compactNow,
                 onShowTreeSheet = chatViewModel::showTreeSheet,
                 onHideTreeSheet = chatViewModel::hideTreeSheet,
                 onForkFromTreeEntry = chatViewModel::forkFromTreeEntry,
@@ -241,6 +254,7 @@ fun ChatRoute(sessionController: SessionController) {
     ChatScreen(
         state = uiState,
         callbacks = callbacks,
+        showExtensionStatusStrip = showExtensionStatusStrip,
     )
 }
 
@@ -249,6 +263,7 @@ fun ChatRoute(sessionController: SessionController) {
 private fun ChatScreen(
     state: ChatUiState,
     callbacks: ChatCallbacks,
+    showExtensionStatusStrip: Boolean,
 ) {
     StreamingFrameMetrics(
         isStreaming = state.isStreaming,
@@ -264,6 +279,7 @@ private fun ChatScreen(
     ChatScreenContent(
         state = state,
         callbacks = callbacks,
+        showExtensionStatusStrip = showExtensionStatusStrip,
     )
 
     ExtensionUiDialogs(
@@ -335,21 +351,76 @@ private fun ChatScreen(
     )
 }
 
+@Suppress("LongMethod")
 @Composable
 private fun ChatScreenContent(
     state: ChatUiState,
     callbacks: ChatCallbacks,
+    showExtensionStatusStrip: Boolean,
 ) {
+    val hasStreamingTimelineItem =
+        remember(state.timeline) {
+            state.timeline.any { item ->
+                when (item) {
+                    is ChatTimelineItem.Assistant -> item.isStreaming
+                    is ChatTimelineItem.Tool -> item.isStreaming
+                    is ChatTimelineItem.User -> false
+                }
+            }
+        }
+    val isRunActive = state.isStreaming || state.isRetrying || hasStreamingTimelineItem
+
+    var runStartedAtMs by remember { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(isRunActive) {
+        if (isRunActive) {
+            if (runStartedAtMs == null) {
+                runStartedAtMs = System.currentTimeMillis()
+            }
+        } else {
+            runStartedAtMs = null
+        }
+    }
+
+    val elapsedSeconds by
+        produceState(
+            initialValue = 0L,
+            key1 = isRunActive,
+            key2 = runStartedAtMs,
+        ) {
+            val startedAt = runStartedAtMs
+            if (!isRunActive || startedAt == null) {
+                value = 0L
+                return@produceState
+            }
+
+            while (true) {
+                value = ((System.currentTimeMillis() - startedAt).coerceAtLeast(0L)) / RUN_PROGRESS_TICK_MS
+                delay(RUN_PROGRESS_TICK_MS)
+            }
+        }
+
+    val runPhase =
+        remember(state.isRetrying, state.timeline) {
+            inferLiveRunPhase(
+                isRetrying = state.isRetrying,
+                timeline = state.timeline,
+            )
+        }
+
     Column(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(16.dp).imePadding(),
-        verticalArrangement = Arrangement.spacedBy(if (state.isStreaming) 8.dp else 12.dp),
+        verticalArrangement = Arrangement.spacedBy(if (isRunActive) 8.dp else 12.dp),
     ) {
         ChatHeader(
-            isStreaming = state.isStreaming,
+            isRunActive = isRunActive,
+            isSyncingSession = state.isSyncingSession,
+            sessionCoherencyWarning = state.sessionCoherencyWarning,
             extensionTitle = state.extensionTitle,
             connectionState = state.connectionState,
             currentModel = state.currentModel,
             thinkingLevel = state.thinkingLevel,
+            contextUsageLabel = formatContextUsageLabel(state.sessionStats, state.currentModel),
             errorMessage = state.errorMessage,
             callbacks = callbacks,
         )
@@ -367,6 +438,9 @@ private fun ChatScreenContent(
                 hasOlderMessages = state.hasOlderMessages,
                 hiddenHistoryCount = state.hiddenHistoryCount,
                 expandedToolArguments = state.expandedToolArguments,
+                isRunActive = isRunActive,
+                runPhase = runPhase,
+                runElapsedSeconds = elapsedSeconds,
                 callbacks = callbacks,
             )
         }
@@ -378,7 +452,7 @@ private fun ChatScreenContent(
         )
 
         PromptControls(
-            isStreaming = state.isStreaming,
+            isStreaming = isRunActive,
             isRetrying = state.isRetrying,
             pendingQueueItems = state.pendingQueueItems,
             steeringMode = state.steeringMode,
@@ -400,21 +474,29 @@ private fun ChatScreenContent(
                     onClearPendingQueueItems = callbacks.onClearPendingQueueItems,
                 ),
         )
+
+        if (showExtensionStatusStrip) {
+            ExtensionStatusStrip(statuses = state.extensionStatuses)
+        }
     }
 }
 
-@Suppress("LongMethod", "LongParameterList")
+@Suppress("LongMethod", "LongParameterList", "CyclomaticComplexMethod")
 @Composable
 private fun ChatHeader(
-    isStreaming: Boolean,
+    isRunActive: Boolean,
+    isSyncingSession: Boolean,
+    sessionCoherencyWarning: String?,
     extensionTitle: String?,
     connectionState: com.ayagmar.pimobile.corenet.ConnectionState,
     currentModel: ModelInfo?,
     thinkingLevel: String?,
+    contextUsageLabel: String,
     errorMessage: String?,
     callbacks: ChatCallbacks,
 ) {
-    val isCompact = isStreaming
+    val isCompact = isRunActive
+    var showSecondaryActionsMenu by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // Top row: Title and minimal actions
@@ -457,28 +539,73 @@ private fun ChatHeader(
             }
 
             // Action buttons
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (!isCompact) {
-                    IconButton(onClick = callbacks.onShowTreeSheet) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (isSyncingSession) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    IconButton(onClick = callbacks.onSyncNow) {
                         Icon(
-                            imageVector = Icons.Default.Folder,
-                            contentDescription = "Tree",
-                        )
-                    }
-                    IconButton(onClick = callbacks.onShowBashDialog) {
-                        Icon(
-                            imageVector = Icons.Default.Terminal,
-                            contentDescription = "Bash",
-                        )
-                    }
-                    IconButton(onClick = callbacks.onShowStatsSheet) {
-                        Icon(
-                            imageVector = Icons.Default.BarChart,
-                            contentDescription = "Stats",
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Sync now",
                         )
                     }
                 }
+
+                IconButton(onClick = { showSecondaryActionsMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "More actions",
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showSecondaryActionsMenu,
+                    onDismissRequest = { showSecondaryActionsMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Tree") },
+                        onClick = {
+                            showSecondaryActionsMenu = false
+                            callbacks.onShowTreeSheet()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Bash") },
+                        onClick = {
+                            showSecondaryActionsMenu = false
+                            callbacks.onShowBashDialog()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Stats") },
+                        onClick = {
+                            showSecondaryActionsMenu = false
+                            callbacks.onShowStatsSheet()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Compact now") },
+                        onClick = {
+                            showSecondaryActionsMenu = false
+                            callbacks.onCompactSession()
+                        },
+                    )
+                }
             }
+        }
+
+        sessionCoherencyWarning?.let { warning ->
+            Text(
+                text = warning,
+                color = MaterialTheme.colorScheme.tertiary,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
 
         // Compact model/thinking controls
@@ -489,12 +616,90 @@ private fun ChatHeader(
             onShowModelPicker = callbacks.onShowModelPicker,
         )
 
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AssistChip(
+                onClick = callbacks.onShowStatsSheet,
+                label = { Text(contextUsageLabel) },
+            )
+            TextButton(onClick = callbacks.onRefreshStats) {
+                Text("Refresh")
+            }
+        }
+
         // Error message if any
         errorMessage?.let { message ->
             Text(
                 text = message,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiveRunProgressIndicator(
+    phase: LiveRunPhase,
+    elapsedSeconds: Long,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp)
+                .testTag(CHAT_RUN_PROGRESS_TAG),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(12.dp),
+            strokeWidth = 2.dp,
+        )
+        Text(
+            text =
+                if (phase == LiveRunPhase.WORKING) {
+                    "Working · waiting for activity · ${formatRunElapsed(elapsedSeconds)}"
+                } else {
+                    "Working · ${phase.label} · ${formatRunElapsed(elapsedSeconds)}"
+                },
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun InlineRunProgressCard(
+    phase: LiveRunPhase,
+    elapsedSeconds: Long,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "Assistant",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            LiveRunProgressIndicator(
+                phase = phase,
+                elapsedSeconds = elapsedSeconds,
+                modifier = Modifier,
             )
         }
     }
@@ -508,8 +713,23 @@ private fun ChatBody(
     hasOlderMessages: Boolean,
     hiddenHistoryCount: Int,
     expandedToolArguments: Set<String>,
+    isRunActive: Boolean,
+    runPhase: LiveRunPhase,
+    runElapsedSeconds: Long,
     callbacks: ChatCallbacks,
 ) {
+    val hasStreamingTimelineItem =
+        remember(timeline) {
+            timeline.any { item ->
+                when (item) {
+                    is ChatTimelineItem.Assistant -> item.isStreaming
+                    is ChatTimelineItem.Tool -> item.isStreaming
+                    is ChatTimelineItem.User -> false
+                }
+            }
+        }
+    val showInlineRunProgress = isRunActive && !hasStreamingTimelineItem
+
     if (isLoading) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
@@ -517,7 +737,7 @@ private fun ChatBody(
         ) {
             CircularProgressIndicator()
         }
-    } else if (timeline.isEmpty()) {
+    } else if (timeline.isEmpty() && !showInlineRunProgress) {
         Text(
             text = "No chat messages yet. Resume a session and send a prompt.",
             style = MaterialTheme.typography.bodyLarge,
@@ -528,6 +748,10 @@ private fun ChatBody(
             hasOlderMessages = hasOlderMessages,
             hiddenHistoryCount = hiddenHistoryCount,
             expandedToolArguments = expandedToolArguments,
+            isRunActive = isRunActive,
+            showInlineRunProgress = showInlineRunProgress,
+            runPhase = runPhase,
+            runElapsedSeconds = runElapsedSeconds,
             onLoadOlderMessages = callbacks.onLoadOlderMessages,
             onToggleToolExpansion = callbacks.onToggleToolExpansion,
             onToggleThinkingExpansion = callbacks.onToggleThinkingExpansion,
@@ -538,13 +762,17 @@ private fun ChatBody(
     }
 }
 
-@Suppress("LongParameterList", "LongMethod")
+@Suppress("LongParameterList")
 @Composable
 private fun ChatTimeline(
     timeline: List<ChatTimelineItem>,
     hasOlderMessages: Boolean,
     hiddenHistoryCount: Int,
     expandedToolArguments: Set<String>,
+    isRunActive: Boolean,
+    showInlineRunProgress: Boolean,
+    runPhase: LiveRunPhase,
+    runElapsedSeconds: Long,
     onLoadOlderMessages: () -> Unit,
     onToggleToolExpansion: (String) -> Unit,
     onToggleThinkingExpansion: (String) -> Unit,
@@ -552,8 +780,142 @@ private fun ChatTimeline(
     onToggleToolArgumentsExpansion: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var previewImageUri by rememberSaveable { mutableStateOf<String?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    val shouldAutoScrollToBottom by
+    val autoScrollUi =
+        rememberTimelineAutoScrollUi(
+            listState = listState,
+            timeline = timeline,
+            showInlineRunProgress = showInlineRunProgress,
+            isRunActive = isRunActive,
+        )
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        ChatTimelineList(
+            listState = listState,
+            timeline = timeline,
+            hasOlderMessages = hasOlderMessages,
+            hiddenHistoryCount = hiddenHistoryCount,
+            expandedToolArguments = expandedToolArguments,
+            showInlineRunProgress = showInlineRunProgress,
+            runPhase = runPhase,
+            runElapsedSeconds = runElapsedSeconds,
+            onLoadOlderMessages = onLoadOlderMessages,
+            onToggleToolExpansion = onToggleToolExpansion,
+            onToggleThinkingExpansion = onToggleThinkingExpansion,
+            onToggleDiffExpansion = onToggleDiffExpansion,
+            onToggleToolArgumentsExpansion = onToggleToolArgumentsExpansion,
+            onPreviewImage = { uri ->
+                previewImageUri = uri
+            },
+        )
+
+        AnimatedVisibility(
+            visible = autoScrollUi.shouldShowJumpToLatest,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = autoScrollUi.onJumpToLatest,
+                modifier = Modifier.testTag(CHAT_JUMP_TO_LATEST_TAG),
+            ) {
+                Text("Jump to latest")
+            }
+        }
+
+        previewImageUri?.let { uri ->
+            ImagePreviewDialog(
+                uriString = uri,
+                onDismiss = { previewImageUri = null },
+            )
+        }
+    }
+}
+
+private data class TimelineAutoScrollUi(
+    val shouldShowJumpToLatest: Boolean,
+    val onJumpToLatest: () -> Unit,
+)
+
+@Suppress("LongMethod")
+@Composable
+private fun rememberTimelineAutoScrollUi(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    timeline: List<ChatTimelineItem>,
+    showInlineRunProgress: Boolean,
+    isRunActive: Boolean,
+): TimelineAutoScrollUi {
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+    val contentItemsCount = timeline.size + if (showInlineRunProgress) 1 else 0
+    val renderedItemsCount = contentItemsCount + 1 // includes bottom anchor item
+    val latestTimelineActivityKey =
+        remember(timeline, showInlineRunProgress) {
+            buildLatestTimelineActivityKey(
+                timeline = timeline,
+                showInlineRunProgress = showInlineRunProgress,
+            )
+        }
+    val isNearBottom = rememberIsNearBottom(listState)
+    var shouldStickToBottom by
+        rememberShouldStickToBottom(
+            listState = listState,
+            isNearBottom = isNearBottom,
+            renderedItemsCount = renderedItemsCount,
+        )
+
+    val shouldAutoScrollToBottom = shouldStickToBottom || isNearBottom
+
+    RunActivityAutoScroll(
+        listState = listState,
+        latestTimelineActivityKey = latestTimelineActivityKey,
+        renderedItemsCount = renderedItemsCount,
+        shouldAutoScrollToBottom = shouldAutoScrollToBottom,
+    )
+
+    RunStreamingAutoScroll(
+        listState = listState,
+        isRunActive = isRunActive,
+        shouldAutoScrollToBottom = shouldAutoScrollToBottom,
+        renderedItemsCount = renderedItemsCount,
+    )
+
+    return TimelineAutoScrollUi(
+        shouldShowJumpToLatest = renderedItemsCount > 1 && !shouldAutoScrollToBottom,
+        onJumpToLatest = {
+            shouldStickToBottom = true
+            coroutineScope.launch {
+                listState.animateScrollToItem(renderedItemsCount - 1)
+            }
+        },
+    )
+}
+
+private fun buildLatestTimelineActivityKey(
+    timeline: List<ChatTimelineItem>,
+    showInlineRunProgress: Boolean,
+): String {
+    val tail = timeline.lastOrNull()
+    val tailKey =
+        when (tail) {
+            is ChatTimelineItem.Assistant -> {
+                "assistant:${tail.id}:${tail.text.length}:${tail.thinking?.length ?: 0}:${tail.isStreaming}"
+            }
+
+            is ChatTimelineItem.Tool -> {
+                "tool:${tail.id}:${tail.output.length}:${tail.isStreaming}:${tail.isCollapsed}"
+            }
+
+            is ChatTimelineItem.User -> "user:${tail.id}:${tail.text.length}:${tail.imageCount}"
+            null -> "empty"
+        }
+
+    return "$tailKey:inline=$showInlineRunProgress:count=${timeline.size}"
+}
+
+@Composable
+private fun rememberIsNearBottom(listState: androidx.compose.foundation.lazy.LazyListState): Boolean {
+    val isNearBottom by
         remember {
             derivedStateOf {
                 val layoutInfo = listState.layoutInfo
@@ -564,17 +926,114 @@ private fun ChatTimeline(
             }
         }
 
-    // Auto-scroll only while the user stays near the bottom.
-    // This avoids jumping when loading older history or reading past messages.
-    LaunchedEffect(timeline.lastOrNull(), timeline.size, shouldAutoScrollToBottom) {
-        if (timeline.isNotEmpty() && shouldAutoScrollToBottom) {
-            listState.scrollToItem(timeline.size - 1)
+    return isNearBottom
+}
+
+@Composable
+private fun rememberShouldStickToBottom(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    isNearBottom: Boolean,
+    renderedItemsCount: Int,
+): androidx.compose.runtime.MutableState<Boolean> {
+    val shouldStickToBottom = remember { mutableStateOf(true) }
+
+    LaunchedEffect(listState.isScrollInProgress, isNearBottom, renderedItemsCount) {
+        if (renderedItemsCount <= 1) {
+            shouldStickToBottom.value = true
+            return@LaunchedEffect
+        }
+
+        if (listState.isScrollInProgress) {
+            shouldStickToBottom.value = isNearBottom
         }
     }
 
+    return shouldStickToBottom
+}
+
+@Composable
+private fun RunActivityAutoScroll(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    latestTimelineActivityKey: String,
+    renderedItemsCount: Int,
+    shouldAutoScrollToBottom: Boolean,
+) {
+    var lastAutoScrollAtMs by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(latestTimelineActivityKey, renderedItemsCount, shouldAutoScrollToBottom) {
+        if (renderedItemsCount <= 0 || !shouldAutoScrollToBottom) {
+            return@LaunchedEffect
+        }
+
+        val targetIndex = renderedItemsCount - 1
+        val now = System.currentTimeMillis()
+
+        when {
+            lastAutoScrollAtMs == 0L -> listState.scrollToItem(targetIndex)
+            now - lastAutoScrollAtMs >= AUTO_SCROLL_ANIMATION_MIN_INTERVAL_MS ->
+                listState.animateScrollToItem(targetIndex)
+
+            else -> listState.scrollToItem(targetIndex)
+        }
+
+        lastAutoScrollAtMs = now
+    }
+}
+
+@Composable
+private fun RunStreamingAutoScroll(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    isRunActive: Boolean,
+    shouldAutoScrollToBottom: Boolean,
+    renderedItemsCount: Int,
+) {
+    LaunchedEffect(
+        isRunActive,
+        shouldAutoScrollToBottom,
+        renderedItemsCount,
+        listState.isScrollInProgress,
+    ) {
+        val shouldRunStreamingAutoScrollLoop =
+            isRunActive &&
+                shouldAutoScrollToBottom &&
+                renderedItemsCount > 0 &&
+                !listState.isScrollInProgress
+        if (!shouldRunStreamingAutoScrollLoop) {
+            return@LaunchedEffect
+        }
+
+        while (true) {
+            val targetIndex = renderedItemsCount - 1
+            val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            if (lastVisibleIndex < targetIndex) {
+                listState.scrollToItem(targetIndex)
+            }
+            delay(STREAMING_AUTO_SCROLL_CHECK_INTERVAL_MS)
+        }
+    }
+}
+
+@Suppress("LongParameterList")
+@Composable
+private fun ChatTimelineList(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    timeline: List<ChatTimelineItem>,
+    hasOlderMessages: Boolean,
+    hiddenHistoryCount: Int,
+    expandedToolArguments: Set<String>,
+    showInlineRunProgress: Boolean,
+    runPhase: LiveRunPhase,
+    runElapsedSeconds: Long,
+    onLoadOlderMessages: () -> Unit,
+    onToggleToolExpansion: (String) -> Unit,
+    onToggleThinkingExpansion: (String) -> Unit,
+    onToggleDiffExpansion: (String) -> Unit,
+    onToggleToolArgumentsExpansion: (String) -> Unit,
+    onPreviewImage: (String) -> Unit,
+) {
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (hasOlderMessages) {
@@ -589,36 +1048,73 @@ private fun ChatTimeline(
         }
 
         items(items = timeline, key = { item -> item.id }) { item ->
-            when (item) {
-                is ChatTimelineItem.User -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        UserCard(
-                            text = item.text,
-                            imageCount = item.imageCount,
-                            imageUris = item.imageUris,
-                        )
-                    }
-                }
-                is ChatTimelineItem.Assistant -> {
-                    AssistantCard(
-                        item = item,
-                        onToggleThinkingExpansion = onToggleThinkingExpansion,
-                    )
-                }
+            ChatTimelineRow(
+                item = item,
+                expandedToolArguments = expandedToolArguments,
+                onToggleToolExpansion = onToggleToolExpansion,
+                onToggleThinkingExpansion = onToggleThinkingExpansion,
+                onToggleDiffExpansion = onToggleDiffExpansion,
+                onToggleToolArgumentsExpansion = onToggleToolArgumentsExpansion,
+                onPreviewImage = onPreviewImage,
+            )
+        }
 
-                is ChatTimelineItem.Tool -> {
-                    ToolCard(
-                        item = item,
-                        isArgumentsExpanded = item.id in expandedToolArguments,
-                        onToggleToolExpansion = onToggleToolExpansion,
-                        onToggleDiffExpansion = onToggleDiffExpansion,
-                        onToggleArgumentsExpansion = onToggleToolArgumentsExpansion,
-                    )
-                }
+        if (showInlineRunProgress) {
+            item(key = "inline-run-progress") {
+                InlineRunProgressCard(
+                    phase = runPhase,
+                    elapsedSeconds = runElapsedSeconds,
+                )
             }
+        }
+
+        item(key = CHAT_TIMELINE_BOTTOM_ANCHOR_KEY) {
+            Spacer(modifier = Modifier.height(1.dp))
+        }
+    }
+}
+
+@Suppress("LongParameterList")
+@Composable
+private fun ChatTimelineRow(
+    item: ChatTimelineItem,
+    expandedToolArguments: Set<String>,
+    onToggleToolExpansion: (String) -> Unit,
+    onToggleThinkingExpansion: (String) -> Unit,
+    onToggleDiffExpansion: (String) -> Unit,
+    onToggleToolArgumentsExpansion: (String) -> Unit,
+    onPreviewImage: (String) -> Unit,
+) {
+    when (item) {
+        is ChatTimelineItem.User -> {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                UserCard(
+                    text = item.text,
+                    imageCount = item.imageCount,
+                    imageUris = item.imageUris,
+                    onImageClick = onPreviewImage,
+                )
+            }
+        }
+
+        is ChatTimelineItem.Assistant -> {
+            AssistantCard(
+                item = item,
+                onToggleThinkingExpansion = onToggleThinkingExpansion,
+            )
+        }
+
+        is ChatTimelineItem.Tool -> {
+            ToolCard(
+                item = item,
+                isArgumentsExpanded = item.id in expandedToolArguments,
+                onToggleToolExpansion = onToggleToolExpansion,
+                onToggleDiffExpansion = onToggleDiffExpansion,
+                onToggleArgumentsExpansion = onToggleToolArgumentsExpansion,
+            )
         }
     }
 }
@@ -629,6 +1125,7 @@ private fun UserCard(
     text: String,
     imageCount: Int,
     imageUris: List<String>,
+    onImageClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -662,7 +1159,10 @@ private fun UserCard(
                         items = imageUris.take(MAX_INLINE_USER_IMAGE_PREVIEWS),
                         key = { index, uri -> "$uri-$index" },
                     ) { _, uriString ->
-                        UserImagePreview(uriString = uriString)
+                        UserImagePreview(
+                            uriString = uriString,
+                            onClick = { onImageClick(uriString) },
+                        )
                     }
 
                     val remaining = imageUris.size - MAX_INLINE_USER_IMAGE_PREVIEWS
@@ -695,7 +1195,10 @@ private fun UserCard(
 }
 
 @Composable
-private fun UserImagePreview(uriString: String) {
+private fun UserImagePreview(
+    uriString: String,
+    onClick: () -> Unit,
+) {
     val uri = remember(uriString) { Uri.parse(uriString) }
     var loadFailed by remember(uriString) { mutableStateOf(false) }
 
@@ -723,7 +1226,8 @@ private fun UserImagePreview(uriString: String) {
         modifier =
             Modifier
                 .size(USER_IMAGE_PREVIEW_SIZE_DP.dp)
-                .clip(RoundedCornerShape(8.dp)),
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onClick),
         contentScale = ContentScale.Crop,
         onError = {
             loadFailed = true
@@ -1360,6 +1864,7 @@ internal fun PromptControls(
     }
 }
 
+@Suppress("LongMethod")
 @Composable
 private fun StreamingControls(
     isRetrying: Boolean,
@@ -1368,57 +1873,66 @@ private fun StreamingControls(
     onSteerClick: () -> Unit,
     onFollowUpClick: () -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth().testTag(CHAT_STREAMING_CONTROLS_TAG),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Button(
-            onClick = onAbort,
-            modifier = Modifier.weight(1f),
-            colors =
-                androidx.compose.material3.ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                ),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Abort",
-                modifier = Modifier.padding(end = 4.dp),
-            )
-            Text(
-                text = "Abort",
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        if (isRetrying) {
             Button(
-                onClick = onAbortRetry,
+                onClick = onAbort,
                 modifier = Modifier.weight(1f),
                 colors =
                     androidx.compose.material3.ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                     ),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp),
             ) {
-                Text(text = "Abort Retry", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-            }
-        } else {
-            Button(
-                onClick = onSteerClick,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(text = "Steer", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                Icon(
+                    imageVector = Icons.Default.Stop,
+                    contentDescription = null,
+                    modifier = Modifier.padding(end = 4.dp),
+                )
+                Text(
+                    text = "Abort",
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
 
-            Button(
-                onClick = onFollowUpClick,
-                modifier = Modifier.weight(1f),
+            if (isRetrying) {
+                OutlinedButton(
+                    onClick = onAbortRetry,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(text = "Abort Retry", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+
+        if (!isRetrying) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "Follow Up", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                OutlinedButton(
+                    onClick = onSteerClick,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(text = "Steer", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                }
+
+                OutlinedButton(
+                    onClick = onFollowUpClick,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(text = "Follow Up", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
@@ -1530,6 +2044,7 @@ internal fun PromptInputRow(
 ) {
     val context = LocalContext.current
     val imageEncoder = remember { ImageEncoder(context) }
+    var previewImageUri by rememberSaveable { mutableStateOf<String?>(null) }
 
     val submitPrompt = {
         onSendPrompt()
@@ -1550,6 +2065,9 @@ internal fun PromptInputRow(
             ImageAttachmentStrip(
                 images = pendingImages,
                 onRemove = onRemoveImage,
+                onImageClick = { uri ->
+                    previewImageUri = uri
+                },
             )
         }
 
@@ -1579,9 +2097,8 @@ internal fun PromptInputRow(
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Type a message...") },
                 singleLine = false,
-                maxLines = 4,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { submitPrompt() }),
+                maxLines = 8,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                 enabled = !isStreaming,
                 trailingIcon = {
                     if (inputText.isEmpty() && !isStreaming) {
@@ -1605,6 +2122,13 @@ internal fun PromptInputRow(
                 )
             }
         }
+
+        previewImageUri?.let { uri ->
+            ImagePreviewDialog(
+                uriString = uri,
+                onDismiss = { previewImageUri = null },
+            )
+        }
     }
 }
 
@@ -1612,6 +2136,7 @@ internal fun PromptInputRow(
 private fun ImageAttachmentStrip(
     images: List<PendingImage>,
     onRemove: (Int) -> Unit,
+    onImageClick: (String) -> Unit,
 ) {
     LazyRow(
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -1624,6 +2149,7 @@ private fun ImageAttachmentStrip(
             ImageThumbnail(
                 image = image,
                 onRemove = { onRemove(index) },
+                onClick = { onImageClick(image.uri) },
             )
         }
     }
@@ -1634,6 +2160,7 @@ private fun ImageAttachmentStrip(
 private fun ImageThumbnail(
     image: PendingImage,
     onRemove: () -> Unit,
+    onClick: () -> Unit,
 ) {
     Box(
         modifier =
@@ -1646,7 +2173,7 @@ private fun ImageThumbnail(
         AsyncImage(
             model = uri,
             contentDescription = image.displayName,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().clickable(onClick = onClick),
             contentScale = ContentScale.Crop,
         )
 
@@ -1675,9 +2202,9 @@ private fun ImageThumbnail(
             modifier =
                 Modifier
                     .align(Alignment.TopEnd)
-                    .size(20.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
         ) {
             Icon(
                 imageVector = Icons.Default.Close,
@@ -1711,6 +2238,42 @@ private fun formatFileSize(bytes: Long): String {
         bytes >= 1_048_576 -> String.format(java.util.Locale.US, "%.1fMB", bytes / 1_048_576.0)
         bytes >= 1_024 -> String.format(java.util.Locale.US, "%.0fKB", bytes / 1_024.0)
         else -> "${bytes}B"
+    }
+}
+
+@Composable
+private fun ImagePreviewDialog(
+    uriString: String,
+    onDismiss: () -> Unit,
+) {
+    val uri = remember(uriString) { Uri.parse(uriString) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(
+                model = uri,
+                contentDescription = "Image preview",
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                contentScale = ContentScale.Fit,
+            )
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close image preview",
+                    tint = Color.White,
+                )
+            }
+        }
     }
 }
 
@@ -1844,6 +2407,231 @@ private fun ModelThinkingControls(
     }
 }
 
+@Suppress("LongMethod")
+@Composable
+private fun ExtensionStatusStrip(statuses: Map<String, String>) {
+    if (statuses.isEmpty()) return
+
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var previousStatuses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var hasPreviousSnapshot by remember { mutableStateOf(false) }
+
+    val comparisonSnapshot =
+        if (hasPreviousSnapshot) {
+            previousStatuses
+        } else {
+            statuses.mapValues { (_, value) -> value.trim() }
+        }
+
+    val presentation =
+        remember(statuses, comparisonSnapshot, expanded) {
+            buildExtensionStatusPresentation(
+                statuses = statuses,
+                previousStatuses = comparisonSnapshot,
+                expanded = expanded,
+            )
+        }
+
+    LaunchedEffect(statuses) {
+        previousStatuses = statuses.mapValues { (_, value) -> value.trim() }
+        hasPreviousSnapshot = true
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+        tonalElevation = 1.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Terminal,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            text = "Extension status",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = "${presentation.activeCount} active · ${presentation.quietCount} quiet",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(if (expanded) "Hide" else "Show")
+                }
+            }
+
+            if (!expanded) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val first = presentation.visibleEntries.firstOrNull()
+                    if (first != null) {
+                        StatusPill(entry = first)
+                    }
+                    if (presentation.hiddenCount > 0) {
+                        Text(
+                            text = "+${presentation.hiddenCount} more",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    presentation.visibleEntries.forEach { entry ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Text(
+                                text = if (entry.isChanged) "•" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                            Text(
+                                text = "${entry.key}: ${entry.value.take(STATUS_VALUE_MAX_LENGTH)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (presentation.changedCount > 0) {
+                Text(
+                    text = "${presentation.changedCount} update(s) since last refresh",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusPill(entry: ExtensionStatusEntry) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color =
+            if (entry.isLowSignal) {
+                MaterialTheme.colorScheme.surface
+            } else {
+                MaterialTheme.colorScheme.secondaryContainer
+            },
+    ) {
+        Text(
+            text = "${entry.key}: ${entry.value.take(EXTENSION_STATUS_PILL_MAX_LENGTH)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
+}
+
+internal data class ExtensionStatusEntry(
+    val key: String,
+    val value: String,
+    val isLowSignal: Boolean,
+    val isChanged: Boolean,
+)
+
+internal data class ExtensionStatusPresentation(
+    val visibleEntries: List<ExtensionStatusEntry>,
+    val hiddenCount: Int,
+    val activeCount: Int,
+    val quietCount: Int,
+    val changedCount: Int,
+)
+
+internal fun buildExtensionStatusPresentation(
+    statuses: Map<String, String>,
+    previousStatuses: Map<String, String>,
+    expanded: Boolean,
+): ExtensionStatusPresentation {
+    if (statuses.isEmpty()) {
+        return ExtensionStatusPresentation(
+            visibleEntries = emptyList(),
+            hiddenCount = 0,
+            activeCount = 0,
+            quietCount = 0,
+            changedCount = 0,
+        )
+    }
+
+    val entries =
+        statuses
+            .toSortedMap()
+            .map { (key, rawValue) ->
+                val value = rawValue.trim().ifEmpty { "(empty)" }
+                ExtensionStatusEntry(
+                    key = key,
+                    value = value,
+                    isLowSignal = isLowSignalExtensionStatus(value),
+                    isChanged = previousStatuses[key] != value,
+                )
+            }
+
+    val changed = entries.filter { it.isChanged }
+    val active = entries.filterNot { it.isLowSignal }
+    val quietCount = entries.size - active.size
+
+    val compactCandidates =
+        when {
+            changed.isNotEmpty() -> changed
+            active.isNotEmpty() -> active
+            else -> entries
+        }
+
+    val visibleEntries = if (expanded) entries else compactCandidates.take(MAX_COMPACT_EXTENSION_STATUS_ITEMS)
+
+    return ExtensionStatusPresentation(
+        visibleEntries = visibleEntries,
+        hiddenCount = if (expanded) 0 else (entries.size - visibleEntries.size).coerceAtLeast(0),
+        activeCount = active.size,
+        quietCount = quietCount,
+        changedCount = changed.size,
+    )
+}
+
+internal fun isLowSignalExtensionStatus(value: String): Boolean {
+    val normalized = value.trim().lowercase()
+    return LOW_SIGNAL_STATUS_TOKENS.any { token -> normalized.contains(token) }
+}
+
 @Composable
 private fun ExtensionWidgets(
     widgets: Map<String, ExtensionWidget>,
@@ -1876,6 +2664,8 @@ private fun ExtensionWidgets(
 internal const val CHAT_PROMPT_CONTROLS_TAG = "chat_prompt_controls"
 internal const val CHAT_STREAMING_CONTROLS_TAG = "chat_streaming_controls"
 internal const val CHAT_PROMPT_INPUT_ROW_TAG = "chat_prompt_input_row"
+internal const val CHAT_RUN_PROGRESS_TAG = "chat_run_progress"
+internal const val CHAT_JUMP_TO_LATEST_TAG = "chat_jump_to_latest"
 
 private const val COLLAPSED_OUTPUT_LENGTH = 280
 private const val THINKING_COLLAPSE_THRESHOLD = 280
@@ -1883,7 +2673,18 @@ private const val MAX_ARG_DISPLAY_LENGTH = 100
 private const val MAX_INLINE_USER_IMAGE_PREVIEWS = 4
 private const val USER_IMAGE_PREVIEW_SIZE_DP = 56
 private const val AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS = 2
+private const val AUTO_SCROLL_ANIMATION_MIN_INTERVAL_MS = 120L
+private const val STREAMING_AUTO_SCROLL_CHECK_INTERVAL_MS = 90L
+private const val CHAT_TIMELINE_BOTTOM_ANCHOR_KEY = "chat_timeline_bottom_anchor"
 private const val TOOL_HIGHLIGHT_MAX_LENGTH = 1_000
+private const val STATUS_VALUE_MAX_LENGTH = 180
+private const val EXTENSION_STATUS_PILL_MAX_LENGTH = 56
+private const val MAX_COMPACT_EXTENSION_STATUS_ITEMS = 2
+private const val CONTEXT_PERCENT_FACTOR = 100.0
+private const val CONTEXT_PERCENT_MIN = 0
+private const val CONTEXT_PERCENT_MAX = 100
+private const val MODEL_PICKER_SCROLL_OFFSET_ITEMS = 1
+private const val RUN_PROGRESS_TICK_MS = 1_000L
 private const val STREAMING_FRAME_LOG_TAG = "StreamingFrameMetrics"
 private val THINKING_LEVEL_OPTIONS = listOf("off", "minimal", "low", "medium", "high", "xhigh")
 private val CODE_FENCE_REGEX = Regex("```([\\w+-]*)\\r?\\n([\\s\\S]*?)```")
@@ -1939,6 +2740,16 @@ private val TOOL_OUTPUT_LANGUAGE_BY_EXTENSION =
         "go" to "go",
         "rs" to "rust",
         "md" to "markdown",
+    )
+private val LOW_SIGNAL_STATUS_TOKENS =
+    setOf(
+        "idle",
+        "ready",
+        "ok",
+        "connected",
+        "none",
+        "no updates",
+        "synced",
     )
 
 @Suppress("LongParameterList", "LongMethod")
@@ -2054,12 +2865,12 @@ private fun BashDialog(
                             if (output.isNotEmpty()) {
                                 IconButton(
                                     onClick = { clipboardManager.setText(AnnotatedString(output)) },
-                                    modifier = Modifier.size(24.dp),
+                                    modifier = Modifier.size(40.dp),
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.ContentCopy,
                                         contentDescription = "Copy output",
-                                        modifier = Modifier.size(16.dp),
+                                        modifier = Modifier.size(18.dp),
                                     )
                                 }
                             }
@@ -2318,12 +3129,123 @@ private fun formatNumber(value: Long): String {
     }
 }
 
+private fun formatContextUsageLabel(
+    stats: SessionStats?,
+    currentModel: ModelInfo?,
+): String {
+    val statsSnapshot = stats ?: return "Ctx --"
+
+    val explicitUsedTokens = statsSnapshot.contextUsedTokens?.coerceAtLeast(0L)
+    val explicitWindowTokens = statsSnapshot.contextWindowTokens?.takeIf { it > 0 }
+    val explicitPercent = statsSnapshot.contextUsagePercent?.coerceIn(CONTEXT_PERCENT_MIN, CONTEXT_PERCENT_MAX)
+
+    val fallbackUsedTokens = (statsSnapshot.inputTokens + statsSnapshot.outputTokens).coerceAtLeast(0L)
+    val fallbackWindowTokens = currentModel?.contextWindow?.takeIf { it > 0 }?.toLong()
+    val approximateWindowTokens = explicitWindowTokens ?: fallbackWindowTokens
+
+    val contextUsage =
+        buildContextUsageCoreLabel(
+            explicitUsedTokens = explicitUsedTokens,
+            explicitWindowTokens = explicitWindowTokens,
+            explicitPercent = explicitPercent,
+            fallbackUsedTokens = fallbackUsedTokens,
+            fallbackWindowTokens = approximateWindowTokens,
+        )
+
+    val compactionLabel =
+        statsSnapshot.compactionCount
+            .takeIf { it > 0 }
+            ?.let { count -> " · C$count" }
+            .orEmpty()
+
+    val costLabel =
+        statsSnapshot.totalCost
+            .takeIf { it > 0.0 }
+            ?.let { cost -> " · ${formatCompactCost(cost)}" }
+            .orEmpty()
+
+    return contextUsage + compactionLabel + costLabel
+}
+
+private fun buildContextUsageCoreLabel(
+    explicitUsedTokens: Long?,
+    explicitWindowTokens: Long?,
+    explicitPercent: Int?,
+    fallbackUsedTokens: Long,
+    fallbackWindowTokens: Long?,
+): String {
+    val explicitPercentLabel =
+        when {
+            explicitPercent == null -> null
+            explicitUsedTokens != null && explicitWindowTokens != null ->
+                formatExactContextUsage(
+                    percent = explicitPercent,
+                    usedTokens = explicitUsedTokens,
+                    windowTokens = explicitWindowTokens,
+                )
+
+            else -> "Ctx $explicitPercent%"
+        }
+
+    if (explicitPercentLabel != null) {
+        return explicitPercentLabel
+    }
+
+    val explicitUsageLabel =
+        when {
+            explicitUsedTokens != null && explicitWindowTokens != null -> {
+                val computedPercent = computeContextPercent(explicitUsedTokens, explicitWindowTokens)
+                formatExactContextUsage(
+                    percent = computedPercent,
+                    usedTokens = explicitUsedTokens,
+                    windowTokens = explicitWindowTokens,
+                )
+            }
+
+            explicitUsedTokens != null -> "Ctx ${formatNumber(explicitUsedTokens)}"
+            fallbackWindowTokens != null ->
+                "Ctx ~${formatNumber(fallbackUsedTokens)}/${formatNumber(fallbackWindowTokens)}"
+
+            else -> "Ctx ~${formatNumber(fallbackUsedTokens)}"
+        }
+
+    return explicitUsageLabel
+}
+
+private fun computeContextPercent(
+    usedTokens: Long,
+    windowTokens: Long,
+): Int {
+    return ((usedTokens * CONTEXT_PERCENT_FACTOR) / windowTokens.toDouble())
+        .toInt()
+        .coerceIn(CONTEXT_PERCENT_MIN, CONTEXT_PERCENT_MAX)
+}
+
+private fun formatExactContextUsage(
+    percent: Int,
+    usedTokens: Long,
+    windowTokens: Long,
+): String {
+    return "Ctx $percent% · ${formatNumber(usedTokens)}/${formatNumber(windowTokens)}"
+}
+
 @Suppress("MagicNumber")
 private fun formatCost(value: Double): String {
     return String.format(java.util.Locale.US, "$%.4f", value)
 }
 
-@Suppress("LongParameterList", "LongMethod")
+@Suppress("MagicNumber")
+private fun formatCompactCost(value: Double): String {
+    val pattern =
+        when {
+            value >= 1.0 -> "$%.2f"
+            value >= 0.1 -> "$%.3f"
+            else -> "$%.4f"
+        }
+    return String.format(java.util.Locale.US, pattern, value)
+}
+
+@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")
 @Composable
 private fun ModelPickerSheet(
     isVisible: Boolean,
@@ -2354,6 +3276,36 @@ private fun ModelPickerSheet(
         remember(filteredModels) {
             filteredModels.groupBy { it.provider }
         }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val selectedModelIndex =
+        remember(groupedModels, currentModel) {
+            if (currentModel == null) {
+                -1
+            } else {
+                var index = 0
+                var foundIndex = -1
+                groupedModels.forEach { (_, modelsInGroup) ->
+                    index += 1 // provider header item
+                    modelsInGroup.forEach { model ->
+                        if (
+                            foundIndex < 0 &&
+                            model.id == currentModel.id &&
+                            model.provider == currentModel.provider
+                        ) {
+                            foundIndex = index
+                        }
+                        index += 1
+                    }
+                }
+                foundIndex
+            }
+        }
+
+    LaunchedEffect(selectedModelIndex, isVisible) {
+        if (isVisible && selectedModelIndex >= 0) {
+            listState.scrollToItem((selectedModelIndex - MODEL_PICKER_SCROLL_OFFSET_ITEMS).coerceAtLeast(0))
+        }
+    }
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
@@ -2391,6 +3343,7 @@ private fun ModelPickerSheet(
                     )
                 } else {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         groupedModels.forEach { (provider, modelsInGroup) ->

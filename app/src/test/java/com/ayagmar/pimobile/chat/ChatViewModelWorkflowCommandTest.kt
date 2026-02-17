@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -152,6 +153,55 @@ class ChatViewModelWorkflowCommandTest {
             dispatcher.scheduler.advanceUntilIdle()
 
             assertTrue(viewModel.uiState.value.isStatsSheetVisible)
+            assertTrue(viewModel.uiState.value.extensionStatuses.isEmpty())
+        }
+
+    @Test
+    fun nonWorkflowStatusIsStoredUpdatedAndCleared() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.emitEvent(
+                ExtensionUiRequestEvent(
+                    type = "extension_ui_request",
+                    id = "req-1",
+                    method = "setStatus",
+                    statusKey = "ext.status",
+                    statusText = "syncing",
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals("syncing", viewModel.uiState.value.extensionStatuses["ext.status"])
+
+            controller.emitEvent(
+                ExtensionUiRequestEvent(
+                    type = "extension_ui_request",
+                    id = "req-2",
+                    method = "setStatus",
+                    statusKey = "ext.status",
+                    statusText = "idle",
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals("idle", viewModel.uiState.value.extensionStatuses["ext.status"])
+
+            controller.emitEvent(
+                ExtensionUiRequestEvent(
+                    type = "extension_ui_request",
+                    id = "req-3",
+                    method = "setStatus",
+                    statusKey = "ext.status",
+                    statusText = null,
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertNull(viewModel.uiState.value.extensionStatuses["ext.status"])
         }
 
     private fun awaitInitialLoad(viewModel: ChatViewModel) {

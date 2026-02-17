@@ -98,7 +98,7 @@ Measured values require device testing and are tracked via `adb logcat | grep Pe
 ## Known Limitations
 
 - No offline mode - requires live laptop connection
-- Text-only - image attachments not supported
+- Image attachments supported for prompt/send flows; editing/viewing remains text-first
 - Large tool outputs truncated (configurable threshold)
 - Session history loads completely on resume (not paginated)
 

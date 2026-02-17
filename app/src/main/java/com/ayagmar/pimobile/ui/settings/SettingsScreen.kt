@@ -95,21 +95,32 @@ private fun SettingsScreen(
             onPing = viewModel::pingBridge,
         )
 
-        AgentBehaviorCard(
+        AgentAutomationCard(
             autoCompactionEnabled = uiState.autoCompactionEnabled,
             autoRetryEnabled = uiState.autoRetryEnabled,
+            onToggleAutoCompaction = viewModel::toggleAutoCompaction,
+            onToggleAutoRetry = viewModel::toggleAutoRetry,
+        )
+
+        TransportCard(
             transportPreference = uiState.transportPreference,
             effectiveTransportPreference = uiState.effectiveTransportPreference,
             transportRuntimeNote = uiState.transportRuntimeNote,
+            onTransportPreferenceSelected = viewModel::setTransportPreference,
+        )
+
+        AppearanceCard(
             themePreference = uiState.themePreference,
+            showExtensionStatusStrip = uiState.showExtensionStatusStrip,
+            onThemePreferenceSelected = viewModel::setThemePreference,
+            onToggleExtensionStatusStrip = viewModel::toggleExtensionStatusStrip,
+        )
+
+        DeliveryModesCard(
             steeringMode = uiState.steeringMode,
             followUpMode = uiState.followUpMode,
             isUpdatingSteeringMode = uiState.isUpdatingSteeringMode,
             isUpdatingFollowUpMode = uiState.isUpdatingFollowUpMode,
-            onToggleAutoCompaction = viewModel::toggleAutoCompaction,
-            onToggleAutoRetry = viewModel::toggleAutoRetry,
-            onTransportPreferenceSelected = viewModel::setTransportPreference,
-            onThemePreferenceSelected = viewModel::setThemePreference,
             onSteeringModeSelected = viewModel::setSteeringMode,
             onFollowUpModeSelected = viewModel::setFollowUpMode,
         )
@@ -215,31 +226,16 @@ private fun ConnectionMessages(
     }
 }
 
-@Suppress("LongParameterList")
 @Composable
-private fun AgentBehaviorCard(
+private fun AgentAutomationCard(
     autoCompactionEnabled: Boolean,
     autoRetryEnabled: Boolean,
-    transportPreference: TransportPreference,
-    effectiveTransportPreference: TransportPreference,
-    transportRuntimeNote: String,
-    themePreference: ThemePreference,
-    steeringMode: String,
-    followUpMode: String,
-    isUpdatingSteeringMode: Boolean,
-    isUpdatingFollowUpMode: Boolean,
     onToggleAutoCompaction: () -> Unit,
     onToggleAutoRetry: () -> Unit,
-    onTransportPreferenceSelected: (TransportPreference) -> Unit,
-    onThemePreferenceSelected: (ThemePreference) -> Unit,
-    onSteeringModeSelected: (String) -> Unit,
-    onFollowUpModeSelected: (String) -> Unit,
 ) {
-    PiCard(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+    PiCard(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "Agent Behavior",
+            text = "Automation",
             style = MaterialTheme.typography.titleMedium,
         )
 
@@ -256,6 +252,21 @@ private fun AgentBehaviorCard(
             checked = autoRetryEnabled,
             onToggle = onToggleAutoRetry,
         )
+    }
+}
+
+@Composable
+private fun TransportCard(
+    transportPreference: TransportPreference,
+    effectiveTransportPreference: TransportPreference,
+    transportRuntimeNote: String,
+    onTransportPreferenceSelected: (TransportPreference) -> Unit,
+) {
+    PiCard(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Connection routing",
+            style = MaterialTheme.typography.titleMedium,
+        )
 
         TransportPreferenceRow(
             selectedPreference = transportPreference,
@@ -263,10 +274,50 @@ private fun AgentBehaviorCard(
             runtimeNote = transportRuntimeNote,
             onPreferenceSelected = onTransportPreferenceSelected,
         )
+    }
+}
+
+@Composable
+private fun AppearanceCard(
+    themePreference: ThemePreference,
+    showExtensionStatusStrip: Boolean,
+    onThemePreferenceSelected: (ThemePreference) -> Unit,
+    onToggleExtensionStatusStrip: () -> Unit,
+) {
+    PiCard(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Appearance",
+            style = MaterialTheme.typography.titleMedium,
+        )
 
         ThemePreferenceRow(
             selectedPreference = themePreference,
             onPreferenceSelected = onThemePreferenceSelected,
+        )
+
+        SettingsToggleRow(
+            title = "Show extension status strip",
+            description = "Show compact extension runtime updates in chat",
+            checked = showExtensionStatusStrip,
+            onToggle = onToggleExtensionStatusStrip,
+        )
+    }
+}
+
+@Suppress("LongParameterList")
+@Composable
+private fun DeliveryModesCard(
+    steeringMode: String,
+    followUpMode: String,
+    isUpdatingSteeringMode: Boolean,
+    isUpdatingFollowUpMode: Boolean,
+    onSteeringModeSelected: (String) -> Unit,
+    onFollowUpModeSelected: (String) -> Unit,
+) {
+    PiCard(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Streaming delivery",
+            style = MaterialTheme.typography.titleMedium,
         )
 
         ModeSelectorRow(

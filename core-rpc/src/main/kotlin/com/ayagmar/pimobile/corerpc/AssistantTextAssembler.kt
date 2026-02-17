@@ -28,7 +28,13 @@ class AssistantTextAssembler(
             type == "text_end" -> handleTextEnd(event, contentIndex, assistantEvent.content)
             type == "thinking_start" -> handleThinkingStart(event, contentIndex)
             type == "thinking_delta" -> handleThinkingDelta(event, contentIndex, assistantEvent.delta)
-            type == "thinking_end" -> handleThinkingEnd(event, contentIndex, assistantEvent.thinking)
+            type == "thinking_end" ->
+                handleThinkingEnd(
+                    event = event,
+                    contentIndex = contentIndex,
+                    thinking = assistantEvent.thinking,
+                    content = assistantEvent.content,
+                )
             else -> null
         }
     }
@@ -114,9 +120,10 @@ class AssistantTextAssembler(
         event: MessageUpdateEvent,
         contentIndex: Int,
         thinking: String?,
+        content: String?,
     ): AssistantTextUpdate {
         val builder = thinkingBuilderFor(event, contentIndex)
-        val resolvedThinking = thinking ?: builder.toString()
+        val resolvedThinking = thinking ?: content ?: builder.toString()
         builder.clear()
         builder.append(resolvedThinking)
         return AssistantTextUpdate(

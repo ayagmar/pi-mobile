@@ -96,6 +96,7 @@ If reconnecting with same `clientId`, `resumed` may be `true` and previous `cwd`
 | `bridge_ping` | `bridge_pong` | Liveness check |
 | `bridge_list_sessions` | `bridge_sessions` | Returns grouped session metadata |
 | `bridge_get_session_tree` | `bridge_session_tree` | Requires `sessionPath`; supports filter |
+| `bridge_get_session_freshness` | `bridge_session_freshness` | Returns freshness fingerprint + lock owner metadata |
 | `bridge_navigate_tree` | `bridge_tree_navigation_result` | Requires control lock; uses internal extension command |
 | `bridge_set_cwd` | `bridge_cwd_set` | Sets active cwd context for client |
 | `bridge_acquire_control` | `bridge_control_acquired` | Acquires write lock for cwd/session |
@@ -112,6 +113,40 @@ Allowed values:
 - `labeled-only`
 
 Unknown filter -> `bridge_error` (`invalid_tree_filter`).
+
+### `bridge_get_session_freshness`
+
+Request payload:
+
+```json
+{
+  "type": "bridge_get_session_freshness",
+  "sessionPath": "/.../session.jsonl"
+}
+```
+
+Response payload:
+
+```json
+{
+  "type": "bridge_session_freshness",
+  "sessionPath": "/.../session.jsonl",
+  "cwd": "/.../project",
+  "fingerprint": {
+    "mtimeMs": 1730000000000,
+    "sizeBytes": 2048,
+    "entryCount": 42,
+    "lastEntryId": "m42",
+    "lastEntriesHash": "..."
+  },
+  "lock": {
+    "cwdOwnerClientId": "client-a",
+    "sessionOwnerClientId": "client-a",
+    "isCurrentClientCwdOwner": true,
+    "isCurrentClientSessionOwner": true
+  }
+}
+```
 
 ### `bridge_navigate_tree`
 
@@ -185,6 +220,7 @@ Common codes:
 - `tree_navigation_failed`
 - `session_index_failed`
 - `session_tree_failed`
+- `session_freshness_failed`
 
 ## Health Endpoint
 

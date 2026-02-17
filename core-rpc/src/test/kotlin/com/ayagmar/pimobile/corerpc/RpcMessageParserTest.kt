@@ -83,6 +83,48 @@ class RpcMessageParserTest {
     }
 
     @Test
+    fun `parse thinking_end payload with content field`() {
+        val line =
+            """
+            {
+              "type":"message_update",
+              "assistantMessageEvent":{
+                "type":"thinking_end",
+                "contentIndex":0,
+                "content":"reasoning from content"
+              }
+            }
+            """.trimIndent()
+
+        val event = assertIs<MessageUpdateEvent>(parser.parse(line))
+        val assistantEvent = assertNotNull(event.assistantMessageEvent)
+        assertEquals("thinking_end", assistantEvent.type)
+        assertEquals("reasoning from content", assistantEvent.content)
+        assertNull(assistantEvent.thinking)
+    }
+
+    @Test
+    fun `parse thinking_end payload with legacy thinking field`() {
+        val line =
+            """
+            {
+              "type":"message_update",
+              "assistantMessageEvent":{
+                "type":"thinking_end",
+                "contentIndex":0,
+                "thinking":"reasoning from thinking"
+              }
+            }
+            """.trimIndent()
+
+        val event = assertIs<MessageUpdateEvent>(parser.parse(line))
+        val assistantEvent = assertNotNull(event.assistantMessageEvent)
+        assertEquals("thinking_end", assistantEvent.type)
+        assertEquals("reasoning from thinking", assistantEvent.thinking)
+        assertNull(assistantEvent.content)
+    }
+
+    @Test
     fun `parse message lifecycle events`() {
         val startLine =
             """

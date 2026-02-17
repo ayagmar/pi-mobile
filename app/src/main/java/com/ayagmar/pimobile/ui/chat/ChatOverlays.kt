@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -233,19 +234,24 @@ internal fun NotificationsDisplay(
             else -> MaterialTheme.colorScheme.primaryContainer
         }
 
-    Snackbar(
-        action = {
-            TextButton(onClick = { onClear(index) }) {
-                Text("Dismiss")
-            }
-        },
-        containerColor = containerColor,
-        modifier = Modifier.padding(8.dp),
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.BottomCenter,
     ) {
-        Text(
-            text = latestNotification.message,
-            color = color,
-        )
+        Snackbar(
+            action = {
+                TextButton(onClick = { onClear(index) }) {
+                    Text("Dismiss")
+                }
+            },
+            containerColor = containerColor,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp),
+        ) {
+            Text(
+                text = latestNotification.message,
+                color = color,
+            )
+        }
     }
 }
 

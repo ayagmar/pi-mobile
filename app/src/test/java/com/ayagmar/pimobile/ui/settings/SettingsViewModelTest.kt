@@ -112,6 +112,22 @@ class SettingsViewModelTest {
             assertEquals(ThemePreference.DARK, viewModel.uiState.themePreference)
         }
 
+    @Test
+    fun toggleExtensionStatusStripUpdatesState() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = createViewModel(controller)
+
+            dispatcher.scheduler.advanceUntilIdle()
+            assertTrue(viewModel.uiState.showExtensionStatusStrip)
+
+            viewModel.toggleExtensionStatusStrip()
+            assertFalse(viewModel.uiState.showExtensionStatusStrip)
+
+            viewModel.toggleExtensionStatusStrip()
+            assertTrue(viewModel.uiState.showExtensionStatusStrip)
+        }
+
     private fun createViewModel(controller: FakeSessionController): SettingsViewModel {
         return SettingsViewModel(
             sessionController = controller,
