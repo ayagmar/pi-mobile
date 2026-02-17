@@ -71,6 +71,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.util.UUID
+import kotlin.math.roundToInt
 
 @Suppress("TooManyFunctions", "LargeClass")
 class RpcSessionController(
@@ -1293,8 +1294,11 @@ private fun parseSessionStats(data: JsonObject?): SessionStats {
     val contextUsagePercent =
         coalesceIntOrNull(
             context?.intField("percent"),
+            context?.doubleField("percent")?.roundToInt(),
             data?.intField("contextPercent"),
+            data?.doubleField("contextPercent")?.roundToInt(),
             data?.intField("contextUsagePercent"),
+            data?.doubleField("contextUsagePercent")?.roundToInt(),
         )
 
     return SessionStats(
@@ -1319,7 +1323,7 @@ private fun parseAvailableModels(data: JsonObject?): List<AvailableModel> {
     val models = runCatching { data?.get("models")?.jsonArray }.getOrNull() ?: JsonArray(emptyList())
 
     return models.mapNotNull { modelElement ->
-        val modelObject = modelElement.jsonObject
+        val modelObject = runCatching { modelElement.jsonObject }.getOrNull() ?: return@mapNotNull null
         val id = modelObject.stringField("id") ?: return@mapNotNull null
         val cost = runCatching { modelObject["cost"]?.jsonObject }.getOrNull()
 

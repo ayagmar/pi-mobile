@@ -786,7 +786,7 @@ private fun ChatTimeline(
     val contentItemsCount = timeline.size + if (showInlineRunProgress) 1 else 0
     val renderedItemsCount = contentItemsCount + 1 // includes bottom anchor item
     val latestTimelineActivityKey =
-        remember(timeline, showInlineRunProgress, isRunActive) {
+        remember(timeline, showInlineRunProgress) {
             val tail = timeline.lastOrNull()
             val tailKey =
                 when (tail) {
@@ -856,85 +856,46 @@ private fun ChatTimeline(
         renderedItemsCount,
         listState.isScrollInProgress,
     ) {
-        if (!isRunActive) return@LaunchedEffect
-        if (!shouldAutoScrollToBottom) return@LaunchedEffect
-        if (renderedItemsCount <= 0) return@LaunchedEffect
-        if (listState.isScrollInProgress) return@LaunchedEffect
+        val shouldRunStreamingAutoScrollLoop =
+            isRunActive &&
+                shouldAutoScrollToBottom &&
+                renderedItemsCount > 0 &&
+                !listState.isScrollInProgress
+        if (!shouldRunStreamingAutoScrollLoop) {
+            return@LaunchedEffect
+        }
 
         while (true) {
             val targetIndex = renderedItemsCount - 1
-            listState.scrollToItem(targetIndex)
+            val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            (lastVisibleIndex < targetIndex)
+                .takeIf { it }
+                ?.let {
+                    listState.scrollToItem(targetIndex)
+                }
             delay(STREAMING_AUTO_SCROLL_CHECK_INTERVAL_MS)
         }
     }
 
     Box(modifier = modifier.fillMaxWidth()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (hasOlderMessages) {
-                item(key = "load-older-messages") {
-                    TextButton(
-                        onClick = onLoadOlderMessages,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Load older messages ($hiddenHistoryCount hidden)")
-                    }
-                }
-            }
-
-            items(items = timeline, key = { item -> item.id }) { item ->
-                when (item) {
-                    is ChatTimelineItem.User -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
-                        ) {
-                            UserCard(
-                                text = item.text,
-                                imageCount = item.imageCount,
-                                imageUris = item.imageUris,
-                                onImageClick = { uri ->
-                                    previewImageUri = uri
-                                },
-                            )
-                        }
-                    }
-
-                    is ChatTimelineItem.Assistant -> {
-                        AssistantCard(
-                            item = item,
-                            onToggleThinkingExpansion = onToggleThinkingExpansion,
-                        )
-                    }
-
-                    is ChatTimelineItem.Tool -> {
-                        ToolCard(
-                            item = item,
-                            isArgumentsExpanded = item.id in expandedToolArguments,
-                            onToggleToolExpansion = onToggleToolExpansion,
-                            onToggleDiffExpansion = onToggleDiffExpansion,
-                            onToggleArgumentsExpansion = onToggleToolArgumentsExpansion,
-                        )
-                    }
-                }
-            }
-
-            if (showInlineRunProgress) {
-                item(key = "inline-run-progress") {
-                    InlineRunProgressCard(
-                        phase = runPhase,
-                        elapsedSeconds = runElapsedSeconds,
-                    )
-                }
-            }
-
-            item(key = CHAT_TIMELINE_BOTTOM_ANCHOR_KEY) {
-                Spacer(modifier = Modifier.height(1.dp))
-            }
-        }
+        ChatTimelineList(
+            listState = listState,
+            timeline = timeline,
+            hasOlderMessages = hasOlderMessages,
+            hiddenHistoryCount = hiddenHistoryCount,
+            expandedToolArguments = expandedToolArguments,
+            showInlineRunProgress = showInlineRunProgress,
+            runPhase = runPhase,
+            runElapsedSeconds = runElapsedSeconds,
+            onLoadOlderMessages = onLoadOlderMessages,
+            onToggleToolExpansion = onToggleToolExpansion,
+            onToggleThinkingExpansion = onToggleThinkingExpansion,
+            onToggleDiffExpansion = onToggleDiffExpansion,
+            onToggleToolArgumentsExpansion = onToggleToolArgumentsExpansion,
+            onPreviewImage = { uri ->
+                previewImageUri = uri
+            },
+        )
 
         AnimatedVisibility(
             visible = shouldShowJumpToLatest,
@@ -959,6 +920,112 @@ private fun ChatTimeline(
             ImagePreviewDialog(
                 uriString = uri,
                 onDismiss = { previewImageUri = null },
+            )
+        }
+    }
+}
+
+@Suppress("LongParameterList")
+@Composable
+private fun ChatTimelineList(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    timeline: List<ChatTimelineItem>,
+    hasOlderMessages: Boolean,
+    hiddenHistoryCount: Int,
+    expandedToolArguments: Set<String>,
+    showInlineRunProgress: Boolean,
+    runPhase: LiveRunPhase,
+    runElapsedSeconds: Long,
+    onLoadOlderMessages: () -> Unit,
+    onToggleToolExpansion: (String) -> Unit,
+    onToggleThinkingExpansion: (String) -> Unit,
+    onToggleDiffExpansion: (String) -> Unit,
+    onToggleToolArgumentsExpansion: (String) -> Unit,
+    onPreviewImage: (String) -> Unit,
+) {
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (hasOlderMessages) {
+            item(key = "load-older-messages") {
+                TextButton(
+                    onClick = onLoadOlderMessages,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Load older messages ($hiddenHistoryCount hidden)")
+                }
+            }
+        }
+
+        items(items = timeline, key = { item -> item.id }) { item ->
+            ChatTimelineRow(
+                item = item,
+                expandedToolArguments = expandedToolArguments,
+                onToggleToolExpansion = onToggleToolExpansion,
+                onToggleThinkingExpansion = onToggleThinkingExpansion,
+                onToggleDiffExpansion = onToggleDiffExpansion,
+                onToggleToolArgumentsExpansion = onToggleToolArgumentsExpansion,
+                onPreviewImage = onPreviewImage,
+            )
+        }
+
+        if (showInlineRunProgress) {
+            item(key = "inline-run-progress") {
+                InlineRunProgressCard(
+                    phase = runPhase,
+                    elapsedSeconds = runElapsedSeconds,
+                )
+            }
+        }
+
+        item(key = CHAT_TIMELINE_BOTTOM_ANCHOR_KEY) {
+            Spacer(modifier = Modifier.height(1.dp))
+        }
+    }
+}
+
+@Suppress("LongParameterList")
+@Composable
+private fun ChatTimelineRow(
+    item: ChatTimelineItem,
+    expandedToolArguments: Set<String>,
+    onToggleToolExpansion: (String) -> Unit,
+    onToggleThinkingExpansion: (String) -> Unit,
+    onToggleDiffExpansion: (String) -> Unit,
+    onToggleToolArgumentsExpansion: (String) -> Unit,
+    onPreviewImage: (String) -> Unit,
+) {
+    when (item) {
+        is ChatTimelineItem.User -> {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                UserCard(
+                    text = item.text,
+                    imageCount = item.imageCount,
+                    imageUris = item.imageUris,
+                    onImageClick = onPreviewImage,
+                )
+            }
+        }
+
+        is ChatTimelineItem.Assistant -> {
+            AssistantCard(
+                item = item,
+                onToggleThinkingExpansion = onToggleThinkingExpansion,
+            )
+        }
+
+        is ChatTimelineItem.Tool -> {
+            ToolCard(
+                item = item,
+                isArgumentsExpanded = item.id in expandedToolArguments,
+                onToggleToolExpansion = onToggleToolExpansion,
+                onToggleDiffExpansion = onToggleDiffExpansion,
+                onToggleArgumentsExpansion = onToggleToolArgumentsExpansion,
             )
         }
     }
@@ -2986,6 +3053,7 @@ private fun formatContextUsageLabel(
 
     val fallbackUsedTokens = (statsSnapshot.inputTokens + statsSnapshot.outputTokens).coerceAtLeast(0L)
     val fallbackWindowTokens = currentModel?.contextWindow?.takeIf { it > 0 }?.toLong()
+    val approximateWindowTokens = explicitWindowTokens ?: fallbackWindowTokens
 
     val contextUsage =
         buildContextUsageCoreLabel(
@@ -2993,7 +3061,7 @@ private fun formatContextUsageLabel(
             explicitWindowTokens = explicitWindowTokens,
             explicitPercent = explicitPercent,
             fallbackUsedTokens = fallbackUsedTokens,
-            fallbackWindowTokens = fallbackWindowTokens,
+            fallbackWindowTokens = approximateWindowTokens,
         )
 
     val compactionLabel =

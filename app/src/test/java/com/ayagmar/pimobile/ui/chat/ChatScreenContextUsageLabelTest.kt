@@ -80,6 +80,30 @@ class ChatScreenContextUsageLabelTest {
         assertEquals("Ctx 90%", label)
     }
 
+    @Test
+    fun usesExplicitWindowAsApproximateFallbackWhenUsedTokensMissing() {
+        val label =
+            formatContextLabel(
+                stats =
+                    SessionStats(
+                        inputTokens = 3200,
+                        outputTokens = 0,
+                        cacheReadTokens = 0,
+                        cacheWriteTokens = 0,
+                        totalCost = 0.0,
+                        messageCount = 0,
+                        userMessageCount = 0,
+                        assistantMessageCount = 0,
+                        toolResultCount = 0,
+                        sessionPath = null,
+                        contextWindowTokens = 64000,
+                    ),
+                currentModel = null,
+            )
+
+        assertEquals("Ctx ~3.2K/64.0K", label)
+    }
+
     private fun modelWithContextWindow(window: Int): ModelInfo {
         return ModelInfo(
             id = "m1",

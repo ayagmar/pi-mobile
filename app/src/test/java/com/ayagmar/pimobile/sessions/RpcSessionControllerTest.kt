@@ -113,6 +113,25 @@ class RpcSessionControllerTest {
     }
 
     @Test
+    fun parseSessionStatsRoundsDecimalContextPercent() {
+        val stats =
+            invokeParser<SessionStats>(
+                functionName = "parseSessionStats",
+                data =
+                    buildJsonObject {
+                        put(
+                            "context",
+                            buildJsonObject {
+                                put("percent", 2.6)
+                            },
+                        )
+                    },
+            )
+
+        assertEquals(3, stats.contextUsagePercent)
+    }
+
+    @Test
     fun parseBashResultMapsCurrentAndLegacyFields() {
         val current =
             invokeParser<BashResult>(
@@ -238,6 +257,33 @@ class RpcSessionControllerTest {
         assertEquals(1, models.size)
         assertEquals(0.004, models.single().inputCostPer1k)
         assertEquals(0.012, models.single().outputCostPer1k)
+    }
+
+    @Test
+    fun parseAvailableModelsSkipsMalformedEntriesAndKeepsValidModels() {
+        val models =
+            invokeParser<List<AvailableModel>>(
+                functionName = "parseAvailableModels",
+                data =
+                    buildJsonObject {
+                        put(
+                            "models",
+                            buildJsonArray {
+                                add(JsonPrimitive("malformed"))
+                                add(
+                                    buildJsonObject {
+                                        put("id", "valid-model")
+                                        put("name", "Valid Model")
+                                        put("provider", "openai")
+                                    },
+                                )
+                            },
+                        )
+                    },
+            )
+
+        assertEquals(1, models.size)
+        assertEquals("valid-model", models.single().id)
     }
 
     @Test
