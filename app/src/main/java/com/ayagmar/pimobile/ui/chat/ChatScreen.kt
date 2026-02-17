@@ -93,6 +93,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -770,6 +772,7 @@ private fun ChatTimeline(
     onToggleToolArgumentsExpansion: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var previewImageUri by rememberSaveable { mutableStateOf<String?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     val totalItems = timeline.size + if (showInlineRunProgress) 1 else 0
@@ -821,6 +824,9 @@ private fun ChatTimeline(
                                 text = item.text,
                                 imageCount = item.imageCount,
                                 imageUris = item.imageUris,
+                                onImageClick = { uri ->
+                                    previewImageUri = uri
+                                },
                             )
                         }
                     }
@@ -871,6 +877,13 @@ private fun ChatTimeline(
                 Text("Jump to latest")
             }
         }
+
+        previewImageUri?.let { uri ->
+            ImagePreviewDialog(
+                uriString = uri,
+                onDismiss = { previewImageUri = null },
+            )
+        }
     }
 }
 
@@ -880,6 +893,7 @@ private fun UserCard(
     text: String,
     imageCount: Int,
     imageUris: List<String>,
+    onImageClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -913,7 +927,10 @@ private fun UserCard(
                         items = imageUris.take(MAX_INLINE_USER_IMAGE_PREVIEWS),
                         key = { index, uri -> "$uri-$index" },
                     ) { _, uriString ->
-                        UserImagePreview(uriString = uriString)
+                        UserImagePreview(
+                            uriString = uriString,
+                            onClick = { onImageClick(uriString) },
+                        )
                     }
 
                     val remaining = imageUris.size - MAX_INLINE_USER_IMAGE_PREVIEWS
@@ -946,7 +963,10 @@ private fun UserCard(
 }
 
 @Composable
-private fun UserImagePreview(uriString: String) {
+private fun UserImagePreview(
+    uriString: String,
+    onClick: () -> Unit,
+) {
     val uri = remember(uriString) { Uri.parse(uriString) }
     var loadFailed by remember(uriString) { mutableStateOf(false) }
 
@@ -974,7 +994,8 @@ private fun UserImagePreview(uriString: String) {
         modifier =
             Modifier
                 .size(USER_IMAGE_PREVIEW_SIZE_DP.dp)
-                .clip(RoundedCornerShape(8.dp)),
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onClick),
         contentScale = ContentScale.Crop,
         onError = {
             loadFailed = true
@@ -1791,6 +1812,7 @@ internal fun PromptInputRow(
 ) {
     val context = LocalContext.current
     val imageEncoder = remember { ImageEncoder(context) }
+    var previewImageUri by rememberSaveable { mutableStateOf<String?>(null) }
 
     val submitPrompt = {
         onSendPrompt()
@@ -1811,6 +1833,9 @@ internal fun PromptInputRow(
             ImageAttachmentStrip(
                 images = pendingImages,
                 onRemove = onRemoveImage,
+                onImageClick = { uri ->
+                    previewImageUri = uri
+                },
             )
         }
 
@@ -1866,6 +1891,13 @@ internal fun PromptInputRow(
                 )
             }
         }
+
+        previewImageUri?.let { uri ->
+            ImagePreviewDialog(
+                uriString = uri,
+                onDismiss = { previewImageUri = null },
+            )
+        }
     }
 }
 
@@ -1873,6 +1905,7 @@ internal fun PromptInputRow(
 private fun ImageAttachmentStrip(
     images: List<PendingImage>,
     onRemove: (Int) -> Unit,
+    onImageClick: (String) -> Unit,
 ) {
     LazyRow(
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -1885,6 +1918,7 @@ private fun ImageAttachmentStrip(
             ImageThumbnail(
                 image = image,
                 onRemove = { onRemove(index) },
+                onClick = { onImageClick(image.uri) },
             )
         }
     }
@@ -1895,6 +1929,7 @@ private fun ImageAttachmentStrip(
 private fun ImageThumbnail(
     image: PendingImage,
     onRemove: () -> Unit,
+    onClick: () -> Unit,
 ) {
     Box(
         modifier =
@@ -1907,7 +1942,7 @@ private fun ImageThumbnail(
         AsyncImage(
             model = uri,
             contentDescription = image.displayName,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().clickable(onClick = onClick),
             contentScale = ContentScale.Crop,
         )
 
@@ -1972,6 +2007,42 @@ private fun formatFileSize(bytes: Long): String {
         bytes >= 1_048_576 -> String.format(java.util.Locale.US, "%.1fMB", bytes / 1_048_576.0)
         bytes >= 1_024 -> String.format(java.util.Locale.US, "%.0fKB", bytes / 1_024.0)
         else -> "${bytes}B"
+    }
+}
+
+@Composable
+private fun ImagePreviewDialog(
+    uriString: String,
+    onDismiss: () -> Unit,
+) {
+    val uri = remember(uriString) { Uri.parse(uriString) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(
+                model = uri,
+                contentDescription = "Image preview",
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                contentScale = ContentScale.Fit,
+            )
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close image preview",
+                    tint = Color.White,
+                )
+            }
+        }
     }
 }
 
