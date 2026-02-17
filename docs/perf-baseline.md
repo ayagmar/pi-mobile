@@ -25,8 +25,8 @@ This document defines the performance metrics, measurement methodology, and base
 | Metric | Target | Status |
 |--------|--------|--------|
 | Streaming buffer per message | < 50KB | ✅ Implemented |
-| Tracked messages limit | 16 | ✅ Implemented |
-| Event buffer capacity | 128 events | ✅ Implemented |
+| Tracked assistant message buffers | 8 | ✅ Implemented |
+| Event buffer capacity (RPC / bridge) | 256 / 128 events | ✅ Implemented |
 
 ## Measurement Infrastructure
 

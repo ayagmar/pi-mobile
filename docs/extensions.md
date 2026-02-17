@@ -133,7 +133,7 @@ They are hidden from visible slash-command results by filtering internal names.
 
 If payload action is `open_stats`, it opens the stats sheet.
 
-Non-workflow status keys are currently ignored to avoid UI noise.
+Non-workflow status keys are surfaced in the extension status strip and can be hidden via Settings.
 
 ## Extension UI Method Support
 
