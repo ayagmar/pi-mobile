@@ -866,14 +866,14 @@ private fun rememberTimelineAutoScrollUi(
 
     val shouldAutoScrollToBottom = shouldStickToBottom || isNearBottom
 
-    runActivityAutoScroll(
+    RunActivityAutoScroll(
         listState = listState,
         latestTimelineActivityKey = latestTimelineActivityKey,
         renderedItemsCount = renderedItemsCount,
         shouldAutoScrollToBottom = shouldAutoScrollToBottom,
     )
 
-    runStreamingAutoScroll(
+    RunStreamingAutoScroll(
         listState = listState,
         isRunActive = isRunActive,
         shouldAutoScrollToBottom = shouldAutoScrollToBottom,
@@ -952,7 +952,7 @@ private fun rememberShouldStickToBottom(
 }
 
 @Composable
-private fun runActivityAutoScroll(
+private fun RunActivityAutoScroll(
     listState: androidx.compose.foundation.lazy.LazyListState,
     latestTimelineActivityKey: String,
     renderedItemsCount: Int,
@@ -981,7 +981,7 @@ private fun runActivityAutoScroll(
 }
 
 @Composable
-private fun runStreamingAutoScroll(
+private fun RunStreamingAutoScroll(
     listState: androidx.compose.foundation.lazy.LazyListState,
     isRunActive: Boolean,
     shouldAutoScrollToBottom: Boolean,
