@@ -760,6 +760,7 @@ class ChatViewModel(
                 } else if (wasStreaming && !isStreaming) {
                     logThinkingDiagnostics(reason = "streaming_state_complete")
                     logStreamingDiagnostics(reason = "streaming_state_complete")
+                    clearStreamingTimelineFlags()
                 }
 
                 _uiState.update { current ->
@@ -767,10 +768,6 @@ class ChatViewModel(
                         isStreaming = isStreaming,
                         pendingQueueItems = if (isStreaming) current.pendingQueueItems else emptyList(),
                     )
-                }
-
-                if (!isStreaming) {
-                    clearStreamingTimelineFlags()
                 }
             }
         }
@@ -2187,32 +2184,42 @@ class ChatViewModel(
     }
 
     private fun clearStreamingTimelineFlags() {
-        updateTimelineState { state ->
-            state.copy(
-                timeline =
-                    state.timeline.map { item ->
-                        when (item) {
-                            is ChatTimelineItem.Assistant -> {
-                                if (item.isStreaming) {
-                                    item.copy(isStreaming = false)
-                                } else {
-                                    item
-                                }
-                            }
-
-                            is ChatTimelineItem.Tool -> {
-                                if (item.isStreaming) {
-                                    item.copy(isStreaming = false)
-                                } else {
-                                    item
-                                }
-                            }
-
-                            is ChatTimelineItem.User -> item
-                        }
-                    },
-            )
+        if (
+            fullTimeline.none { item ->
+                when (item) {
+                    is ChatTimelineItem.Assistant -> item.isStreaming
+                    is ChatTimelineItem.Tool -> item.isStreaming
+                    is ChatTimelineItem.User -> false
+                }
+            }
+        ) {
+            return
         }
+
+        fullTimeline =
+            fullTimeline.map { item ->
+                when (item) {
+                    is ChatTimelineItem.Assistant -> {
+                        if (item.isStreaming) {
+                            item.copy(isStreaming = false)
+                        } else {
+                            item
+                        }
+                    }
+
+                    is ChatTimelineItem.Tool -> {
+                        if (item.isStreaming) {
+                            item.copy(isStreaming = false)
+                        } else {
+                            item
+                        }
+                    }
+
+                    is ChatTimelineItem.User -> item
+                }
+            }
+
+        publishVisibleTimeline()
     }
 
     private fun upsertTimelineItem(item: ChatTimelineItem) {

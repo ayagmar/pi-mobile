@@ -850,10 +850,16 @@ private fun ChatTimeline(
         }
     }
 
-    LaunchedEffect(isRunActive, shouldAutoScrollToBottom, renderedItemsCount) {
-        if (!isRunActive || !shouldAutoScrollToBottom || renderedItemsCount <= 0) {
-            return@LaunchedEffect
-        }
+    LaunchedEffect(
+        isRunActive,
+        shouldAutoScrollToBottom,
+        renderedItemsCount,
+        listState.isScrollInProgress,
+    ) {
+        if (!isRunActive) return@LaunchedEffect
+        if (!shouldAutoScrollToBottom) return@LaunchedEffect
+        if (renderedItemsCount <= 0) return@LaunchedEffect
+        if (listState.isScrollInProgress) return@LaunchedEffect
 
         while (true) {
             val targetIndex = renderedItemsCount - 1
@@ -2520,6 +2526,8 @@ private const val STATUS_VALUE_MAX_LENGTH = 180
 private const val EXTENSION_STATUS_PILL_MAX_LENGTH = 56
 private const val MAX_COMPACT_EXTENSION_STATUS_ITEMS = 2
 private const val CONTEXT_PERCENT_FACTOR = 100.0
+private const val CONTEXT_PERCENT_MIN = 0
+private const val CONTEXT_PERCENT_MAX = 100
 private const val MODEL_PICKER_SCROLL_OFFSET_ITEMS = 1
 private const val RUN_PROGRESS_TICK_MS = 1_000L
 private const val STREAMING_FRAME_LOG_TAG = "StreamingFrameMetrics"
@@ -2974,37 +2982,19 @@ private fun formatContextUsageLabel(
 
     val explicitUsedTokens = statsSnapshot.contextUsedTokens?.coerceAtLeast(0L)
     val explicitWindowTokens = statsSnapshot.contextWindowTokens?.takeIf { it > 0 }
-    val explicitPercent = statsSnapshot.contextUsagePercent?.coerceIn(0, 100)
+    val explicitPercent = statsSnapshot.contextUsagePercent?.coerceIn(CONTEXT_PERCENT_MIN, CONTEXT_PERCENT_MAX)
 
     val fallbackUsedTokens = (statsSnapshot.inputTokens + statsSnapshot.outputTokens).coerceAtLeast(0L)
     val fallbackWindowTokens = currentModel?.contextWindow?.takeIf { it > 0 }?.toLong()
 
-    val hasExplicitContextUsage = explicitUsedTokens != null || explicitPercent != null
-    val usedTokens = explicitUsedTokens ?: fallbackUsedTokens
-    val contextWindow = explicitWindowTokens ?: fallbackWindowTokens
-
     val contextUsage =
-        if (contextWindow == null) {
-            if (hasExplicitContextUsage) {
-                "Ctx ${formatNumber(usedTokens)}"
-            } else {
-                "Ctx ~${formatNumber(usedTokens)}"
-            }
-        } else {
-            val percent =
-                explicitPercent
-                    ?: if (hasExplicitContextUsage) {
-                        ((usedTokens * CONTEXT_PERCENT_FACTOR) / contextWindow.toDouble()).toInt().coerceIn(0, 100)
-                    } else {
-                        null
-                    }
-
-            if (percent == null) {
-                "Ctx ~${formatNumber(usedTokens)}/${formatNumber(contextWindow)}"
-            } else {
-                "Ctx $percent% · ${formatNumber(usedTokens)}/${formatNumber(contextWindow)}"
-            }
-        }
+        buildContextUsageCoreLabel(
+            explicitUsedTokens = explicitUsedTokens,
+            explicitWindowTokens = explicitWindowTokens,
+            explicitPercent = explicitPercent,
+            fallbackUsedTokens = fallbackUsedTokens,
+            fallbackWindowTokens = fallbackWindowTokens,
+        )
 
     val compactionLabel =
         statsSnapshot.compactionCount
@@ -3019,6 +3009,68 @@ private fun formatContextUsageLabel(
             .orEmpty()
 
     return contextUsage + compactionLabel + costLabel
+}
+
+private fun buildContextUsageCoreLabel(
+    explicitUsedTokens: Long?,
+    explicitWindowTokens: Long?,
+    explicitPercent: Int?,
+    fallbackUsedTokens: Long,
+    fallbackWindowTokens: Long?,
+): String {
+    val explicitPercentLabel =
+        when {
+            explicitPercent == null -> null
+            explicitUsedTokens != null && explicitWindowTokens != null ->
+                formatExactContextUsage(
+                    percent = explicitPercent,
+                    usedTokens = explicitUsedTokens,
+                    windowTokens = explicitWindowTokens,
+                )
+
+            else -> "Ctx $explicitPercent%"
+        }
+
+    if (explicitPercentLabel != null) {
+        return explicitPercentLabel
+    }
+
+    val explicitUsageLabel =
+        when {
+            explicitUsedTokens != null && explicitWindowTokens != null -> {
+                val computedPercent = computeContextPercent(explicitUsedTokens, explicitWindowTokens)
+                formatExactContextUsage(
+                    percent = computedPercent,
+                    usedTokens = explicitUsedTokens,
+                    windowTokens = explicitWindowTokens,
+                )
+            }
+
+            explicitUsedTokens != null -> "Ctx ${formatNumber(explicitUsedTokens)}"
+            fallbackWindowTokens != null ->
+                "Ctx ~${formatNumber(fallbackUsedTokens)}/${formatNumber(fallbackWindowTokens)}"
+
+            else -> "Ctx ~${formatNumber(fallbackUsedTokens)}"
+        }
+
+    return explicitUsageLabel
+}
+
+private fun computeContextPercent(
+    usedTokens: Long,
+    windowTokens: Long,
+): Int {
+    return ((usedTokens * CONTEXT_PERCENT_FACTOR) / windowTokens.toDouble())
+        .toInt()
+        .coerceIn(CONTEXT_PERCENT_MIN, CONTEXT_PERCENT_MAX)
+}
+
+private fun formatExactContextUsage(
+    percent: Int,
+    usedTokens: Long,
+    windowTokens: Long,
+): String {
+    return "Ctx $percent% · ${formatNumber(usedTokens)}/${formatNumber(windowTokens)}"
 }
 
 @Suppress("MagicNumber")

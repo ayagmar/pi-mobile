@@ -75,6 +75,22 @@ class RpcSessionControllerTest {
     }
 
     @Test
+    fun parseSessionStatsFallsBackToToolCallsWhenToolResultsMissing() {
+        val stats =
+            invokeParser<SessionStats>(
+                functionName = "parseSessionStats",
+                data =
+                    buildJsonObject {
+                        put("totalMessages", 3)
+                        put("toolCalls", 7)
+                    },
+            )
+
+        assertEquals(3, stats.messageCount)
+        assertEquals(7, stats.toolResultCount)
+    }
+
+    @Test
     fun parseBashResultMapsCurrentAndLegacyFields() {
         val current =
             invokeParser<BashResult>(

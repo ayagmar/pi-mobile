@@ -1256,6 +1256,7 @@ private fun parseSessionStats(data: JsonObject?): SessionStats {
         coalesceInt(
             data?.intField("toolResults"),
             data?.intField("toolResultCount"),
+            data?.intField("toolCalls"),
         )
     val sessionPath =
         coalesceString(
