@@ -3,11 +3,13 @@
 package com.ayagmar.pimobile.ui.settings
 
 import android.content.SharedPreferences
+import androidx.lifecycle.viewModelScope
 import com.ayagmar.pimobile.sessions.TransportPreference
 import com.ayagmar.pimobile.testutil.FakeSessionController
 import com.ayagmar.pimobile.ui.theme.ThemePreference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -23,14 +25,18 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
     private val dispatcher = StandardTestDispatcher()
+    private val viewModels = mutableListOf<SettingsViewModel>()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
+        viewModels.clear()
     }
 
     @After
     fun tearDown() {
+        viewModels.forEach { it.viewModelScope.cancel() }
+        viewModels.clear()
         Dispatchers.resetMain()
     }
 
@@ -133,7 +139,7 @@ class SettingsViewModelTest {
             sessionController = controller,
             sharedPreferences = InMemorySharedPreferences(),
             appVersionOverride = "test",
-        )
+        ).also { viewModels.add(it) }
     }
 }
 

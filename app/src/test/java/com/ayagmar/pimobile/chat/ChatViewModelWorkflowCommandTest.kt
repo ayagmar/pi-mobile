@@ -1,10 +1,12 @@
 package com.ayagmar.pimobile.chat
 
+import androidx.lifecycle.viewModelScope
 import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import com.ayagmar.pimobile.testutil.FakeSessionController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -20,15 +22,23 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelWorkflowCommandTest {
     private val dispatcher = StandardTestDispatcher()
+    private val viewModels = mutableListOf<ChatViewModel>()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
+        viewModels.clear()
     }
 
     @After
     fun tearDown() {
+        viewModels.forEach { it.viewModelScope.cancel() }
+        viewModels.clear()
         Dispatchers.resetMain()
+    }
+
+    private fun createViewModel(controller: FakeSessionController): ChatViewModel {
+        return ChatViewModel(sessionController = controller).also { viewModels.add(it) }
     }
 
     @Test
@@ -60,7 +70,7 @@ class ChatViewModelWorkflowCommandTest {
                     ),
                 )
 
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -88,7 +98,7 @@ class ChatViewModelWorkflowCommandTest {
                     ),
                 )
 
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -113,7 +123,7 @@ class ChatViewModelWorkflowCommandTest {
     fun selectingBridgeBackedBuiltinStatsFallsBackWhenInternalCommandUnavailable() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -137,7 +147,7 @@ class ChatViewModelWorkflowCommandTest {
     fun internalWorkflowStatusActionCanOpenStatsSheet() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
@@ -160,7 +170,7 @@ class ChatViewModelWorkflowCommandTest {
     fun nonWorkflowStatusIsStoredUpdatedAndCleared() =
         runTest(dispatcher) {
             val controller = FakeSessionController()
-            val viewModel = ChatViewModel(sessionController = controller)
+            val viewModel = createViewModel(controller)
             dispatcher.scheduler.advanceUntilIdle()
             awaitInitialLoad(viewModel)
 
