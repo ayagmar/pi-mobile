@@ -488,6 +488,11 @@ class ChatViewModelThinkingExpansionTest {
             dispatcher.scheduler.advanceUntilIdle()
             assertEquals("abort failed", viewModel.uiState.value.errorMessage)
 
+            viewModel.onInputTextChanged("/model")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+
             viewModel.onInputTextChanged("/name Sprint planning")
             viewModel.sendPrompt()
             dispatcher.scheduler.advanceUntilIdle()
@@ -813,6 +818,30 @@ class ChatViewModelThinkingExpansionTest {
             }
 
             assertTrue(viewModel.userItems().none { it.id.startsWith("local-user-") })
+            assertEquals("rpc failed", viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
+    fun sendPromptFailureDoesNotOverwriteNewerDraftInput() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController().apply {
+                sendPromptResult = Result.failure(IllegalStateException("rpc failed"))
+                sendPromptDelayMs = 50L
+            }
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("original draft")
+            viewModel.sendPrompt()
+
+            viewModel.onInputTextChanged("new draft")
+
+            waitForState(viewModel) { state ->
+                state.errorMessage == "rpc failed"
+            }
+
+            assertEquals("new draft", viewModel.uiState.value.inputText)
             assertEquals("rpc failed", viewModel.uiState.value.errorMessage)
         }
 

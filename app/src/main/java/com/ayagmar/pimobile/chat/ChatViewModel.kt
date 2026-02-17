@@ -182,14 +182,29 @@ class ChatViewModel(
                 return@launch
             }
 
-            _uiState.update { it.copy(inputText = "", pendingImages = emptyList(), errorMessage = null) }
+            var composerWasCleared = false
+            _uiState.update { state ->
+                val shouldClearComposer =
+                    state.inputText == currentState.inputText &&
+                        state.pendingImages == currentState.pendingImages
+                composerWasCleared = shouldClearComposer
+
+                if (shouldClearComposer) {
+                    state.copy(inputText = "", pendingImages = emptyList(), errorMessage = null)
+                } else {
+                    state.copy(errorMessage = null)
+                }
+            }
+
             val result = sessionController.sendPrompt(message, imagePayloads)
             if (result.isFailure) {
                 discardPendingLocalUserItem(optimisticUserId)
-                _uiState.update {
-                    it.copy(
-                        inputText = currentState.inputText,
-                        pendingImages = currentState.pendingImages,
+                _uiState.update { state ->
+                    val shouldRestoreDraft =
+                        composerWasCleared && state.inputText.isEmpty() && state.pendingImages.isEmpty()
+                    state.copy(
+                        inputText = if (shouldRestoreDraft) currentState.inputText else state.inputText,
+                        pendingImages = if (shouldRestoreDraft) currentState.pendingImages else state.pendingImages,
                         errorMessage = result.exceptionOrNull()?.message,
                     )
                 }
@@ -394,6 +409,7 @@ class ChatViewModel(
                 isCommandPaletteVisible = false,
                 isCommandPaletteAutoOpened = false,
                 commandsQuery = "",
+                errorMessage = null,
             )
         }
 
@@ -454,7 +470,6 @@ class ChatViewModel(
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(errorMessage = null) }
             markLocalSessionMutationExpected()
             val result = sessionController.renameSession(newName)
             if (result.isSuccess) {
@@ -467,7 +482,6 @@ class ChatViewModel(
 
     private fun runExportSlashCommand() {
         viewModelScope.launch {
-            _uiState.update { it.copy(errorMessage = null) }
             val result = sessionController.exportSession()
             if (result.isSuccess) {
                 val exportPath = result.getOrNull()
@@ -483,7 +497,6 @@ class ChatViewModel(
 
     private fun runNewSessionSlashCommand() {
         viewModelScope.launch {
-            _uiState.update { it.copy(errorMessage = null) }
             markLocalSessionMutationExpected()
             val result = sessionController.newSession()
             if (result.isSuccess) {

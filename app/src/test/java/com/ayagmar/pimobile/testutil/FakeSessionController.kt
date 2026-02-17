@@ -17,6 +17,7 @@ import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import com.ayagmar.pimobile.sessions.TransportPreference
 import com.ayagmar.pimobile.sessions.TreeNavigationResult
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -39,6 +40,7 @@ class FakeSessionController : SessionController {
     var lastPromptMessage: String? = null
     var lastFreshnessSessionPath: String? = null
     var sendPromptResult: Result<Unit> = Result.success(Unit)
+    var sendPromptDelayMs: Long = 0L
     var abortResult: Result<Unit> = Result.success(Unit)
     var abortRetryResult: Result<Unit> = Result.success(Unit)
     var abortCallCount: Int = 0
@@ -143,6 +145,9 @@ class FakeSessionController : SessionController {
     ): Result<Unit> {
         sendPromptCallCount += 1
         lastPromptMessage = message
+        if (sendPromptDelayMs > 0) {
+            delay(sendPromptDelayMs)
+        }
         return sendPromptResult
     }
 
