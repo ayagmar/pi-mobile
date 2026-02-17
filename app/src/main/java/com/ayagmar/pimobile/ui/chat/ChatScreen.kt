@@ -17,8 +17,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -775,7 +777,28 @@ private fun ChatTimeline(
     var previewImageUri by rememberSaveable { mutableStateOf<String?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
-    val totalItems = timeline.size + if (showInlineRunProgress) 1 else 0
+    val contentItemsCount = timeline.size + if (showInlineRunProgress) 1 else 0
+    val renderedItemsCount = contentItemsCount + 1 // includes bottom anchor item
+    val latestTimelineActivityKey =
+        remember(timeline, showInlineRunProgress) {
+            val tail = timeline.lastOrNull()
+            val tailKey =
+                when (tail) {
+                    is ChatTimelineItem.Assistant -> {
+                        "assistant:${tail.id}:${tail.text.length}:${tail.thinking?.length ?: 0}:${tail.isStreaming}"
+                    }
+
+                    is ChatTimelineItem.Tool -> {
+                        "tool:${tail.id}:${tail.output.length}:${tail.isStreaming}:${tail.isCollapsed}"
+                    }
+
+                    is ChatTimelineItem.User -> "user:${tail.id}:${tail.text.length}:${tail.imageCount}"
+                    null -> "empty"
+                }
+            "$tailKey:inline=$showInlineRunProgress:count=${timeline.size}"
+        }
+    var lastAutoScrollAtMs by remember { mutableStateOf(0L) }
+
     val shouldAutoScrollToBottom by
         remember {
             derivedStateOf {
@@ -786,13 +809,24 @@ private fun ChatTimeline(
                 lastItemIndex <= 0 || lastVisibleIndex >= lastItemIndex - AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS
             }
         }
-    val shouldShowJumpToLatest = totalItems > 0 && !shouldAutoScrollToBottom
+    val shouldShowJumpToLatest = renderedItemsCount > 1 && !shouldAutoScrollToBottom
 
     // Auto-scroll only while the user stays near the bottom.
     // This avoids jumping when loading older history or reading past messages.
-    LaunchedEffect(timeline.lastOrNull(), totalItems, shouldAutoScrollToBottom) {
-        if (totalItems > 0 && shouldAutoScrollToBottom) {
-            listState.scrollToItem(totalItems - 1)
+    LaunchedEffect(latestTimelineActivityKey, renderedItemsCount, shouldAutoScrollToBottom) {
+        if (renderedItemsCount > 0 && shouldAutoScrollToBottom) {
+            val targetIndex = renderedItemsCount - 1
+            val now = System.currentTimeMillis()
+
+            when {
+                lastAutoScrollAtMs == 0L -> listState.scrollToItem(targetIndex)
+                now - lastAutoScrollAtMs >= AUTO_SCROLL_ANIMATION_MIN_INTERVAL_MS ->
+                    listState.animateScrollToItem(targetIndex)
+
+                else -> listState.scrollToItem(targetIndex)
+            }
+
+            lastAutoScrollAtMs = now
         }
     }
 
@@ -858,6 +892,10 @@ private fun ChatTimeline(
                     )
                 }
             }
+
+            item(key = CHAT_TIMELINE_BOTTOM_ANCHOR_KEY) {
+                Spacer(modifier = Modifier.height(1.dp))
+            }
         }
 
         AnimatedVisibility(
@@ -869,7 +907,7 @@ private fun ChatTimeline(
             OutlinedButton(
                 onClick = {
                     coroutineScope.launch {
-                        listState.animateScrollToItem(totalItems - 1)
+                        listState.animateScrollToItem(renderedItemsCount - 1)
                     }
                 },
                 modifier = Modifier.testTag(CHAT_JUMP_TO_LATEST_TAG),
@@ -2442,6 +2480,8 @@ private const val MAX_ARG_DISPLAY_LENGTH = 100
 private const val MAX_INLINE_USER_IMAGE_PREVIEWS = 4
 private const val USER_IMAGE_PREVIEW_SIZE_DP = 56
 private const val AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS = 2
+private const val AUTO_SCROLL_ANIMATION_MIN_INTERVAL_MS = 120L
+private const val CHAT_TIMELINE_BOTTOM_ANCHOR_KEY = "chat_timeline_bottom_anchor"
 private const val TOOL_HIGHLIGHT_MAX_LENGTH = 1_000
 private const val STATUS_VALUE_MAX_LENGTH = 180
 private const val EXTENSION_STATUS_PILL_MAX_LENGTH = 56
