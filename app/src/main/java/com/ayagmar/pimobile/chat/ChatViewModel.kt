@@ -768,6 +768,10 @@ class ChatViewModel(
                         pendingQueueItems = if (isStreaming) current.pendingQueueItems else emptyList(),
                     )
                 }
+
+                if (!isStreaming) {
+                    clearStreamingTimelineFlags()
+                }
             }
         }
     }
@@ -1052,6 +1056,14 @@ class ChatViewModel(
     }
 
     private fun handleTurnEnd() {
+        clearStreamingTimelineFlags()
+        _uiState.update {
+            it.copy(
+                isStreaming = false,
+                pendingQueueItems = emptyList(),
+            )
+        }
+
         // Refresh stats at turn end so context/cost indicators stay current.
         loadSessionStats()
     }
@@ -2172,6 +2184,35 @@ class ChatViewModel(
         toolUpdateFlushJobs.clear()
         toolUpdateThrottlers.values.forEach { throttler -> throttler.reset() }
         toolUpdateThrottlers.clear()
+    }
+
+    private fun clearStreamingTimelineFlags() {
+        updateTimelineState { state ->
+            state.copy(
+                timeline =
+                    state.timeline.map { item ->
+                        when (item) {
+                            is ChatTimelineItem.Assistant -> {
+                                if (item.isStreaming) {
+                                    item.copy(isStreaming = false)
+                                } else {
+                                    item
+                                }
+                            }
+
+                            is ChatTimelineItem.Tool -> {
+                                if (item.isStreaming) {
+                                    item.copy(isStreaming = false)
+                                } else {
+                                    item
+                                }
+                            }
+
+                            is ChatTimelineItem.User -> item
+                        }
+                    },
+            )
+        }
     }
 
     private fun upsertTimelineItem(item: ChatTimelineItem) {

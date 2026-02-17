@@ -6,6 +6,7 @@ import com.ayagmar.pimobile.corerpc.AgentEndEvent
 import com.ayagmar.pimobile.corerpc.AssistantMessageEvent
 import com.ayagmar.pimobile.corerpc.MessageEndEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
+import com.ayagmar.pimobile.corerpc.TurnEndEvent
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import com.ayagmar.pimobile.sessions.TreeNavigationResult
 import com.ayagmar.pimobile.testutil.FakeSessionController
@@ -583,6 +584,39 @@ class ChatViewModelThinkingExpansionTest {
             controller.setStreaming(false)
             dispatcher.scheduler.advanceUntilIdle()
             assertTrue(viewModel.uiState.value.pendingQueueItems.isEmpty())
+        }
+
+    @Test
+    fun turnEndClearsStreamingIndicatorsAndPendingQueue() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            controller.setStreaming(true)
+            controller.emitEvent(
+                textUpdate(
+                    assistantType = "text_delta",
+                    delta = "Streaming reply",
+                    messageTimestamp = "1733234567000",
+                ),
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.steer("Keep concise")
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(viewModel.singleAssistantItem().isStreaming)
+            assertTrue(viewModel.uiState.value.pendingQueueItems.isNotEmpty())
+
+            controller.emitEvent(TurnEndEvent(type = "turn_end"))
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val finalState = viewModel.uiState.value
+            assertFalse(finalState.isStreaming)
+            assertTrue(finalState.pendingQueueItems.isEmpty())
+            assertFalse(viewModel.singleAssistantItem().isStreaming)
         }
 
     @Test
