@@ -36,6 +36,7 @@ class RpcSessionControllerTest {
                         put("userMessages", 4)
                         put("assistantMessages", 5)
                         put("toolResults", 3)
+                        put("compactions", 2)
                         put("sessionFile", "/tmp/current.session.jsonl")
                     },
             )
@@ -55,6 +56,7 @@ class RpcSessionControllerTest {
                         put("userMessageCount", 3)
                         put("assistantMessageCount", 4)
                         put("toolResultCount", 2)
+                        put("compactionCount", 1)
                         put("sessionPath", "/tmp/legacy.session.jsonl")
                     },
             )
@@ -366,6 +368,7 @@ class RpcSessionControllerTest {
         assertEquals(5, current.assistantMessageCount)
         assertEquals(3, current.toolResultCount)
         assertEquals("/tmp/current.session.jsonl", current.sessionPath)
+        assertEquals(2, current.compactionCount)
     }
 
     private fun assertLegacyStats(legacy: SessionStats) {
@@ -379,6 +382,7 @@ class RpcSessionControllerTest {
         assertEquals(4, legacy.assistantMessageCount)
         assertEquals(2, legacy.toolResultCount)
         assertEquals("/tmp/legacy.session.jsonl", legacy.sessionPath)
+        assertEquals(1, legacy.compactionCount)
     }
 
     @Suppress("UNCHECKED_CAST")
