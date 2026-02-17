@@ -61,6 +61,11 @@ interface PendingRpcEventWaiter {
     timeoutHandle: NodeJS.Timeout;
 }
 
+interface RuntimeLeafOverride {
+    currentLeafId: string | null;
+    cwd: string;
+}
+
 const PI_MOBILE_TREE_EXTENSION_PATH = path.resolve(
     fileURLToPath(new URL("./extensions/pi-mobile-tree.ts", import.meta.url)),
 );
@@ -114,8 +119,16 @@ export function createBridgeServer(
 
     const clientContexts = new Map<WebSocket, ClientConnectionContext>();
     const disconnectedClients = new Map<string, DisconnectedClientState>();
-    const runtimeLeafBySessionPath = new Map<string, string | null>();
+    const runtimeLeafBySessionPath = new Map<string, RuntimeLeafOverride>();
     const pendingRpcWaiters = new Set<PendingRpcEventWaiter>();
+
+    const clearRuntimeLeafOverridesForCwd = (cwd: string): void => {
+        for (const [sessionPath, override] of runtimeLeafBySessionPath.entries()) {
+            if (override.cwd === cwd) {
+                runtimeLeafBySessionPath.delete(sessionPath);
+            }
+        }
+    };
 
     const awaitRpcEvent = (
         cwd: string,
@@ -212,6 +225,10 @@ export function createBridgeServer(
             isSuccessfulRpcResponse(event.payload, "new_session") ||
             isSuccessfulRpcResponse(event.payload, "fork")) {
             runtimeLeafBySessionPath.clear();
+        }
+
+        if (isSuccessfulRpcResponse(event.payload, "prompt")) {
+            clearRuntimeLeafOverridesForCwd(event.cwd);
         }
 
         if (consumedByInternalWaiter) {
@@ -389,7 +406,7 @@ async function handleClientMessage(
         predicate: (payload: Record<string, unknown>) => boolean,
         options?: { timeoutMs?: number; consume?: boolean },
     ) => Promise<Record<string, unknown>>,
-    runtimeLeafBySessionPath: Map<string, string | null>,
+    runtimeLeafBySessionPath: Map<string, RuntimeLeafOverride>,
 ): Promise<void> {
     const dataAsString = asUtf8String(data);
     const parsedEnvelope = parseBridgeEnvelope(dataAsString);
@@ -445,7 +462,7 @@ async function handleBridgeControlMessage(
         predicate: (payload: Record<string, unknown>) => boolean,
         options?: { timeoutMs?: number; consume?: boolean },
     ) => Promise<Record<string, unknown>>,
-    runtimeLeafBySessionPath: Map<string, string | null>,
+    runtimeLeafBySessionPath: Map<string, RuntimeLeafOverride>,
 ): Promise<void> {
     const messageType = payload.type;
 
@@ -519,7 +536,8 @@ async function handleBridgeControlMessage(
 
         try {
             const tree = await sessionIndexer.getSessionTree(sessionPath, requestedFilter);
-            const runtimeLeafId = runtimeLeafBySessionPath.get(tree.sessionPath);
+            const runtimeLeafOverride = runtimeLeafBySessionPath.get(tree.sessionPath);
+            const runtimeLeafId = runtimeLeafOverride?.currentLeafId;
 
             client.send(
                 JSON.stringify(
@@ -646,7 +664,10 @@ async function handleBridgeControlMessage(
             if (navigationResult.sessionPath) {
                 runtimeLeafBySessionPath.set(
                     navigationResult.sessionPath,
-                    navigationResult.currentLeafId,
+                    {
+                        currentLeafId: navigationResult.currentLeafId,
+                        cwd,
+                    },
                 );
             }
 

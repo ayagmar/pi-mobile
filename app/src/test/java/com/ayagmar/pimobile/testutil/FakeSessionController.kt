@@ -59,6 +59,14 @@ class FakeSessionController : SessionController {
     var steeringModeResult: Result<Unit> = Result.success(Unit)
     var followUpModeResult: Result<Unit> = Result.success(Unit)
     var newSessionResult: Result<Unit> = Result.success(Unit)
+    var renameSessionResult: Result<String?> = Result.success(null)
+    var compactSessionResult: Result<String?> = Result.success(null)
+    var exportSessionResult: Result<String> = Result.success("/tmp/export.html")
+    var renameSessionCallCount: Int = 0
+    var compactSessionCallCount: Int = 0
+    var exportSessionCallCount: Int = 0
+    var newSessionCallCount: Int = 0
+    var lastRenamedSessionName: String? = null
     var lastSteeringMode: String? = null
     var lastFollowUpMode: String? = null
     var lastTransportPreference: TransportPreference = TransportPreference.AUTO
@@ -147,11 +155,21 @@ class FakeSessionController : SessionController {
 
     override suspend fun followUp(message: String): Result<Unit> = Result.success(Unit)
 
-    override suspend fun renameSession(name: String): Result<String?> = Result.success(null)
+    override suspend fun renameSession(name: String): Result<String?> {
+        renameSessionCallCount += 1
+        lastRenamedSessionName = name
+        return renameSessionResult
+    }
 
-    override suspend fun compactSession(): Result<String?> = Result.success(null)
+    override suspend fun compactSession(): Result<String?> {
+        compactSessionCallCount += 1
+        return compactSessionResult
+    }
 
-    override suspend fun exportSession(): Result<String> = Result.success("/tmp/export.html")
+    override suspend fun exportSession(): Result<String> {
+        exportSessionCallCount += 1
+        return exportSessionResult
+    }
 
     override suspend fun forkSessionFromEntryId(entryId: String): Result<String?> = Result.success(null)
 
@@ -191,7 +209,10 @@ class FakeSessionController : SessionController {
         cancelled: Boolean?,
     ): Result<Unit> = Result.success(Unit)
 
-    override suspend fun newSession(): Result<Unit> = newSessionResult
+    override suspend fun newSession(): Result<Unit> {
+        newSessionCallCount += 1
+        return newSessionResult
+    }
 
     override suspend fun getCommands(): Result<List<SlashCommandInfo>> {
         getCommandsCallCount += 1

@@ -441,6 +441,70 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun sendingModelSlashCommandOpensModelPickerWithoutRpcPrompt() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("/model")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(0, controller.sendPromptCallCount)
+            assertTrue(viewModel.uiState.value.isModelPickerVisible)
+        }
+
+    @Test
+    fun sendingNameSlashCommandRenamesSessionWithoutRpcPrompt() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("/name Sprint planning")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(0, controller.sendPromptCallCount)
+            assertEquals(1, controller.renameSessionCallCount)
+            assertEquals("Sprint planning", controller.lastRenamedSessionName)
+        }
+
+    @Test
+    fun slashCommandsClearExistingErrorsOnSuccessfulExecution() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController().apply {
+                abortResult = Result.failure(IllegalStateException("abort failed"))
+                abortRetryResult = Result.failure(IllegalStateException("abort retry failed"))
+            }
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.abort()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals("abort failed", viewModel.uiState.value.errorMessage)
+
+            viewModel.onInputTextChanged("/name Sprint planning")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+
+            viewModel.onInputTextChanged("/export")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+
+            viewModel.onInputTextChanged("/new")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
     fun selectingBridgeBackedBuiltinTreeOpensTreeSheet() =
         runTest(dispatcher) {
             val controller = FakeSessionController()

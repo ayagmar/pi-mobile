@@ -83,6 +83,7 @@ class ChatViewModel(
     private var lastKnownSessionFreshness: SessionFreshnessFingerprint? = null
     private var localSessionMutationGraceUntilMs: Long = 0
     private var isSessionFreshnessUnsupported = false
+    private var lastFreshnessWarningAtMs: Long = 0
 
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -127,15 +128,23 @@ class ChatViewModel(
         }
     }
 
+    @Suppress("ReturnCount")
     fun sendPrompt() {
         val currentState = _uiState.value
         val message = currentState.inputText.trim()
         val pendingImages = currentState.pendingImages
         if (message.isEmpty() && pendingImages.isEmpty()) return
 
-        val builtinCommand = message.extractBuiltinCommand()
-        if (builtinCommand != null) {
-            handleNonRpcBuiltinCommand(builtinCommand)
+        val slashInvocation = message.extractKnownSlashInvocation()
+        if (slashInvocation != null) {
+            if (pendingImages.isNotEmpty()) {
+                _uiState.update {
+                    it.copy(errorMessage = "Image attachments are only supported for normal prompts")
+                }
+                return
+            }
+
+            handleKnownSlashCommand(slashInvocation)
             return
         }
 
@@ -323,7 +332,7 @@ class ChatViewModel(
         when (command.source) {
             COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
             COMMAND_SOURCE_BUILTIN_UNSUPPORTED,
-            -> handleNonRpcBuiltinCommand(command.name)
+            -> handleKnownSlashCommand(SlashCommandInvocation(name = command.name, args = null))
 
             else -> {
                 val currentText = _uiState.value.inputText
@@ -366,9 +375,20 @@ class ChatViewModel(
         }
     }
 
-    private fun handleNonRpcBuiltinCommand(commandName: String) {
-        val normalized = commandName.lowercase()
+    @Suppress("ReturnCount")
+    private fun String.extractKnownSlashInvocation(): SlashCommandInvocation? {
+        val trimmed = trim()
+        if (!trimmed.startsWith('/')) return null
 
+        val token = trimmed.removePrefix("/")
+        val name = token.substringBefore(' ').trim().lowercase()
+        if (name.isBlank() || name !in KNOWN_SLASH_COMMAND_NAMES) return null
+
+        val args = token.substringAfter(' ', missingDelimiterValue = "").trim().ifBlank { null }
+        return SlashCommandInvocation(name = name, args = args)
+    }
+
+    private fun handleKnownSlashCommand(invocation: SlashCommandInvocation) {
         _uiState.update {
             it.copy(
                 isCommandPaletteVisible = false,
@@ -377,30 +397,99 @@ class ChatViewModel(
             )
         }
 
-        when (normalized) {
+        when (invocation.name) {
             BUILTIN_TREE_COMMAND -> showTreeSheet()
             BUILTIN_STATS_COMMAND -> {
                 invokeInternalWorkflowCommand(INTERNAL_STATS_WORKFLOW_COMMAND) {
                     showStatsSheet()
                 }
             }
-
+            BUILTIN_MODEL_COMMAND -> showModelPicker()
+            BUILTIN_SESSION_COMMAND -> showStatsSheet()
+            BUILTIN_COMPACT_COMMAND -> compactNow()
+            BUILTIN_FORK_COMMAND -> {
+                showTreeSheet()
+                addSystemNotification(
+                    message = "Select an entry and tap Fork to create a new branch session",
+                    type = "info",
+                )
+            }
+            BUILTIN_EXPORT_COMMAND -> runExportSlashCommand()
+            BUILTIN_NEW_COMMAND -> runNewSessionSlashCommand()
+            BUILTIN_NAME_COMMAND -> runRenameSlashCommand(invocation.args)
             BUILTIN_SETTINGS_COMMAND -> {
                 _uiState.update {
                     it.copy(errorMessage = "Use the Settings tab for /settings on mobile")
                 }
             }
-
             BUILTIN_HOTKEYS_COMMAND -> {
                 _uiState.update {
                     it.copy(errorMessage = "/hotkeys is not supported on mobile yet")
                 }
             }
-
+            BUILTIN_RESUME_COMMAND,
+            BUILTIN_COPY_COMMAND,
+            BUILTIN_SHARE_COMMAND,
+            BUILTIN_RELOAD_COMMAND,
+            BUILTIN_CHANGELOG_COMMAND,
+            BUILTIN_SCOPED_MODELS_COMMAND,
+            -> {
+                _uiState.update {
+                    it.copy(errorMessage = "/${invocation.name} is not available on mobile yet")
+                }
+            }
             else -> {
                 _uiState.update {
-                    it.copy(errorMessage = "/$normalized is interactive-only and unavailable via RPC prompt")
+                    it.copy(errorMessage = "/${invocation.name} is interactive-only and unavailable via RPC prompt")
                 }
+            }
+        }
+    }
+
+    private fun runRenameSlashCommand(args: String?) {
+        val newName = args?.trim().orEmpty()
+        if (newName.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Usage: /name <session name>") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            markLocalSessionMutationExpected()
+            val result = sessionController.renameSession(newName)
+            if (result.isSuccess) {
+                addSystemNotification(message = "Session renamed to \"$newName\"", type = "info")
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    private fun runExportSlashCommand() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val result = sessionController.exportSession()
+            if (result.isSuccess) {
+                val exportPath = result.getOrNull()
+                addSystemNotification(
+                    message = "Session exported${if (exportPath.isNullOrBlank()) "" else " to $exportPath"}",
+                    type = "info",
+                )
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    private fun runNewSessionSlashCommand() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            markLocalSessionMutationExpected()
+            val result = sessionController.newSession()
+            if (result.isSuccess) {
+                addSystemNotification(message = "Started a new session", type = "info")
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
             }
         }
     }
@@ -477,18 +566,6 @@ class ChatViewModel(
         val knownNames = visibleRpcCommands.map { it.name.lowercase() }.toSet()
         val missingBuiltins = BUILTIN_COMMANDS.filterNot { it.name.lowercase() in knownNames }
         return visibleRpcCommands + missingBuiltins
-    }
-
-    private fun String.extractBuiltinCommand(): String? {
-        val commandName =
-            trim().substringBefore(' ')
-                .takeIf { token -> token.startsWith('/') }
-                ?.removePrefix("/")
-                ?.trim()
-                ?.lowercase()
-                .orEmpty()
-
-        return commandName.takeIf { name -> name.isNotBlank() && BUILTIN_COMMAND_NAMES.contains(name) }
     }
 
     fun toggleToolExpansion(itemId: String) {
@@ -606,7 +683,7 @@ class ChatViewModel(
             it.copy(sessionCoherencyWarning = SESSION_COHERENCY_WARNING_MESSAGE)
         }
 
-        if (trigger == FreshnessCheckTrigger.POLL) {
+        if (trigger == FreshnessCheckTrigger.POLL && shouldEmitFreshnessWarning()) {
             addSystemNotification(
                 message = buildSessionFreshnessWarningMessage(freshness),
                 type = "warning",
@@ -628,6 +705,24 @@ class ChatViewModel(
             }
 
         return "Potential cross-device edits detected$ownerHint. Use Sync now before continuing."
+    }
+
+    private fun shouldEmitFreshnessWarning(): Boolean {
+        val now = System.currentTimeMillis()
+
+        val elapsedMs = now - lastFreshnessWarningAtMs
+        val shouldEmit =
+            lastFreshnessWarningAtMs == 0L || elapsedMs >= SESSION_FRESHNESS_WARNING_COOLDOWN_MS
+
+        if (shouldEmit) {
+            lastFreshnessWarningAtMs = now
+        }
+
+        return shouldEmit
+    }
+
+    private fun resetFreshnessWarningThrottle() {
+        lastFreshnessWarningAtMs = 0L
     }
 
     private fun markLocalSessionMutationExpected() {
@@ -717,6 +812,7 @@ class ChatViewModel(
                 latestSessionPath = null
                 lastKnownSessionFreshness = null
                 localSessionMutationGraceUntilMs = 0
+                resetFreshnessWarningThrottle()
                 _uiState.update {
                     it.copy(
                         sessionCoherencyWarning = null,
@@ -1421,6 +1517,7 @@ class ChatViewModel(
                     }
 
                     if (messagesResult.isSuccess) {
+                        resetFreshnessWarningThrottle()
                         val message =
                             if (hasPotentialExternalChanges) {
                                 "Potential cross-device edits detected. Timeline refreshed."
@@ -1436,6 +1533,7 @@ class ChatViewModel(
                     }
 
                     if (messagesResult.isSuccess) {
+                        resetFreshnessWarningThrottle()
                         val message =
                             if (hasPotentialExternalChanges) {
                                 "Session changed externally. Timeline auto-refreshed."
@@ -2227,6 +2325,11 @@ class ChatViewModel(
         }
     }
 
+    private data class SlashCommandInvocation(
+        val name: String,
+        val args: String?,
+    )
+
     private enum class AssistantUpdateSource {
         IMMEDIATE_DELTA,
         FLUSHED_DELTA,
@@ -2255,6 +2358,7 @@ class ChatViewModel(
         resetStreamingUpdateState()
         resetThinkingDiagnostics(startNewRun = false)
         resetStreamingDiagnostics(startNewRun = false)
+        resetFreshnessWarningThrottle()
         pendingLocalUserIds.clear()
         super.onCleared()
     }
@@ -2275,6 +2379,19 @@ class ChatViewModel(
         private const val BUILTIN_SETTINGS_COMMAND = "settings"
         private const val BUILTIN_TREE_COMMAND = "tree"
         private const val BUILTIN_STATS_COMMAND = "stats"
+        private const val BUILTIN_MODEL_COMMAND = "model"
+        private const val BUILTIN_SESSION_COMMAND = "session"
+        private const val BUILTIN_COMPACT_COMMAND = "compact"
+        private const val BUILTIN_EXPORT_COMMAND = "export"
+        private const val BUILTIN_FORK_COMMAND = "fork"
+        private const val BUILTIN_NEW_COMMAND = "new"
+        private const val BUILTIN_NAME_COMMAND = "name"
+        private const val BUILTIN_RESUME_COMMAND = "resume"
+        private const val BUILTIN_COPY_COMMAND = "copy"
+        private const val BUILTIN_SHARE_COMMAND = "share"
+        private const val BUILTIN_RELOAD_COMMAND = "reload"
+        private const val BUILTIN_CHANGELOG_COMMAND = "changelog"
+        private const val BUILTIN_SCOPED_MODELS_COMMAND = "scoped-models"
         private const val BUILTIN_HOTKEYS_COMMAND = "hotkeys"
 
         private const val INTERNAL_TREE_NAVIGATION_COMMAND = "pi-mobile-tree"
@@ -2286,22 +2403,71 @@ class ChatViewModel(
             listOf(
                 SlashCommandInfo(
                     name = BUILTIN_SETTINGS_COMMAND,
-                    description = "Open mobile settings UI (interactive-only in TUI)",
+                    description = "Open mobile settings tab",
                     source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
                     location = null,
                     path = null,
                 ),
                 SlashCommandInfo(
                     name = BUILTIN_TREE_COMMAND,
-                    description = "Open session tree sheet (interactive-only in TUI)",
+                    description = "Open session tree sheet",
                     source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
                     location = null,
                     path = null,
                 ),
                 SlashCommandInfo(
                     name = BUILTIN_STATS_COMMAND,
-                    description = "Open session stats sheet (interactive-only in TUI)",
+                    description = "Open session stats sheet",
                     source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_MODEL_COMMAND,
+                    description = "Open model picker",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_SESSION_COMMAND,
+                    description = "Open session stats overview",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_COMPACT_COMMAND,
+                    description = "Compact the active session context",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_EXPORT_COMMAND,
+                    description = "Export session to HTML",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_FORK_COMMAND,
+                    description = "Open tree and fork from a selected entry",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_NEW_COMMAND,
+                    description = "Start a new session",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_RESUME_COMMAND,
+                    description = "Not available in chat on mobile (use Sessions tab)",
+                    source = COMMAND_SOURCE_BUILTIN_UNSUPPORTED,
                     location = null,
                     path = null,
                 ),
@@ -2315,6 +2481,16 @@ class ChatViewModel(
             )
 
         private val BUILTIN_COMMAND_NAMES = BUILTIN_COMMANDS.map { it.name }.toSet()
+        private val KNOWN_SLASH_COMMAND_NAMES =
+            BUILTIN_COMMAND_NAMES +
+                setOf(
+                    BUILTIN_NAME_COMMAND,
+                    BUILTIN_COPY_COMMAND,
+                    BUILTIN_SHARE_COMMAND,
+                    BUILTIN_RELOAD_COMMAND,
+                    BUILTIN_CHANGELOG_COMMAND,
+                    BUILTIN_SCOPED_MODELS_COMMAND,
+                )
         private val INTERNAL_HIDDEN_COMMAND_NAMES =
             setOf(
                 INTERNAL_TREE_NAVIGATION_COMMAND,
@@ -2339,6 +2515,7 @@ class ChatViewModel(
         private const val SESSION_COHERENCY_WARNING_MESSAGE =
             "Potential cross-device session edits detected. Use Sync now before continuing."
         private const val SESSION_FRESHNESS_POLL_INTERVAL_MS = 4_000L
+        private const val SESSION_FRESHNESS_WARNING_COOLDOWN_MS = 20_000L
         private const val LOCAL_SESSION_MUTATION_GRACE_MS = 90_000L
     }
 }

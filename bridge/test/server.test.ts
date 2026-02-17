@@ -472,6 +472,108 @@ describe("bridge websocket server", () => {
         ws.close();
     });
 
+    it("clears runtime tree leaf override after a prompt run starts", async () => {
+        const fakeProcessManager = new FakeProcessManager();
+        fakeProcessManager.treeNavigationResult = {
+            cancelled: false,
+            editorText: "Retry with more context",
+            currentLeafId: "entry-42",
+            sessionPath: "/tmp/session-tree.jsonl",
+        };
+
+        const fakeSessionIndexer = new FakeSessionIndexer(
+            [],
+            {
+                sessionPath: "/tmp/session-tree.jsonl",
+                rootIds: ["m1"],
+                currentLeafId: "stale-leaf",
+                entries: [],
+            },
+        );
+
+        const { baseUrl, server } = await startBridgeServer({
+            processManager: fakeProcessManager,
+            sessionIndexer: fakeSessionIndexer,
+        });
+        bridgeServer = server;
+
+        const ws = await connectWebSocket(baseUrl, {
+            headers: {
+                authorization: "Bearer bridge-token",
+            },
+        });
+
+        const waitForCwdSet = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_cwd_set");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_set_cwd",
+                    cwd: "/tmp/project",
+                },
+            }),
+        );
+        await waitForCwdSet;
+
+        const waitForControl = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_control_acquired");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_acquire_control",
+                    cwd: "/tmp/project",
+                },
+            }),
+        );
+        await waitForControl;
+
+        const waitForNavigate =
+            waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_tree_navigation_result");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_navigate_tree",
+                    entryId: "entry-42",
+                },
+            }),
+        );
+        await waitForNavigate;
+
+        const waitForPromptResponse = waitForEnvelope(
+            ws,
+            (envelope) => envelope.channel === "rpc" && envelope.payload?.id === "req-prompt" &&
+                envelope.payload?.type === "response",
+        );
+        ws.send(
+            JSON.stringify({
+                channel: "rpc",
+                payload: {
+                    id: "req-prompt",
+                    type: "prompt",
+                    message: "Continue from here",
+                },
+            }),
+        );
+        await waitForPromptResponse;
+
+        const waitForTree = waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_session_tree");
+        ws.send(
+            JSON.stringify({
+                channel: "bridge",
+                payload: {
+                    type: "bridge_get_session_tree",
+                    sessionPath: "/tmp/session-tree.jsonl",
+                },
+            }),
+        );
+
+        const treeEnvelope = await waitForTree;
+        expect(treeEnvelope.payload?.currentLeafId).toBe("stale-leaf");
+
+        ws.close();
+    });
+
     it("returns bridge_error when tree navigation command is unavailable", async () => {
         const fakeProcessManager = new FakeProcessManager();
         fakeProcessManager.availableCommandNames = [];
@@ -1177,6 +1279,7 @@ async function startBridgeServer(
 }
 
 const envelopeBuffers = new WeakMap<WebSocket, EnvelopeLike[]>();
+const envelopeCursors = new WeakMap<WebSocket, number>();
 
 async function connectWebSocket(url: string, options?: ClientOptions): Promise<WebSocket> {
     return await new Promise<WebSocket>((resolve, reject) => {
@@ -1198,6 +1301,7 @@ async function connectWebSocket(url: string, options?: ClientOptions): Promise<W
         ws.on("open", () => {
             clearTimeout(timeoutHandle);
             envelopeBuffers.set(ws, buffer);
+            envelopeCursors.set(ws, 0);
             resolve(ws);
         });
 
@@ -1241,13 +1345,14 @@ async function waitForEnvelope(
         throw new Error("Missing envelope buffer for websocket");
     }
 
-    let cursor = 0;
+    let cursor = envelopeCursors.get(ws) ?? 0;
     const timeoutAt = Date.now() + timeoutMs;
 
     while (Date.now() < timeoutAt) {
         while (cursor < buffer.length) {
             const envelope = buffer[cursor];
             cursor += 1;
+            envelopeCursors.set(ws, cursor);
 
             if (predicate(envelope)) {
                 return envelope;
