@@ -48,6 +48,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -91,6 +92,7 @@ class RpcSessionController(
     private var connectionStateJob: Job? = null
     private var streamingMonitorJob: Job? = null
     private var resyncMonitorJob: Job? = null
+    private var reconnectRecoveryJob: Job? = null
 
     override val rpcEvents: SharedFlow<RpcIncomingMessage> = _rpcEvents
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -837,10 +839,12 @@ class RpcSessionController(
         connectionStateJob?.cancel()
         streamingMonitorJob?.cancel()
         resyncMonitorJob?.cancel()
+        reconnectRecoveryJob?.cancel()
         rpcEventsJob = null
         connectionStateJob = null
         streamingMonitorJob = null
         resyncMonitorJob = null
+        reconnectRecoveryJob = null
 
         activeConnection?.disconnect()
         activeConnection = null
@@ -856,6 +860,8 @@ class RpcSessionController(
         connectionStateJob?.cancel()
         streamingMonitorJob?.cancel()
         resyncMonitorJob?.cancel()
+        reconnectRecoveryJob?.cancel()
+        reconnectRecoveryJob = null
 
         rpcEventsJob =
             scope.launch {
@@ -867,7 +873,28 @@ class RpcSessionController(
         connectionStateJob =
             scope.launch {
                 connection.connectionState.collect { state ->
-                    _connectionState.value = state
+                    when (state) {
+                        ConnectionState.DISCONNECTED -> {
+                            if (activeConnection === connection && activeContext != null) {
+                                _connectionState.value = ConnectionState.RECONNECTING
+                                scheduleReconnectRecovery(connection)
+                            } else {
+                                cancelReconnectRecovery()
+                                _connectionState.value = ConnectionState.DISCONNECTED
+                            }
+                        }
+
+                        ConnectionState.CONNECTED -> {
+                            cancelReconnectRecovery()
+                            _connectionState.value = ConnectionState.CONNECTED
+                        }
+
+                        ConnectionState.CONNECTING,
+                        ConnectionState.RECONNECTING,
+                        -> {
+                            _connectionState.value = state
+                        }
+                    }
                 }
             }
 
@@ -889,6 +916,38 @@ class RpcSessionController(
                     _isStreaming.value = isStreaming
                 }
             }
+    }
+
+    private fun scheduleReconnectRecovery(connection: PiRpcConnection) {
+        if (reconnectRecoveryJob?.isActive == true) {
+            return
+        }
+
+        reconnectRecoveryJob =
+            scope.launch {
+                delay(DISCONNECT_RECOVERY_DELAY_MS)
+
+                if (activeConnection !== connection || activeContext == null) {
+                    return@launch
+                }
+
+                runCatching {
+                    connection.reconnect()
+                }.onFailure { error ->
+                    Log.w(
+                        TRANSPORT_LOG_TAG,
+                        "Automatic reconnect after disconnect failed: ${error.message ?: "unknown"}",
+                    )
+                    if (activeConnection === connection) {
+                        _connectionState.value = ConnectionState.DISCONNECTED
+                    }
+                }
+            }
+    }
+
+    private fun cancelReconnectRecovery() {
+        reconnectRecoveryJob?.cancel()
+        reconnectRecoveryJob = null
     }
 
     private fun ensureActiveConnection(): PiRpcConnection {
@@ -952,6 +1011,7 @@ class RpcSessionController(
         private const val EVENT_BUFFER_CAPACITY = 256
         private const val DEFAULT_TIMEOUT_MS = 10_000L
         private const val BASH_TIMEOUT_MS = 60_000L
+        private const val DISCONNECT_RECOVERY_DELAY_MS = 700L
         private const val TRANSPORT_LOG_TAG = "RpcTransport"
     }
 }

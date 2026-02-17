@@ -93,6 +93,36 @@ class PiRpcConnection(
         resyncIfActive(connectionEpoch)
     }
 
+    suspend fun reconnect() {
+        val (reconnectConfig, reconnectEpoch) =
+            lifecycleMutex.withLock {
+                val config = activeConfig ?: error("Connection is not active")
+                lifecycleEpoch += 1
+                startBackgroundJobs()
+                config to lifecycleEpoch
+            }
+
+        val helloChannel = bridgeChannel(bridgeChannels, BRIDGE_HELLO_TYPE)
+
+        transport.reconnect()
+        withTimeout(reconnectConfig.connectTimeoutMs) {
+            connectionState.first { state -> state == ConnectionState.CONNECTED }
+        }
+
+        withTimeout(reconnectConfig.requestTimeoutMs) {
+            helloChannel.receive()
+        }
+
+        ensureBridgeControl(
+            transport = transport,
+            json = json,
+            channels = bridgeChannels,
+            config = reconnectConfig,
+        )
+
+        resyncIfActive(reconnectEpoch)
+    }
+
     suspend fun disconnect() {
         val configToRelease =
             lifecycleMutex.withLock {

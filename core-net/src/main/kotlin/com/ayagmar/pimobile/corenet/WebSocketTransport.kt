@@ -391,7 +391,7 @@ class WebSocketTransport(
                 .build()
         }
 
-        private const val PING_INTERVAL_SECONDS = 30L
+        private const val PING_INTERVAL_SECONDS = 12L
         private const val CONNECT_TIMEOUT_SECONDS = 10L
         private const val NO_TIMEOUT = 0L
     }
@@ -416,8 +416,8 @@ data class WebSocketTarget(
     val url: String,
     val headers: Map<String, String> = emptyMap(),
     val connectTimeoutMs: Long = 10_000,
-    val reconnectInitialDelayMs: Long = 250,
-    val reconnectMaxDelayMs: Long = 5_000,
+    val reconnectInitialDelayMs: Long = 120,
+    val reconnectMaxDelayMs: Long = 2_000,
 ) {
     fun toRequest(): Request {
         val builder = Request.Builder().url(url)
