@@ -14,6 +14,7 @@ import com.ayagmar.pimobile.corerpc.AutoRetryStartEvent
 import com.ayagmar.pimobile.corerpc.AvailableModel
 import com.ayagmar.pimobile.corerpc.ExtensionErrorEvent
 import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
+import com.ayagmar.pimobile.corerpc.ImagePayload
 import com.ayagmar.pimobile.corerpc.MessageEndEvent
 import com.ayagmar.pimobile.corerpc.MessageStartEvent
 import com.ayagmar.pimobile.corerpc.MessageUpdateEvent
@@ -135,26 +136,65 @@ class ChatViewModel(
         val pendingImages = currentState.pendingImages
         if (message.isEmpty() && pendingImages.isEmpty()) return
 
-        val slashInvocation = message.extractKnownSlashInvocation()
-        if (slashInvocation != null) {
-            if (pendingImages.isNotEmpty()) {
-                _uiState.update {
-                    it.copy(errorMessage = "Image attachments are only supported for normal prompts")
-                }
-                return
-            }
-
-            handleKnownSlashCommand(slashInvocation)
+        if (handleSlashInvocationIfNeeded(message = message, pendingImages = pendingImages)) {
             return
         }
 
+        preparePromptDispatch()
+        val optimisticUserId = addOptimisticUserMessage(message = message, pendingImages = pendingImages)
+
+        viewModelScope.launch {
+            val imagePayloads = encodePendingImages(pendingImages)
+
+            if (message.isEmpty() && imagePayloads.isEmpty()) {
+                handleImageEncodingFailure(optimisticUserId)
+                return@launch
+            }
+
+            val clearedDraftState = clearDraftAfterPromptDispatch(currentState)
+
+            val result = sessionController.sendPrompt(message, imagePayloads)
+            if (result.isFailure) {
+                handleSendPromptFailure(
+                    result = result,
+                    optimisticUserId = optimisticUserId,
+                    currentState = currentState,
+                    clearedDraftState = clearedDraftState,
+                )
+            }
+        }
+    }
+
+    private fun handleSlashInvocationIfNeeded(
+        message: String,
+        pendingImages: List<PendingImage>,
+    ): Boolean {
+        val slashInvocation = message.extractKnownSlashInvocation() ?: return false
+
+        if (pendingImages.isNotEmpty()) {
+            _uiState.update {
+                it.copy(errorMessage = "Image attachments are only supported for normal prompts")
+            }
+        } else {
+            handleKnownSlashCommand(slashInvocation)
+        }
+
+        return true
+    }
+
+    private fun preparePromptDispatch() {
         _uiState.update { it.copy(sessionCoherencyWarning = null) }
 
         // Record prompt send for TTFT tracking
         recordMetricsSafely { PerformanceMetrics.recordPromptSend() }
         hasRecordedFirstToken = false
         markLocalSessionMutationExpected()
+    }
 
+    private fun addOptimisticUserMessage(
+        message: String,
+        pendingImages: List<PendingImage>,
+    ): String {
         val optimisticUserId = "$LOCAL_USER_ITEM_PREFIX${UUID.randomUUID()}"
         upsertTimelineItem(
             ChatTimelineItem.User(
@@ -165,53 +205,64 @@ class ChatViewModel(
             ),
         )
         pendingLocalUserIds.addLast(optimisticUserId)
+        return optimisticUserId
+    }
 
-        viewModelScope.launch {
-            val imagePayloads =
-                withContext(Dispatchers.Default) {
-                    pendingImages.mapNotNull { pending ->
-                        imageEncoder?.encodeToPayload(pending)
-                    }
-                }
-
-            if (message.isEmpty() && imagePayloads.isEmpty()) {
-                discardPendingLocalUserItem(optimisticUserId)
-                _uiState.update {
-                    it.copy(errorMessage = "Unable to attach image. Please try again.")
-                }
-                return@launch
+    private suspend fun encodePendingImages(pendingImages: List<PendingImage>): List<ImagePayload> {
+        return withContext(Dispatchers.Default) {
+            pendingImages.mapNotNull { pending ->
+                imageEncoder?.encodeToPayload(pending)
             }
+        }
+    }
 
-            var inputWasCleared = false
-            var imagesWereCleared = false
-            _uiState.update { state ->
-                val shouldClearInput = state.inputText == currentState.inputText
-                val shouldClearImages = state.pendingImages == currentState.pendingImages
-                inputWasCleared = shouldClearInput
-                imagesWereCleared = shouldClearImages
+    private fun handleImageEncodingFailure(optimisticUserId: String) {
+        discardPendingLocalUserItem(optimisticUserId)
+        _uiState.update {
+            it.copy(errorMessage = "Unable to attach image. Please try again.")
+        }
+    }
 
-                state.copy(
-                    inputText = if (shouldClearInput) "" else state.inputText,
-                    pendingImages = if (shouldClearImages) emptyList() else state.pendingImages,
-                    errorMessage = null,
-                )
-            }
+    private fun clearDraftAfterPromptDispatch(currentState: ChatUiState): DraftClearState {
+        var inputWasCleared = false
+        var imagesWereCleared = false
 
-            val result = sessionController.sendPrompt(message, imagePayloads)
-            if (result.isFailure) {
-                discardPendingLocalUserItem(optimisticUserId)
-                _uiState.update { state ->
-                    val shouldRestoreDraft =
-                        (inputWasCleared || imagesWereCleared) &&
-                            state.inputText.isEmpty() &&
-                            state.pendingImages.isEmpty()
-                    state.copy(
-                        inputText = if (shouldRestoreDraft) currentState.inputText else state.inputText,
-                        pendingImages = if (shouldRestoreDraft) currentState.pendingImages else state.pendingImages,
-                        errorMessage = result.exceptionOrNull()?.message,
-                    )
-                }
-            }
+        _uiState.update { state ->
+            val shouldClearInput = state.inputText == currentState.inputText
+            val shouldClearImages = state.pendingImages == currentState.pendingImages
+            inputWasCleared = shouldClearInput
+            imagesWereCleared = shouldClearImages
+
+            state.copy(
+                inputText = if (shouldClearInput) "" else state.inputText,
+                pendingImages = if (shouldClearImages) emptyList() else state.pendingImages,
+                errorMessage = null,
+            )
+        }
+
+        return DraftClearState(
+            inputWasCleared = inputWasCleared,
+            imagesWereCleared = imagesWereCleared,
+        )
+    }
+
+    private fun handleSendPromptFailure(
+        result: Result<Unit>,
+        optimisticUserId: String,
+        currentState: ChatUiState,
+        clearedDraftState: DraftClearState,
+    ) {
+        discardPendingLocalUserItem(optimisticUserId)
+        _uiState.update { state ->
+            val shouldRestoreDraft =
+                (clearedDraftState.inputWasCleared || clearedDraftState.imagesWereCleared) &&
+                    state.inputText.isEmpty() &&
+                    state.pendingImages.isEmpty()
+            state.copy(
+                inputText = if (shouldRestoreDraft) currentState.inputText else state.inputText,
+                pendingImages = if (shouldRestoreDraft) currentState.pendingImages else state.pendingImages,
+                errorMessage = result.exceptionOrNull()?.message,
+            )
         }
     }
 
@@ -2763,6 +2814,11 @@ private data class InitialLoadMetadata(
     val steeringMode: String,
     val followUpMode: String,
     val sessionPath: String?,
+)
+
+private data class DraftClearState(
+    val inputWasCleared: Boolean,
+    val imagesWereCleared: Boolean,
 )
 
 private data class ThinkingDiagnosticsCounters(

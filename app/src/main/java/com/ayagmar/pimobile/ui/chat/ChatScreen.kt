@@ -762,7 +762,7 @@ private fun ChatBody(
     }
 }
 
-@Suppress("LongParameterList", "LongMethod")
+@Suppress("LongParameterList")
 @Composable
 private fun ChatTimeline(
     timeline: List<ChatTimelineItem>,
@@ -782,100 +782,13 @@ private fun ChatTimeline(
 ) {
     var previewImageUri by rememberSaveable { mutableStateOf<String?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
-    val contentItemsCount = timeline.size + if (showInlineRunProgress) 1 else 0
-    val renderedItemsCount = contentItemsCount + 1 // includes bottom anchor item
-    val latestTimelineActivityKey =
-        remember(timeline, showInlineRunProgress) {
-            val tail = timeline.lastOrNull()
-            val tailKey =
-                when (tail) {
-                    is ChatTimelineItem.Assistant -> {
-                        "assistant:${tail.id}:${tail.text.length}:${tail.thinking?.length ?: 0}:${tail.isStreaming}"
-                    }
-
-                    is ChatTimelineItem.Tool -> {
-                        "tool:${tail.id}:${tail.output.length}:${tail.isStreaming}:${tail.isCollapsed}"
-                    }
-
-                    is ChatTimelineItem.User -> "user:${tail.id}:${tail.text.length}:${tail.imageCount}"
-                    null -> "empty"
-                }
-            "$tailKey:inline=$showInlineRunProgress:count=${timeline.size}"
-        }
-    var lastAutoScrollAtMs by remember { mutableStateOf(0L) }
-
-    val isNearBottom by
-        remember {
-            derivedStateOf {
-                val layoutInfo = listState.layoutInfo
-                val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                val lastItemIndex = layoutInfo.totalItemsCount - 1
-
-                lastItemIndex <= 0 || lastVisibleIndex >= lastItemIndex - AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS
-            }
-        }
-    var shouldStickToBottom by remember { mutableStateOf(true) }
-
-    LaunchedEffect(listState.isScrollInProgress, isNearBottom, renderedItemsCount) {
-        if (renderedItemsCount <= 1) {
-            shouldStickToBottom = true
-            return@LaunchedEffect
-        }
-
-        if (listState.isScrollInProgress) {
-            shouldStickToBottom = isNearBottom
-        }
-    }
-
-    val shouldAutoScrollToBottom = shouldStickToBottom || isNearBottom
-    val shouldShowJumpToLatest = renderedItemsCount > 1 && !shouldAutoScrollToBottom
-
-    // Auto-scroll while the user is in follow mode (sticky near-bottom state).
-    // This keeps streaming/thinking updates pinned without forcing jumps after manual scroll-up.
-    LaunchedEffect(latestTimelineActivityKey, renderedItemsCount, shouldAutoScrollToBottom) {
-        if (renderedItemsCount > 0 && shouldAutoScrollToBottom) {
-            val targetIndex = renderedItemsCount - 1
-            val now = System.currentTimeMillis()
-
-            when {
-                lastAutoScrollAtMs == 0L -> listState.scrollToItem(targetIndex)
-                now - lastAutoScrollAtMs >= AUTO_SCROLL_ANIMATION_MIN_INTERVAL_MS ->
-                    listState.animateScrollToItem(targetIndex)
-
-                else -> listState.scrollToItem(targetIndex)
-            }
-
-            lastAutoScrollAtMs = now
-        }
-    }
-
-    LaunchedEffect(
-        isRunActive,
-        shouldAutoScrollToBottom,
-        renderedItemsCount,
-        listState.isScrollInProgress,
-    ) {
-        val shouldRunStreamingAutoScrollLoop =
-            isRunActive &&
-                shouldAutoScrollToBottom &&
-                renderedItemsCount > 0 &&
-                !listState.isScrollInProgress
-        if (!shouldRunStreamingAutoScrollLoop) {
-            return@LaunchedEffect
-        }
-
-        while (true) {
-            val targetIndex = renderedItemsCount - 1
-            val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-            (lastVisibleIndex < targetIndex)
-                .takeIf { it }
-                ?.let {
-                    listState.scrollToItem(targetIndex)
-                }
-            delay(STREAMING_AUTO_SCROLL_CHECK_INTERVAL_MS)
-        }
-    }
+    val autoScrollUi =
+        rememberTimelineAutoScrollUi(
+            listState = listState,
+            timeline = timeline,
+            showInlineRunProgress = showInlineRunProgress,
+            isRunActive = isRunActive,
+        )
 
     Box(modifier = modifier.fillMaxWidth()) {
         ChatTimelineList(
@@ -898,18 +811,13 @@ private fun ChatTimeline(
         )
 
         AnimatedVisibility(
-            visible = shouldShowJumpToLatest,
+            visible = autoScrollUi.shouldShowJumpToLatest,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
         ) {
             OutlinedButton(
-                onClick = {
-                    shouldStickToBottom = true
-                    coroutineScope.launch {
-                        listState.animateScrollToItem(renderedItemsCount - 1)
-                    }
-                },
+                onClick = autoScrollUi.onJumpToLatest,
                 modifier = Modifier.testTag(CHAT_JUMP_TO_LATEST_TAG),
             ) {
                 Text("Jump to latest")
@@ -921,6 +829,186 @@ private fun ChatTimeline(
                 uriString = uri,
                 onDismiss = { previewImageUri = null },
             )
+        }
+    }
+}
+
+private data class TimelineAutoScrollUi(
+    val shouldShowJumpToLatest: Boolean,
+    val onJumpToLatest: () -> Unit,
+)
+
+@Suppress("LongMethod")
+@Composable
+private fun rememberTimelineAutoScrollUi(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    timeline: List<ChatTimelineItem>,
+    showInlineRunProgress: Boolean,
+    isRunActive: Boolean,
+): TimelineAutoScrollUi {
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+    val contentItemsCount = timeline.size + if (showInlineRunProgress) 1 else 0
+    val renderedItemsCount = contentItemsCount + 1 // includes bottom anchor item
+    val latestTimelineActivityKey =
+        remember(timeline, showInlineRunProgress) {
+            buildLatestTimelineActivityKey(
+                timeline = timeline,
+                showInlineRunProgress = showInlineRunProgress,
+            )
+        }
+    val isNearBottom = rememberIsNearBottom(listState)
+    var shouldStickToBottom by
+        rememberShouldStickToBottom(
+            listState = listState,
+            isNearBottom = isNearBottom,
+            renderedItemsCount = renderedItemsCount,
+        )
+
+    val shouldAutoScrollToBottom = shouldStickToBottom || isNearBottom
+
+    runActivityAutoScroll(
+        listState = listState,
+        latestTimelineActivityKey = latestTimelineActivityKey,
+        renderedItemsCount = renderedItemsCount,
+        shouldAutoScrollToBottom = shouldAutoScrollToBottom,
+    )
+
+    runStreamingAutoScroll(
+        listState = listState,
+        isRunActive = isRunActive,
+        shouldAutoScrollToBottom = shouldAutoScrollToBottom,
+        renderedItemsCount = renderedItemsCount,
+    )
+
+    return TimelineAutoScrollUi(
+        shouldShowJumpToLatest = renderedItemsCount > 1 && !shouldAutoScrollToBottom,
+        onJumpToLatest = {
+            shouldStickToBottom = true
+            coroutineScope.launch {
+                listState.animateScrollToItem(renderedItemsCount - 1)
+            }
+        },
+    )
+}
+
+private fun buildLatestTimelineActivityKey(
+    timeline: List<ChatTimelineItem>,
+    showInlineRunProgress: Boolean,
+): String {
+    val tail = timeline.lastOrNull()
+    val tailKey =
+        when (tail) {
+            is ChatTimelineItem.Assistant -> {
+                "assistant:${tail.id}:${tail.text.length}:${tail.thinking?.length ?: 0}:${tail.isStreaming}"
+            }
+
+            is ChatTimelineItem.Tool -> {
+                "tool:${tail.id}:${tail.output.length}:${tail.isStreaming}:${tail.isCollapsed}"
+            }
+
+            is ChatTimelineItem.User -> "user:${tail.id}:${tail.text.length}:${tail.imageCount}"
+            null -> "empty"
+        }
+
+    return "$tailKey:inline=$showInlineRunProgress:count=${timeline.size}"
+}
+
+@Composable
+private fun rememberIsNearBottom(listState: androidx.compose.foundation.lazy.LazyListState): Boolean {
+    val isNearBottom by
+        remember {
+            derivedStateOf {
+                val layoutInfo = listState.layoutInfo
+                val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                val lastItemIndex = layoutInfo.totalItemsCount - 1
+
+                lastItemIndex <= 0 || lastVisibleIndex >= lastItemIndex - AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS
+            }
+        }
+
+    return isNearBottom
+}
+
+@Composable
+private fun rememberShouldStickToBottom(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    isNearBottom: Boolean,
+    renderedItemsCount: Int,
+): androidx.compose.runtime.MutableState<Boolean> {
+    val shouldStickToBottom = remember { mutableStateOf(true) }
+
+    LaunchedEffect(listState.isScrollInProgress, isNearBottom, renderedItemsCount) {
+        if (renderedItemsCount <= 1) {
+            shouldStickToBottom.value = true
+            return@LaunchedEffect
+        }
+
+        if (listState.isScrollInProgress) {
+            shouldStickToBottom.value = isNearBottom
+        }
+    }
+
+    return shouldStickToBottom
+}
+
+@Composable
+private fun runActivityAutoScroll(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    latestTimelineActivityKey: String,
+    renderedItemsCount: Int,
+    shouldAutoScrollToBottom: Boolean,
+) {
+    var lastAutoScrollAtMs by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(latestTimelineActivityKey, renderedItemsCount, shouldAutoScrollToBottom) {
+        if (renderedItemsCount <= 0 || !shouldAutoScrollToBottom) {
+            return@LaunchedEffect
+        }
+
+        val targetIndex = renderedItemsCount - 1
+        val now = System.currentTimeMillis()
+
+        when {
+            lastAutoScrollAtMs == 0L -> listState.scrollToItem(targetIndex)
+            now - lastAutoScrollAtMs >= AUTO_SCROLL_ANIMATION_MIN_INTERVAL_MS ->
+                listState.animateScrollToItem(targetIndex)
+
+            else -> listState.scrollToItem(targetIndex)
+        }
+
+        lastAutoScrollAtMs = now
+    }
+}
+
+@Composable
+private fun runStreamingAutoScroll(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    isRunActive: Boolean,
+    shouldAutoScrollToBottom: Boolean,
+    renderedItemsCount: Int,
+) {
+    LaunchedEffect(
+        isRunActive,
+        shouldAutoScrollToBottom,
+        renderedItemsCount,
+        listState.isScrollInProgress,
+    ) {
+        val shouldRunStreamingAutoScrollLoop =
+            isRunActive &&
+                shouldAutoScrollToBottom &&
+                renderedItemsCount > 0 &&
+                !listState.isScrollInProgress
+        if (!shouldRunStreamingAutoScrollLoop) {
+            return@LaunchedEffect
+        }
+
+        while (true) {
+            val targetIndex = renderedItemsCount - 1
+            val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            if (lastVisibleIndex < targetIndex) {
+                listState.scrollToItem(targetIndex)
+            }
+            delay(STREAMING_AUTO_SCROLL_CHECK_INTERVAL_MS)
         }
     }
 }
