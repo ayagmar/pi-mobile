@@ -37,6 +37,14 @@ class RpcSessionControllerTest {
                         put("assistantMessages", 5)
                         put("toolResults", 3)
                         put("compactions", 2)
+                        put(
+                            "context",
+                            buildJsonObject {
+                                put("used", 3072)
+                                put("window", 128000)
+                                put("percent", 2)
+                            },
+                        )
                         put("sessionFile", "/tmp/current.session.jsonl")
                     },
             )
@@ -57,6 +65,9 @@ class RpcSessionControllerTest {
                         put("assistantMessageCount", 4)
                         put("toolResultCount", 2)
                         put("compactionCount", 1)
+                        put("contextTokens", 4096)
+                        put("contextWindow", 200000)
+                        put("contextPercent", 2)
                         put("sessionPath", "/tmp/legacy.session.jsonl")
                     },
             )
@@ -369,6 +380,9 @@ class RpcSessionControllerTest {
         assertEquals(3, current.toolResultCount)
         assertEquals("/tmp/current.session.jsonl", current.sessionPath)
         assertEquals(2, current.compactionCount)
+        assertEquals(3072L, current.contextUsedTokens)
+        assertEquals(128000L, current.contextWindowTokens)
+        assertEquals(2, current.contextUsagePercent)
     }
 
     private fun assertLegacyStats(legacy: SessionStats) {
@@ -383,6 +397,9 @@ class RpcSessionControllerTest {
         assertEquals(2, legacy.toolResultCount)
         assertEquals("/tmp/legacy.session.jsonl", legacy.sessionPath)
         assertEquals(1, legacy.compactionCount)
+        assertEquals(4096L, legacy.contextUsedTokens)
+        assertEquals(200000L, legacy.contextWindowTokens)
+        assertEquals(2, legacy.contextUsagePercent)
     }
 
     @Suppress("UNCHECKED_CAST")

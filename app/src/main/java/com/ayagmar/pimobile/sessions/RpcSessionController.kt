@@ -40,6 +40,7 @@ import com.ayagmar.pimobile.corerpc.SetSteeringModeCommand
 import com.ayagmar.pimobile.corerpc.SetThinkingLevelCommand
 import com.ayagmar.pimobile.corerpc.SteerCommand
 import com.ayagmar.pimobile.corerpc.SwitchSessionCommand
+import com.ayagmar.pimobile.corerpc.TurnEndEvent
 import com.ayagmar.pimobile.coresessions.SessionRecord
 import com.ayagmar.pimobile.hosts.HostProfile
 import kotlinx.coroutines.CoroutineScope
@@ -881,6 +882,7 @@ class RpcSessionController(
                             } else {
                                 cancelReconnectRecovery()
                                 _connectionState.value = ConnectionState.DISCONNECTED
+                                _isStreaming.value = false
                             }
                         }
 
@@ -903,7 +905,10 @@ class RpcSessionController(
                 connection.rpcEvents.collect { event ->
                     when (event) {
                         is AgentStartEvent -> _isStreaming.value = true
-                        is AgentEndEvent -> _isStreaming.value = false
+                        is AgentEndEvent,
+                        is TurnEndEvent,
+                        -> _isStreaming.value = false
+
                         else -> Unit
                     }
                 }
@@ -940,6 +945,7 @@ class RpcSessionController(
                     )
                     if (activeConnection === connection) {
                         _connectionState.value = ConnectionState.DISCONNECTED
+                        _isStreaming.value = false
                     }
                 }
             }
@@ -1263,6 +1269,29 @@ private fun parseSessionStats(data: JsonObject?): SessionStats {
             data?.intField("autoCompactions"),
         )
 
+    val context = data?.get("context")?.jsonObject
+    val contextUsedTokens =
+        coalesceLongOrNull(
+            context?.longField("used"),
+            context?.longField("tokens"),
+            context?.longField("current"),
+            data?.longField("contextUsedTokens"),
+            data?.longField("contextTokens"),
+            data?.longField("activeContextTokens"),
+        )
+    val contextWindowTokens =
+        coalesceLongOrNull(
+            context?.longField("window"),
+            context?.longField("max"),
+            data?.longField("contextWindow"),
+        )
+    val contextUsagePercent =
+        coalesceIntOrNull(
+            context?.intField("percent"),
+            data?.intField("contextPercent"),
+            data?.intField("contextUsagePercent"),
+        )
+
     return SessionStats(
         inputTokens = inputTokens,
         outputTokens = outputTokens,
@@ -1275,6 +1304,9 @@ private fun parseSessionStats(data: JsonObject?): SessionStats {
         toolResultCount = toolResultCount,
         sessionPath = sessionPath,
         compactionCount = compactionCount,
+        contextUsedTokens = contextUsedTokens,
+        contextWindowTokens = contextWindowTokens,
+        contextUsagePercent = contextUsagePercent,
     )
 }
 
@@ -1306,8 +1338,16 @@ private fun coalesceLong(vararg values: Long?): Long {
     return values.firstOrNull { it != null } ?: 0L
 }
 
+private fun coalesceLongOrNull(vararg values: Long?): Long? {
+    return values.firstOrNull { it != null }
+}
+
 private fun coalesceInt(vararg values: Int?): Int {
     return values.firstOrNull { it != null } ?: 0
+}
+
+private fun coalesceIntOrNull(vararg values: Int?): Int? {
+    return values.firstOrNull { it != null }
 }
 
 private fun coalesceDouble(vararg values: Double?): Double {

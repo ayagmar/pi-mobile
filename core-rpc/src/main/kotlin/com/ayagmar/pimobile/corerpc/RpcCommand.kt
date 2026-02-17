@@ -235,6 +235,9 @@ data class SessionStats(
     val toolResultCount: Int,
     val sessionPath: String?,
     val compactionCount: Int = 0,
+    val contextUsedTokens: Long? = null,
+    val contextWindowTokens: Long? = null,
+    val contextUsagePercent: Int? = null,
 )
 
 /**

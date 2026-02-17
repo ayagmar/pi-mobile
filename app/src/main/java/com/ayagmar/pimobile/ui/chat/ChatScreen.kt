@@ -661,7 +661,12 @@ private fun LiveRunProgressIndicator(
             strokeWidth = 2.dp,
         )
         Text(
-            text = "Working · ${phase.label} · ${formatRunElapsed(elapsedSeconds)}",
+            text =
+                if (phase == LiveRunPhase.WORKING) {
+                    "Working · waiting for activity · ${formatRunElapsed(elapsedSeconds)}"
+                } else {
+                    "Working · ${phase.label} · ${formatRunElapsed(elapsedSeconds)}"
+                },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -2966,15 +2971,39 @@ private fun formatContextUsageLabel(
     currentModel: ModelInfo?,
 ): String {
     val statsSnapshot = stats ?: return "Ctx --"
-    val consumedTokens = (statsSnapshot.inputTokens + statsSnapshot.outputTokens).coerceAtLeast(0L)
-    val contextWindow = currentModel?.contextWindow?.takeIf { it > 0 }
+
+    val explicitUsedTokens = statsSnapshot.contextUsedTokens?.coerceAtLeast(0L)
+    val explicitWindowTokens = statsSnapshot.contextWindowTokens?.takeIf { it > 0 }
+    val explicitPercent = statsSnapshot.contextUsagePercent?.coerceIn(0, 100)
+
+    val fallbackUsedTokens = (statsSnapshot.inputTokens + statsSnapshot.outputTokens).coerceAtLeast(0L)
+    val fallbackWindowTokens = currentModel?.contextWindow?.takeIf { it > 0 }?.toLong()
+
+    val hasExplicitContextUsage = explicitUsedTokens != null || explicitPercent != null
+    val usedTokens = explicitUsedTokens ?: fallbackUsedTokens
+    val contextWindow = explicitWindowTokens ?: fallbackWindowTokens
 
     val contextUsage =
         if (contextWindow == null) {
-            "Ctx ${formatNumber(consumedTokens)}"
+            if (hasExplicitContextUsage) {
+                "Ctx ${formatNumber(usedTokens)}"
+            } else {
+                "Ctx ~${formatNumber(usedTokens)}"
+            }
         } else {
-            val percent = ((consumedTokens * CONTEXT_PERCENT_FACTOR) / contextWindow.toDouble()).toInt().coerceAtLeast(0)
-            "Ctx $percent% · ${formatNumber(consumedTokens)}/${formatNumber(contextWindow.toLong())}"
+            val percent =
+                explicitPercent
+                    ?: if (hasExplicitContextUsage) {
+                        ((usedTokens * CONTEXT_PERCENT_FACTOR) / contextWindow.toDouble()).toInt().coerceIn(0, 100)
+                    } else {
+                        null
+                    }
+
+            if (percent == null) {
+                "Ctx ~${formatNumber(usedTokens)}/${formatNumber(contextWindow)}"
+            } else {
+                "Ctx $percent% · ${formatNumber(usedTokens)}/${formatNumber(contextWindow)}"
+            }
         }
 
     val compactionLabel =
