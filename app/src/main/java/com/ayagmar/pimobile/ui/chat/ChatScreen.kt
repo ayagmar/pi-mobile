@@ -33,7 +33,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -744,6 +743,7 @@ private fun ChatBody(
             hasOlderMessages = hasOlderMessages,
             hiddenHistoryCount = hiddenHistoryCount,
             expandedToolArguments = expandedToolArguments,
+            isRunActive = isRunActive,
             showInlineRunProgress = showInlineRunProgress,
             runPhase = runPhase,
             runElapsedSeconds = runElapsedSeconds,
@@ -764,6 +764,7 @@ private fun ChatTimeline(
     hasOlderMessages: Boolean,
     hiddenHistoryCount: Int,
     expandedToolArguments: Set<String>,
+    isRunActive: Boolean,
     showInlineRunProgress: Boolean,
     runPhase: LiveRunPhase,
     runElapsedSeconds: Long,
@@ -780,7 +781,7 @@ private fun ChatTimeline(
     val contentItemsCount = timeline.size + if (showInlineRunProgress) 1 else 0
     val renderedItemsCount = contentItemsCount + 1 // includes bottom anchor item
     val latestTimelineActivityKey =
-        remember(timeline, showInlineRunProgress) {
+        remember(timeline, showInlineRunProgress, isRunActive) {
             val tail = timeline.lastOrNull()
             val tailKey =
                 when (tail) {
@@ -799,7 +800,7 @@ private fun ChatTimeline(
         }
     var lastAutoScrollAtMs by remember { mutableStateOf(0L) }
 
-    val shouldAutoScrollToBottom by
+    val isNearBottom by
         remember {
             derivedStateOf {
                 val layoutInfo = listState.layoutInfo
@@ -809,10 +810,24 @@ private fun ChatTimeline(
                 lastItemIndex <= 0 || lastVisibleIndex >= lastItemIndex - AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS
             }
         }
+    var shouldStickToBottom by remember { mutableStateOf(true) }
+
+    LaunchedEffect(listState.isScrollInProgress, isNearBottom, renderedItemsCount) {
+        if (renderedItemsCount <= 1) {
+            shouldStickToBottom = true
+            return@LaunchedEffect
+        }
+
+        if (listState.isScrollInProgress) {
+            shouldStickToBottom = isNearBottom
+        }
+    }
+
+    val shouldAutoScrollToBottom = shouldStickToBottom || isNearBottom
     val shouldShowJumpToLatest = renderedItemsCount > 1 && !shouldAutoScrollToBottom
 
-    // Auto-scroll only while the user stays near the bottom.
-    // This avoids jumping when loading older history or reading past messages.
+    // Auto-scroll while the user is in follow mode (sticky near-bottom state).
+    // This keeps streaming/thinking updates pinned without forcing jumps after manual scroll-up.
     LaunchedEffect(latestTimelineActivityKey, renderedItemsCount, shouldAutoScrollToBottom) {
         if (renderedItemsCount > 0 && shouldAutoScrollToBottom) {
             val targetIndex = renderedItemsCount - 1
@@ -827,6 +842,18 @@ private fun ChatTimeline(
             }
 
             lastAutoScrollAtMs = now
+        }
+    }
+
+    LaunchedEffect(isRunActive, shouldAutoScrollToBottom, renderedItemsCount) {
+        if (!isRunActive || !shouldAutoScrollToBottom || renderedItemsCount <= 0) {
+            return@LaunchedEffect
+        }
+
+        while (true) {
+            val targetIndex = renderedItemsCount - 1
+            listState.scrollToItem(targetIndex)
+            delay(STREAMING_AUTO_SCROLL_CHECK_INTERVAL_MS)
         }
     }
 
@@ -906,6 +933,7 @@ private fun ChatTimeline(
         ) {
             OutlinedButton(
                 onClick = {
+                    shouldStickToBottom = true
                     coroutineScope.launch {
                         listState.animateScrollToItem(renderedItemsCount - 1)
                     }
@@ -1904,8 +1932,7 @@ internal fun PromptInputRow(
                 placeholder = { Text("Type a message...") },
                 singleLine = false,
                 maxLines = 4,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { submitPrompt() }),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                 enabled = !isStreaming,
                 trailingIcon = {
                     if (inputText.isEmpty() && !isStreaming) {
@@ -2481,6 +2508,7 @@ private const val MAX_INLINE_USER_IMAGE_PREVIEWS = 4
 private const val USER_IMAGE_PREVIEW_SIZE_DP = 56
 private const val AUTO_SCROLL_BOTTOM_THRESHOLD_ITEMS = 2
 private const val AUTO_SCROLL_ANIMATION_MIN_INTERVAL_MS = 120L
+private const val STREAMING_AUTO_SCROLL_CHECK_INTERVAL_MS = 90L
 private const val CHAT_TIMELINE_BOTTOM_ANCHOR_KEY = "chat_timeline_bottom_anchor"
 private const val TOOL_HIGHLIGHT_MAX_LENGTH = 1_000
 private const val STATUS_VALUE_MAX_LENGTH = 180
@@ -2941,17 +2969,43 @@ private fun formatContextUsageLabel(
     val consumedTokens = (statsSnapshot.inputTokens + statsSnapshot.outputTokens).coerceAtLeast(0L)
     val contextWindow = currentModel?.contextWindow?.takeIf { it > 0 }
 
-    return if (contextWindow == null) {
-        "Ctx ${formatNumber(consumedTokens)}"
-    } else {
-        val percent = ((consumedTokens * CONTEXT_PERCENT_FACTOR) / contextWindow.toDouble()).toInt().coerceAtLeast(0)
-        "Ctx $percent% · ${formatNumber(consumedTokens)}/${formatNumber(contextWindow.toLong())}"
-    }
+    val contextUsage =
+        if (contextWindow == null) {
+            "Ctx ${formatNumber(consumedTokens)}"
+        } else {
+            val percent = ((consumedTokens * CONTEXT_PERCENT_FACTOR) / contextWindow.toDouble()).toInt().coerceAtLeast(0)
+            "Ctx $percent% · ${formatNumber(consumedTokens)}/${formatNumber(contextWindow.toLong())}"
+        }
+
+    val compactionLabel =
+        statsSnapshot.compactionCount
+            .takeIf { it > 0 }
+            ?.let { count -> " · C$count" }
+            .orEmpty()
+
+    val costLabel =
+        statsSnapshot.totalCost
+            .takeIf { it > 0.0 }
+            ?.let { cost -> " · ${formatCompactCost(cost)}" }
+            .orEmpty()
+
+    return contextUsage + compactionLabel + costLabel
 }
 
 @Suppress("MagicNumber")
 private fun formatCost(value: Double): String {
     return String.format(java.util.Locale.US, "$%.4f", value)
+}
+
+@Suppress("MagicNumber")
+private fun formatCompactCost(value: Double): String {
+    val pattern =
+        when {
+            value >= 1.0 -> "$%.2f"
+            value >= 0.1 -> "$%.3f"
+            else -> "$%.4f"
+        }
+    return String.format(java.util.Locale.US, pattern, value)
 }
 
 @Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")

@@ -1196,6 +1196,12 @@ private fun parseSessionStats(data: JsonObject?): SessionStats {
             data?.stringField("sessionFile"),
             data?.stringField("sessionPath"),
         )
+    val compactionCount =
+        coalesceInt(
+            data?.intField("compactions"),
+            data?.intField("compactionCount"),
+            data?.intField("autoCompactions"),
+        )
 
     return SessionStats(
         inputTokens = inputTokens,
@@ -1208,6 +1214,7 @@ private fun parseSessionStats(data: JsonObject?): SessionStats {
         assistantMessageCount = assistantMessageCount,
         toolResultCount = toolResultCount,
         sessionPath = sessionPath,
+        compactionCount = compactionCount,
     )
 }
 

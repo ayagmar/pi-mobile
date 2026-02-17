@@ -234,6 +234,7 @@ data class SessionStats(
     val assistantMessageCount: Int,
     val toolResultCount: Int,
     val sessionPath: String?,
+    val compactionCount: Int = 0,
 )
 
 /**
