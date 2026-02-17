@@ -1931,7 +1931,7 @@ internal fun PromptInputRow(
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Type a message...") },
                 singleLine = false,
-                maxLines = 4,
+                maxLines = 8,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                 enabled = !isStreaming,
                 trailingIcon = {
