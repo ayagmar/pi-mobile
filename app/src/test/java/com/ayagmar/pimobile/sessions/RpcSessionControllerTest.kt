@@ -91,6 +91,28 @@ class RpcSessionControllerTest {
     }
 
     @Test
+    fun parseSessionStatsIgnoresMalformedNestedTokenAndContextObjects() {
+        val stats =
+            invokeParser<SessionStats>(
+                functionName = "parseSessionStats",
+                data =
+                    buildJsonObject {
+                        put("tokens", JsonPrimitive("not-an-object"))
+                        put("context", JsonPrimitive("not-an-object"))
+                        put("inputTokens", 12)
+                        put("outputTokens", 34)
+                        put("contextTokens", 2222)
+                        put("contextWindow", 128000)
+                    },
+            )
+
+        assertEquals(12L, stats.inputTokens)
+        assertEquals(34L, stats.outputTokens)
+        assertEquals(2222L, stats.contextUsedTokens)
+        assertEquals(128000L, stats.contextWindowTokens)
+    }
+
+    @Test
     fun parseBashResultMapsCurrentAndLegacyFields() {
         val current =
             invokeParser<BashResult>(
@@ -186,6 +208,36 @@ class RpcSessionControllerTest {
         assertEquals(false, legacy.supportsThinking)
         assertEquals(0.001, legacy.inputCostPer1k)
         assertEquals(0.005, legacy.outputCostPer1k)
+    }
+
+    @Test
+    fun parseAvailableModelsIgnoresMalformedCostObjectAndUsesLegacyCostFields() {
+        val models =
+            invokeParser<List<AvailableModel>>(
+                functionName = "parseAvailableModels",
+                data =
+                    buildJsonObject {
+                        put(
+                            "models",
+                            buildJsonArray {
+                                add(
+                                    buildJsonObject {
+                                        put("id", "model-with-bad-cost")
+                                        put("name", "Model With Bad Cost")
+                                        put("provider", "openai")
+                                        put("cost", JsonPrimitive("invalid-shape"))
+                                        put("inputCostPer1k", 0.004)
+                                        put("outputCostPer1k", 0.012)
+                                    },
+                                )
+                            },
+                        )
+                    },
+            )
+
+        assertEquals(1, models.size)
+        assertEquals(0.004, models.single().inputCostPer1k)
+        assertEquals(0.012, models.single().outputCostPer1k)
     }
 
     @Test

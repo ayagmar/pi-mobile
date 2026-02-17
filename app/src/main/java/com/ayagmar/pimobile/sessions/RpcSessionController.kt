@@ -936,6 +936,10 @@ class RpcSessionController(
                     return@launch
                 }
 
+                // Clear job reference before reconnect to avoid cancelling this coroutine
+                // via the CONNECTED state observer while reconnect() is in-flight.
+                reconnectRecoveryJob = null
+
                 runCatching {
                     connection.reconnect()
                 }.onFailure { error ->
@@ -1209,7 +1213,7 @@ private fun parseBashResult(data: JsonObject?): BashResult {
 
 @Suppress("MagicNumber", "LongMethod")
 private fun parseSessionStats(data: JsonObject?): SessionStats {
-    val tokens = data?.get("tokens")?.jsonObject
+    val tokens = runCatching { data?.get("tokens")?.jsonObject }.getOrNull()
 
     val inputTokens =
         coalesceLong(
@@ -1270,7 +1274,7 @@ private fun parseSessionStats(data: JsonObject?): SessionStats {
             data?.intField("autoCompactions"),
         )
 
-    val context = data?.get("context")?.jsonObject
+    val context = runCatching { data?.get("context")?.jsonObject }.getOrNull()
     val contextUsedTokens =
         coalesceLongOrNull(
             context?.longField("used"),
@@ -1317,7 +1321,7 @@ private fun parseAvailableModels(data: JsonObject?): List<AvailableModel> {
     return models.mapNotNull { modelElement ->
         val modelObject = modelElement.jsonObject
         val id = modelObject.stringField("id") ?: return@mapNotNull null
-        val cost = modelObject["cost"]?.jsonObject
+        val cost = runCatching { modelObject["cost"]?.jsonObject }.getOrNull()
 
         AvailableModel(
             id = id,
