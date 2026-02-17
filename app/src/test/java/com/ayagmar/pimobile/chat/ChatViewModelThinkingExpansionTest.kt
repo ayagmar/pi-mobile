@@ -846,6 +846,38 @@ class ChatViewModelThinkingExpansionTest {
         }
 
     @Test
+    fun successfulPromptClearsSentImagesEvenWhenUserTypesNewDraftMidFlight() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController().apply {
+                sendPromptDelayMs = 50L
+            }
+            val viewModel = ChatViewModel(sessionController = controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.addImage(
+                PendingImage(
+                    uri = "content://test/image-mid-flight",
+                    mimeType = "image/png",
+                    sizeBytes = 128,
+                    displayName = "mid-flight.png",
+                ),
+            )
+            viewModel.onInputTextChanged("first prompt")
+            viewModel.sendPrompt()
+
+            viewModel.onInputTextChanged("new draft")
+
+            waitForState(viewModel) { state ->
+                state.inputText == "new draft" && state.pendingImages.isEmpty()
+            }
+
+            assertEquals("new draft", viewModel.uiState.value.inputText)
+            assertTrue(viewModel.uiState.value.pendingImages.isEmpty())
+            assertEquals(null, viewModel.uiState.value.errorMessage)
+        }
+
+    @Test
     fun serverUserMessagePreservesPendingImageUris() =
         runTest(dispatcher) {
             val controller = FakeSessionController()

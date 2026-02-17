@@ -182,18 +182,19 @@ class ChatViewModel(
                 return@launch
             }
 
-            var composerWasCleared = false
+            var inputWasCleared = false
+            var imagesWereCleared = false
             _uiState.update { state ->
-                val shouldClearComposer =
-                    state.inputText == currentState.inputText &&
-                        state.pendingImages == currentState.pendingImages
-                composerWasCleared = shouldClearComposer
+                val shouldClearInput = state.inputText == currentState.inputText
+                val shouldClearImages = state.pendingImages == currentState.pendingImages
+                inputWasCleared = shouldClearInput
+                imagesWereCleared = shouldClearImages
 
-                if (shouldClearComposer) {
-                    state.copy(inputText = "", pendingImages = emptyList(), errorMessage = null)
-                } else {
-                    state.copy(errorMessage = null)
-                }
+                state.copy(
+                    inputText = if (shouldClearInput) "" else state.inputText,
+                    pendingImages = if (shouldClearImages) emptyList() else state.pendingImages,
+                    errorMessage = null,
+                )
             }
 
             val result = sessionController.sendPrompt(message, imagePayloads)
@@ -201,7 +202,9 @@ class ChatViewModel(
                 discardPendingLocalUserItem(optimisticUserId)
                 _uiState.update { state ->
                     val shouldRestoreDraft =
-                        composerWasCleared && state.inputText.isEmpty() && state.pendingImages.isEmpty()
+                        (inputWasCleared || imagesWereCleared) &&
+                            state.inputText.isEmpty() &&
+                            state.pendingImages.isEmpty()
                     state.copy(
                         inputText = if (shouldRestoreDraft) currentState.inputText else state.inputText,
                         pendingImages = if (shouldRestoreDraft) currentState.pendingImages else state.pendingImages,
