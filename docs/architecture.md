@@ -6,26 +6,26 @@ This document gives a high-level view of how Pi Mobile works across Android, bri
 
 ```mermaid
 flowchart LR
-    User[Mobile user]
+    User["Mobile user"]
 
-    subgraph Android[Android app]
-      Hosts[Hosts + Tokens]
-      Sessions[Sessions screen\ncache + filter]
-      Chat[Chat screen + ViewModel]
-      Net[PiRpcConnection\nWebSocketTransport]
+    subgraph Android["Android app"]
+      Hosts["Hosts and tokens"]
+      Sessions["Sessions screen<br/>cache and filter"]
+      Chat["Chat screen and ViewModel"]
+      Net["PiRpcConnection<br/>WebSocketTransport"]
     end
 
-    subgraph Bridge[Node bridge]
-      WS[WebSocket server\n/auth + envelope routing/]
-      Locks[Control lock manager\n(cwd + session)]
-      PM[Process manager\n(one pi process per cwd)]
-      Indexer[Session indexer\nreads JSONL sessions]
-      Ext[Internal extensions\npi-mobile-tree\npi-mobile-open-stats]
+    subgraph Bridge["Node bridge"]
+      WS["WebSocket server<br/>auth and envelope routing"]
+      Locks["Control lock manager<br/>cwd and session"]
+      PM["Process manager<br/>one pi process per cwd"]
+      Indexer["Session indexer<br/>reads JSONL sessions"]
+      Ext["Internal extensions<br/>pi-mobile-tree<br/>pi-mobile-open-stats"]
     end
 
-    subgraph Laptop[Local pi runtime]
-      Pi[pi --mode rpc]
-      Files[(~/.pi/agent/sessions/*.jsonl)]
+    subgraph Laptop["Local pi runtime"]
+      Pi["pi --mode rpc"]
+      Files["~/.pi/agent/sessions/*.jsonl"]
     end
 
     User --> Android
@@ -33,7 +33,7 @@ flowchart LR
     Sessions --> Net
     Chat --> Net
 
-    Net <-->|ws://.../ws\n{channel,payload}| WS
+    Net <-->|ws://.../ws<br/>channel payload envelope| WS
     WS --> Locks
     WS --> PM
     WS --> Indexer
@@ -95,7 +95,7 @@ flowchart LR
     A[User selects tree entry] --> B[Android sends bridge_navigate_tree]
     B --> C[Bridge validates cwd + control lock]
     C --> D[Bridge checks get_commands for pi-mobile-tree]
-    D --> E[Bridge sends rpc prompt: /pi-mobile-tree <entryId> <statusKey>]
+    D --> E[Bridge sends rpc prompt: pi-mobile-tree entryId statusKey]
     E --> F[Extension navigates tree + setEditorText + setStatus]
     F --> G[Bridge captures setStatus payload]
     G --> H[Bridge returns bridge_tree_navigation_result]
@@ -107,7 +107,7 @@ flowchart LR
 ```mermaid
 stateDiagram-v2
     [*] --> Unlocked
-    Unlocked --> LockedByClientA: bridge_acquire_control(cwd[, sessionPath])
+    Unlocked --> LockedByClientA: bridge_acquire_control cwd and optional sessionPath
     LockedByClientA --> LockedByClientA: same client re-acquires
     LockedByClientA --> DeniedForOthers: other client acquire attempt
     DeniedForOthers --> LockedByClientA

@@ -6,6 +6,10 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   android:
     name: Android
@@ -22,6 +26,18 @@ jobs:
 
       - name: Lint & Test
         run: ./gradlew :app:check
+
+      - name: Generate Kotlin coverage XML
+        run: ./gradlew :app:koverXmlReport
+
+      - name: Comment coverage on PR
+        if: github.event_name == 'pull_request'
+        uses: madrapps/jacoco-report@v1.7.1
+        with:
+          paths: ${{ github.workspace }}/app/build/reports/kover/report.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: Kotlin Coverage
+          update-comment: true
 
   bridge:
     name: Bridge
@@ -49,3 +65,53 @@ jobs:
 
       - name: Lint, Typecheck & Test
         run: pnpm check
+
+      - name: Generate bridge coverage
+        run: pnpm run test:coverage
+
+      - name: Build bridge coverage PR comment
+        if: github.event_name == 'pull_request'
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const summaryPath = 'coverage/coverage-summary.json';
+          if (!fs.existsSync(summaryPath)) {
+            throw new Error(`Coverage summary not found at ${summaryPath}`);
+          }
+
+          const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+          const total = summary.total ?? {};
+
+          const metricRow = (key, label) => {
+            const metric = total[key] ?? { covered: 0, total: 0, pct: 0 };
+            const covered = Number(metric.covered ?? 0);
+            const totalCount = Number(metric.total ?? 0);
+            const pct = Number(metric.pct ?? 0).toFixed(2);
+            return `| ${label} | ${covered} / ${totalCount} | ${pct}% |`;
+          };
+
+          const markdown = [
+            '## Bridge Coverage (Vitest)',
+            '',
+            '| Metric | Covered / Total | Coverage |',
+            '|---|---:|---:|',
+            metricRow('lines', 'Lines'),
+            metricRow('functions', 'Functions'),
+            metricRow('branches', 'Branches'),
+            metricRow('statements', 'Statements'),
+            '',
+            '_Source: bridge/coverage/coverage-summary.json_',
+            '',
+          ].join('\n');
+
+          fs.mkdirSync('coverage', { recursive: true });
+          fs.writeFileSync('coverage/pr-comment.md', markdown);
+          NODE
+
+      - name: Comment bridge coverage on PR
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: bridge-coverage
+          path: bridge/coverage/pr-comment.md
