@@ -120,9 +120,16 @@ They are hidden from visible slash-command results by filtering internal names.
 | Mobile command | Behavior |
 |---|---|
 | `/tree` | Opens mobile tree sheet directly |
-| `/stats` | Attempts internal `/pi-mobile-open-stats`, falls back to local sheet if unavailable |
-| `/settings` | Opens Settings tab guidance message |
-| `/hotkeys` | Explicitly marked unsupported on mobile |
+| `/stats` | Attempts internal `/pi-mobile-open-stats`, falls back to local stats sheet if unavailable |
+| `/model` | Opens model picker |
+| `/session` | Opens stats/session overview sheet |
+| `/compact` | Runs compact on active session |
+| `/export` | Exports current session to HTML |
+| `/fork` | Opens tree sheet and guides user to select fork entry |
+| `/new` | Starts a new session |
+| `/name <new name>` | Renames active session |
+| `/settings` | Shows guidance to use Settings tab |
+| `/hotkeys`, `/resume`, `/copy`, `/share`, `/reload`, `/changelog`, `/scoped-models` | Explicitly marked unavailable on mobile |
 
 ### Workflow status handling
 

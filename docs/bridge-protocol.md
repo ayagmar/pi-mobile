@@ -216,6 +216,7 @@ Common codes:
 - `invalid_tree_entry_id`
 - `control_lock_required`
 - `control_lock_denied`
+- `invalid_rpc_payload`
 - `rpc_forward_failed`
 - `tree_navigation_failed`
 - `session_index_failed`

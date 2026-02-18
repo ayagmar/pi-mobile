@@ -2,6 +2,9 @@
 
 This document explains how the Pi Mobile project is organized, how data flows through the system, and where to make changes safely.
 
+For visual system diagrams, see [Architecture (Mermaid diagrams)](architecture.md).
+For durable decision rationale, see [Architecture Decision Records](adr/README.md).
+
 ## Table of Contents
 
 - [System Overview](#system-overview)
@@ -12,6 +15,7 @@ This document explains how the Pi Mobile project is organized, how data flows th
   - [2) Prompt and Streaming Events](#2-prompt-and-streaming-events)
   - [3) Reconnect and Resync](#3-reconnect-and-resync)
   - [4) Session Tree Navigation](#4-session-tree-navigation)
+  - [5) Session Coherency Monitoring + Sync](#5-session-coherency-monitoring--sync)
 - [Bridge Control Model](#bridge-control-model)
 - [State Management in Android](#state-management-in-android)
 - [Testing Strategy](#testing-strategy)
@@ -47,6 +51,7 @@ The app never talks directly to a pi process. It talks to the bridge, which:
 | `core-net/` | WebSocket transport, envelope routing, reconnect/resync |
 | `core-sessions/` | Session index models, cache, repository logic |
 | `bridge/` | Node bridge server, protocol, process manager, extensions |
+| `benchmark/` | Android macrobenchmark module and baseline-profile scaffolding |
 | `docs/` | Human-facing project docs |
 | `docs/ai/` | Planning/progress artifacts |
 
@@ -134,6 +139,20 @@ Tree flow uses both bridge control and internal extension command:
 5. Bridge parses payload and replies with `bridge_tree_navigation_result`
 6. App updates input text and tree state
 
+### 5) Session Coherency Monitoring + Sync
+
+To protect against cross-device edits on the same session file:
+
+1. `ChatViewModel` polls `bridge_get_session_freshness` every few seconds
+2. Bridge computes a fingerprint (`mtime`, size, entry count, last ids/hash)
+3. Client compares fingerprint against previous snapshot
+4. If mismatch is outside local mutation grace window:
+   - show coherency warning banner
+   - emit warning notification with lock owner hints
+5. User can trigger **Sync now** to force timeline reload and clear warning
+
+This helps avoid writing on stale in-memory state after another client changed the session.
+
 ## Bridge Control Model
 
 The bridge uses lock ownership to prevent conflicting writers.
@@ -156,6 +175,7 @@ Important sub-states:
 - extension dialogs/notifications/widgets/title
 - bash dialog state
 - stats/model/tree bottom-sheet state
+- session coherency warning + sync-in-progress state
 
 High-level design:
 

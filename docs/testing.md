@@ -76,13 +76,13 @@ pnpm install  # if not done
 pnpm start
 ```
 
-The bridge will print your Tailscale IP and port.
+The bridge logs the host/port it is listening on.
 
 ### 2. Configure the App
 
 In the emulator app:
-1. Tap "Add Host"
-2. Enter your laptop's Tailscale IP (e.g., `100.x.x.x`)
+1. Open the left drawer → **Hosts** tab → **Add host**
+2. Enter your laptop's Tailscale IP or MagicDNS hostname (`*.ts.net`)
 3. Port: `8787` (or whatever the bridge uses)
 4. Token: whatever you set in `bridge/.env` as `BRIDGE_AUTH_TOKEN`
 
@@ -99,7 +99,7 @@ If not, check:
 
 ### "No hosts configured" shows immediately
 
-Normal on first launch. Tap the hosts icon (top bar) to add one.
+Normal on first launch. Open the left drawer and go to the **Hosts** tab to add one.
 
 ### "Connection failed"
 

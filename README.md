@@ -6,15 +6,16 @@ An Android client for the [Pi coding agent](https://github.com/badlogic/pi-mono)
 
 Pi runs on your laptop. This app lets you:
 - Browse and resume coding sessions from anywhere
-- Chat with the agent, send prompts, abort, steer, and follow up
-- Discover slash commands from an in-app command palette
+- Chat with the agent: prompt, abort, steer, follow-up, compact, rename, export
+- Discover slash commands from an in-app command palette (`/tree`, `/stats`, `/model`, `/new`, `/name`, ...)
 - View streaming thinking/tool blocks with collapse/expand controls
 - Open a built-in bash dialog (run/abort/history/copy output)
-- Inspect session stats and pick models from an advanced model picker
+- Inspect session stats, context usage, and pick models from an advanced model picker
+- Detect cross-device session drift and run **Sync now** for safe refresh
 - Attach images to prompts
-- Navigate session tree branches in-place (jump+continue) and fork from selected entries
+- Navigate session tree branches in-place (jump+continue), filter tree views, and fork from selected entries
 - Switch between projects (different working directories)
-- Handle extension dialogs (confirmations, inputs, selections)
+- Handle extension dialogs/widgets/status updates (confirm/input/select/editor/setStatus/setWidget)
 
 The connection goes over Tailscale, so it works anywhere without port forwarding.
 
@@ -29,6 +30,8 @@ The bridge is a small Node.js service that translates WebSocket to pi's stdin/st
 ## Documentation
 
 - [Documentation index](docs/README.md)
+- [Architecture diagrams (Mermaid)](docs/architecture.md)
+- [Architecture Decision Records (ADRs)](docs/adr/README.md)
 - [Codebase guide](docs/codebase.md)
 - [Custom extensions](docs/extensions.md)
 - [Bridge protocol reference](docs/bridge-protocol.md)
@@ -50,6 +53,7 @@ Clone and start the bridge:
 git clone https://github.com/yourusername/pi-mobile.git
 cd pi-mobile/bridge
 pnpm install
+# create .env and set BRIDGE_AUTH_TOKEN (see Configuration section below)
 pnpm start
 ```
 
@@ -67,10 +71,11 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 1. Add a host in the app:
    - Host: your laptop's Tailscale MagicDNS hostname (`<device>.<tailnet>.ts.net`)
-   - Port: 8787 (or whatever the bridge uses)
-   - Token: set this in bridge/.env as `BRIDGE_AUTH_TOKEN`
+   - Port: `8787` (or whatever the bridge uses)
+   - Use TLS: off for local/Tailscale bridge unless you've put TLS in front
+   - Token: set this in `bridge/.env` as `BRIDGE_AUTH_TOKEN`
 
-2. The app will fetch your sessions from `~/.pi/agent/sessions/`
+2. The app will fetch your sessions from `~/.pi/agent/sessions/` (or `BRIDGE_SESSION_DIR` if overridden)
 
 3. Tap a session to resume it
 
@@ -83,8 +88,9 @@ Sessions are grouped by working directory (cwd). Each session is a JSONL file in
 ### Process Management
 
 The bridge manages one pi process per cwd:
-- First connection to a project spawns pi (with small internal extensions for tree in-place navigation parity and mobile workflow commands)
-- Process stays alive with idle timeout
+- First connection to a project spawns pi (with internal extensions for tree navigation + mobile workflow commands)
+- Process stays alive with idle timeout (`BRIDGE_PROCESS_IDLE_TTL_MS`)
+- Short disconnects keep control locks during reconnect grace (`BRIDGE_RECONNECT_GRACE_MS`)
 - Reconnecting reuses the existing process
 - Crash restart with exponential backoff
 
@@ -109,11 +115,13 @@ App renders streaming text/tools
 - **Thinking blocks**: streaming reasoning appears separately and can be collapsed/expanded.
 - **Tool cards**: tool args/output are grouped with icons and expandable output.
 - **Edit diff viewer**: `edit` tool calls show before/after content.
-- **Command palette**: insert slash commands quickly from the prompt field menu, including extension-driven mobile workflows.
+- **Command palette**: insert slash commands quickly from the prompt field menu, including bridge-backed mobile commands.
 - **Bash dialog**: execute shell commands with timeout/truncation handling and history.
-- **Session stats sheet**: token/cost/message counters and session path.
+- **Session stats sheet**: token/cost/message/context counters and session path.
 - **Model picker**: provider-aware searchable model selection.
-- **Tree navigator**: inspect branch points, jump in-place, or fork from chosen entries.
+- **Tree navigator**: inspect branch points, filter views, jump in-place, or fork from chosen entries.
+- **Session coherency guard**: warns on cross-device edits and offers **Sync now**.
+- **Settings controls**: auto-compaction, auto-retry, steer/follow-up delivery modes, theme, and status-strip visibility.
 
 ## Troubleshooting
 
@@ -153,6 +161,7 @@ core-rpc/         - RPC protocol models and parsing
 core-net/         - WebSocket transport and connection management
 core-sessions/    - Session caching and repository
 bridge/           - Node.js bridge service
+benchmark/        - Macrobenchmark / baseline profile scaffolding
 ```
 
 ### Running Tests
@@ -164,7 +173,10 @@ bridge/           - Node.js bridge service
 # Bridge tests
 cd bridge && pnpm test
 
-# All quality checks
+# Bridge full checks (lint + typecheck + tests)
+cd bridge && pnpm run check
+
+# All Android quality checks
 ./gradlew ktlintCheck detekt test
 ```
 
@@ -191,12 +203,14 @@ pnpm start 2>&1 | tee bridge.log
 Create `bridge/.env`:
 
 ```env
-BRIDGE_HOST=0.0.0.0              # Use 0.0.0.0 to accept Tailscale connections
-BRIDGE_PORT=8787                 # Port to listen on
-BRIDGE_AUTH_TOKEN=your-secret    # Required authentication token
-BRIDGE_PROCESS_IDLE_TTL_MS=300000  # 5 minutes idle timeout
-BRIDGE_LOG_LEVEL=info            # debug, info, warn, error, silent
-BRIDGE_ENABLE_HEALTH_ENDPOINT=true  # set false to disable /health exposure
+BRIDGE_HOST=0.0.0.0                 # Bind host (default: 127.0.0.1)
+BRIDGE_PORT=8787                    # Port to listen on
+BRIDGE_AUTH_TOKEN=your-secret       # Required authentication token
+BRIDGE_PROCESS_IDLE_TTL_MS=300000   # Idle process eviction window (ms)
+BRIDGE_RECONNECT_GRACE_MS=30000     # Keep control locks after disconnect (ms)
+BRIDGE_SESSION_DIR=/absolute/path/to/.pi/agent/sessions  # Override session index root (optional)
+BRIDGE_LOG_LEVEL=info               # fatal,error,warn,info,debug,trace,silent
+BRIDGE_ENABLE_HEALTH_ENDPOINT=true  # set false to disable /health endpoint
 ```
 
 ### App Build Variants
@@ -217,7 +231,7 @@ Debug builds include logging and assertions. Release builds (if you make them) s
 ## Limitations
 
 - No offline mode - requires live connection to laptop
-- Session history currently loads in full on resume (no incremental pagination)
+- Session history is fetched via `get_messages` and rendered in a capped window (no true server-side pagination yet)
 - Tree navigation is MVP-level (functional, minimal rendering)
 - Mobile keyboard shortcuts vary by device/IME
 
