@@ -6,6 +6,10 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   android:
     name: Android
@@ -22,6 +26,18 @@ jobs:
 
       - name: Lint & Test
         run: ./gradlew :app:check
+
+      - name: Generate Kotlin coverage XML
+        run: ./gradlew :app:koverXmlReport
+
+      - name: Comment coverage on PR
+        if: github.event_name == 'pull_request'
+        uses: madrapps/jacoco-report@v1.7.1
+        with:
+          paths: ${{ github.workspace }}/app/build/reports/kover/report.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: Kotlin Coverage
+          update-comment: true
 
   bridge:
     name: Bridge
