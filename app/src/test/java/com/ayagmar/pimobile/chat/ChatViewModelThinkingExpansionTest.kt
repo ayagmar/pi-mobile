@@ -309,7 +309,11 @@ class ChatViewModelThinkingExpansionTest {
                         },
                 ),
             )
-            dispatcher.scheduler.advanceUntilIdle()
+
+            waitForState(viewModel) { state ->
+                val assistants = state.timeline.filterIsInstance<ChatTimelineItem.Assistant>()
+                assistants.size == 1 && assistants.single().text == "New"
+            }
 
             val item = viewModel.singleAssistantItem()
             assertEquals("New", item.text)
