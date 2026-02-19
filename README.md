@@ -1,6 +1,19 @@
 # Pi Mobile
 
-An Android client for the [Pi coding agent](https://github.com/badlogic/pi-mono). Control your coding sessions from your phone over Tailscale.
+> **Your Pi coding agent, in your pocket.**
+> Run and steer coding sessions from Android anywhere over Tailscale.
+
+Pi Mobile is an Android client for the [Pi coding agent](https://github.com/badlogic/pi-mono). It gives you live session control when you’re away from your laptop.
+
+## Demo (WIP)
+
+▶️ **Streamable demo:** https://streamable.com/jngtjp *(WIP)*
+
+## Screenshots
+
+| Chat + tools | Sessions + controls |
+|---|---|
+| ![Pi Mobile chat and tool streaming screenshot](https://i.imgur.com/sKXfkOe.png) | ![Pi Mobile session browsing screenshot](https://i.imgur.com/JBFchOQ.png) |
 
 ## What This Does
 
@@ -19,13 +32,22 @@ Pi runs on your laptop. This app lets you:
 
 The connection goes over Tailscale, so it works anywhere without port forwarding.
 
-## Architecture
+## High-Level Design
 
-```
-Phone (this app)  <--Tailscale-->  Laptop (bridge)  <--local-->  pi --mode rpc
+```mermaid
+flowchart LR
+    Phone["Android app\nPi Mobile"]
+    Bridge["Node.js bridge\nWebSocket ↔ pi stdio"]
+    Pi["pi --mode rpc\n(on laptop)"]
+    Sessions["Session files\n~/.pi/agent/sessions/*.jsonl"]
+
+    Phone <-->|"WebSocket + token auth\nover Tailscale"| Bridge
+    Bridge <-->|"JSON lines\nstdin/stdout RPC"| Pi
+    Pi <--> Sessions
+    Bridge -. "indexes sessions" .-> Sessions
 ```
 
-The bridge is a small Node.js service that translates WebSocket to pi's stdin/stdout JSON protocol. The app connects to the bridge, not directly to pi.
+The bridge is a small Node.js service that translates WebSocket to pi's stdin/stdout JSON protocol. The app connects to the bridge, not directly to pi. For deeper diagrams, see [docs/architecture.md](docs/architecture.md).
 
 ## Documentation
 

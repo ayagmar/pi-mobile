@@ -4,6 +4,7 @@ This directory contains human-facing documentation for the Pi Mobile app and bri
 
 ## Table of Contents
 
+- [Product Overview, Demo, and Screenshots (README)](../README.md)
 - [Architecture (Mermaid diagrams)](architecture.md)
 - [Architecture Decision Records (ADRs)](adr/README.md)
 - [Codebase Guide](codebase.md)
@@ -17,8 +18,9 @@ This directory contains human-facing documentation for the Pi Mobile app and bri
 
 - `docs/ai/` contains planning/progress notes generated during implementation.
 - For day-to-day development and maintenance, start with:
-  1. [Architecture (Mermaid diagrams)](architecture.md)
-  2. [Architecture Decision Records (ADRs)](adr/README.md)
-  3. [Codebase Guide](codebase.md)
-  4. [Custom Extensions](extensions.md)
-  5. [Bridge Protocol Reference](bridge-protocol.md)
+  1. [Product Overview, Demo, and Screenshots (README)](../README.md)
+  2. [Architecture (Mermaid diagrams)](architecture.md)
+  3. [Architecture Decision Records (ADRs)](adr/README.md)
+  4. [Codebase Guide](codebase.md)
+  5. [Custom Extensions](extensions.md)
+  6. [Bridge Protocol Reference](bridge-protocol.md)
