@@ -142,6 +142,12 @@ data class GetCommandsCommand(
 ) : RpcCommand
 
 @Serializable
+data class GetLastAssistantTextCommand(
+    override val id: String? = null,
+    override val type: String = "get_last_assistant_text",
+) : RpcCommand
+
+@Serializable
 data class BashCommand(
     override val id: String? = null,
     override val type: String = "bash",

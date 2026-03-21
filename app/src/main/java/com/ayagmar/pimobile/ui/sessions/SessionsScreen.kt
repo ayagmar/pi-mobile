@@ -147,6 +147,7 @@ private data class SessionsListCallbacks(
 
 private data class RenameDialogUiState(
     val isVisible: Boolean,
+    val activeSession: SessionRecord?,
     val draft: String,
     val onDraftChange: (String) -> Unit,
     val onDismiss: () -> Unit,
@@ -160,6 +161,10 @@ private fun SessionsScreen(
 ) {
     var renameDraft by remember { mutableStateOf("") }
     var showRenameDialog by remember { mutableStateOf(false) }
+    val activeSession =
+        remember(state.groups, state.activeSessionPath) {
+            findSessionByPath(state.groups, state.activeSessionPath)
+        }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(PiSpacing.md),
@@ -167,6 +172,7 @@ private fun SessionsScreen(
     ) {
         SessionsHeader(
             state = state,
+            activeSession = activeSession,
             callbacks = callbacks,
         )
 
@@ -192,7 +198,7 @@ private fun SessionsScreen(
             activeSessionActions =
                 ActiveSessionActionCallbacks(
                     onRename = {
-                        renameDraft = ""
+                        renameDraft = activeSession?.displayName.orEmpty()
                         showRenameDialog = true
                     },
                     onFork = callbacks.onFork,
@@ -208,6 +214,7 @@ private fun SessionsScreen(
         renameDialog =
             RenameDialogUiState(
                 isVisible = showRenameDialog,
+                activeSession = activeSession,
                 draft = renameDraft,
                 onDraftChange = { renameDraft = it },
                 onDismiss = { showRenameDialog = false },
@@ -223,6 +230,7 @@ private fun SessionsDialogs(
 ) {
     if (renameDialog.isVisible) {
         RenameSessionDialog(
+            currentSession = renameDialog.activeSession,
             name = renameDialog.draft,
             isBusy = state.isPerformingAction,
             onNameChange = renameDialog.onDraftChange,
@@ -247,14 +255,26 @@ private fun SessionsDialogs(
 @Composable
 private fun SessionsHeader(
     state: SessionsUiState,
+    activeSession: SessionRecord?,
     callbacks: SessionsScreenCallbacks,
 ) {
     PiTopBar(
         title = {
-            Text(
-                text = "Sessions",
-                style = MaterialTheme.typography.headlineSmall,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "Sessions",
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                activeSession?.let { session ->
+                    Text(
+                        text = "Active: ${session.displayTitle}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         },
         actions = {
             Row(
@@ -531,6 +551,15 @@ private fun SessionCardSummary(
         overflow = TextOverflow.Ellipsis,
     )
 
+    session.displaySubtitle?.let { subtitle ->
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+
     if (showCwd && session.cwd.isNotBlank()) {
         Text(
             text = session.cwd,
@@ -551,14 +580,16 @@ private fun SessionCardSummary(
         overflow = TextOverflow.Ellipsis,
     )
 
-    session.firstUserMessagePreview?.let { preview ->
-        Text(
-            text = preview,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    session.firstUserMessagePreview
+        ?.takeIf { preview -> preview != session.displaySubtitle }
+        ?.let { preview ->
+            Text(
+                text = preview,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
 }
 
 @Composable
@@ -605,6 +636,20 @@ private fun SessionMetadataRow(session: SessionRecord) {
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )
+}
+
+private fun findSessionByPath(
+    groups: List<CwdSessionGroupUiState>,
+    sessionPath: String?,
+): SessionRecord? {
+    if (sessionPath == null) {
+        return null
+    }
+
+    return groups
+        .asSequence()
+        .flatMap { group -> group.sessions.asSequence() }
+        .firstOrNull { session -> session.sessionPath == sessionPath }
 }
 
 private fun String.compactIsoTimestamp(): String {

@@ -23,6 +23,7 @@ import com.ayagmar.pimobile.corerpc.ForkCommand
 import com.ayagmar.pimobile.corerpc.GetAvailableModelsCommand
 import com.ayagmar.pimobile.corerpc.GetCommandsCommand
 import com.ayagmar.pimobile.corerpc.GetForkMessagesCommand
+import com.ayagmar.pimobile.corerpc.GetLastAssistantTextCommand
 import com.ayagmar.pimobile.corerpc.GetSessionStatsCommand
 import com.ayagmar.pimobile.corerpc.ImagePayload
 import com.ayagmar.pimobile.corerpc.NewSessionCommand
@@ -575,6 +576,50 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun getLastAssistantText(): Result<String?> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val response =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = GetLastAssistantTextCommand(id = UUID.randomUUID().toString()),
+                        expectedCommand = GET_LAST_ASSISTANT_TEXT_COMMAND,
+                    ).requireSuccess("Failed to load last assistant text")
+
+                response.data.stringField("text")
+            }
+        }
+    }
+
+    override suspend fun importSessionJsonl(
+        fileName: String,
+        jsonlContent: String,
+    ): Result<String?> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val bridgePayload =
+                    buildJsonObject {
+                        put("type", BRIDGE_IMPORT_SESSION_JSONL_TYPE)
+                        put("fileName", fileName)
+                        put("content", jsonlContent)
+                    }
+
+                val bridgeResponse =
+                    connection.requestBridge(
+                        payload = bridgePayload,
+                        expectedType = BRIDGE_SESSION_IMPORTED_TYPE,
+                    )
+
+                val sessionPath = bridgeResponse.payload.stringField("sessionPath")
+                _sessionChanged.emit(sessionPath)
+                sessionPath
+            }
+        }
+    }
+
     override suspend fun executeBash(
         command: String,
         timeoutMs: Int?,
@@ -1004,6 +1049,7 @@ class RpcSessionController(
         private const val ABORT_RETRY_COMMAND = "abort_retry"
         private const val NEW_SESSION_COMMAND = "new_session"
         private const val GET_COMMANDS_COMMAND = "get_commands"
+        private const val GET_LAST_ASSISTANT_TEXT_COMMAND = "get_last_assistant_text"
         private const val BASH_COMMAND = "bash"
         private const val ABORT_BASH_COMMAND = "abort_bash"
         private const val GET_SESSION_STATS_COMMAND = "get_session_stats"
@@ -1017,6 +1063,8 @@ class RpcSessionController(
         private const val BRIDGE_SESSION_TREE_TYPE = "bridge_session_tree"
         private const val BRIDGE_GET_SESSION_FRESHNESS_TYPE = "bridge_get_session_freshness"
         private const val BRIDGE_SESSION_FRESHNESS_TYPE = "bridge_session_freshness"
+        private const val BRIDGE_IMPORT_SESSION_JSONL_TYPE = "bridge_import_session_jsonl"
+        private const val BRIDGE_SESSION_IMPORTED_TYPE = "bridge_session_imported"
         private const val BRIDGE_NAVIGATE_TREE_TYPE = "bridge_navigate_tree"
         private const val BRIDGE_TREE_NAVIGATION_RESULT_TYPE = "bridge_tree_navigation_result"
         private const val EVENT_BUFFER_CAPACITY = 256

@@ -204,7 +204,21 @@ private fun ConnectionMessages(
 ) {
     state.piVersion?.let { version ->
         Text(
-            text = "Pi version: $version",
+            text = "Active model: $version",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+
+    state.sessionName?.let { sessionName ->
+        Text(
+            text = "Active session: $sessionName",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+
+    state.pendingMessageCount?.let { pendingCount ->
+        Text(
+            text = "Queued messages: $pendingCount",
             style = MaterialTheme.typography.bodySmall,
         )
     }

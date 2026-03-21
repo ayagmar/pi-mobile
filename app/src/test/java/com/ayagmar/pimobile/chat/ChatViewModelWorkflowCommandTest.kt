@@ -2,6 +2,7 @@ package com.ayagmar.pimobile.chat
 
 import androidx.lifecycle.viewModelScope
 import com.ayagmar.pimobile.corerpc.ExtensionUiRequestEvent
+import com.ayagmar.pimobile.corerpc.RpcResponse
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
 import com.ayagmar.pimobile.testutil.FakeSessionController
 import kotlinx.coroutines.Dispatchers
@@ -11,6 +12,8 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -81,6 +84,113 @@ class ChatViewModelWorkflowCommandTest {
             assertTrue(commandNames.contains("fix-tests"))
             assertFalse(commandNames.contains("pi-mobile-tree"))
             assertFalse(commandNames.contains("pi-mobile-open-stats"))
+        }
+
+    @Test
+    fun initialStateLoadsSessionNameAndPendingMessageCount() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController().apply {
+                    getStateResult =
+                        Result.success(
+                            RpcResponse(
+                                type = "response",
+                                command = "get_state",
+                                success = true,
+                                data =
+                                    buildJsonObject {
+                                        put("sessionName", "queued-session")
+                                        put("pendingMessageCount", 2)
+                                        put("steeringMode", ChatViewModel.DELIVERY_MODE_ONE_AT_A_TIME)
+                                        put("followUpMode", ChatViewModel.DELIVERY_MODE_ONE_AT_A_TIME)
+                                    },
+                            ),
+                        )
+                }
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            assertEquals("queued-session", viewModel.uiState.value.sessionName)
+            assertEquals(2, viewModel.uiState.value.pendingMessageCount)
+        }
+
+    @Test
+    fun copyLastResponseQueuesClipboardActionFromLastAssistantText() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController().apply {
+                    getLastAssistantTextResult = Result.success("Copied answer")
+                }
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.copyLastResponse()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(1, controller.getLastAssistantTextCallCount)
+            assertEquals("Copied answer", viewModel.uiState.value.pendingClipboardText)
+            assertEquals(0, controller.sendPromptCallCount)
+        }
+
+    @Test
+    fun slashCopyQueuesClipboardActionFromLastAssistantText() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController().apply {
+                    getLastAssistantTextResult = Result.success("Copied answer")
+                }
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("/copy")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(1, controller.getLastAssistantTextCallCount)
+            assertEquals("Copied answer", viewModel.uiState.value.pendingClipboardText)
+            assertEquals(0, controller.sendPromptCallCount)
+        }
+
+    @Test
+    fun slashImportRequestsDocumentPickerInsteadOfSendingPrompt() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.onInputTextChanged("/import")
+            viewModel.sendPrompt()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value.pendingImportRequestToken != null)
+            assertEquals(0, controller.sendPromptCallCount)
+        }
+
+    @Test
+    fun importSessionJsonlDelegatesToSessionController() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController().apply {
+                    importSessionJsonlResult = Result.success("/tmp/imported.jsonl")
+                }
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            viewModel.importSessionJsonl(
+                fileName = "picked-session.jsonl",
+                jsonlContent = "{\"type\":\"session\"}\n",
+            )
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(1, controller.importSessionJsonlCallCount)
+            assertEquals("picked-session.jsonl", controller.lastImportedSessionFileName)
+            assertEquals("{\"type\":\"session\"}\n", controller.lastImportedSessionJsonlContent)
+            assertTrue(viewModel.uiState.value.notifications.any { it.message.contains("Session imported") })
         }
 
     @Test

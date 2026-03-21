@@ -125,11 +125,13 @@ They are hidden from visible slash-command results by filtering internal names.
 | `/session` | Opens stats/session overview sheet |
 | `/compact` | Runs compact on active session |
 | `/export` | Exports current session to HTML |
+| `/import` | Opens the Android document picker and imports a JSONL session into the active runtime |
+| `/copy` | Copies the last assistant response to the Android clipboard |
 | `/fork` | Opens tree sheet and guides user to select fork entry |
 | `/new` | Starts a new session |
 | `/name <new name>` | Renames active session |
 | `/settings` | Shows guidance to use Settings tab |
-| `/hotkeys`, `/resume`, `/copy`, `/share`, `/reload`, `/changelog`, `/scoped-models` | Explicitly marked unavailable on mobile |
+| `/hotkeys`, `/resume`, `/share`, `/reload`, `/changelog`, `/scoped-models` | Explicitly marked unavailable on mobile |
 
 ### Workflow status handling
 

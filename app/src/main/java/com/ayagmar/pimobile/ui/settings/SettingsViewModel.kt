@@ -86,7 +86,7 @@ class SettingsViewModel(
             }
         }
 
-        refreshDeliveryModesFromState()
+        refreshStateSummary()
     }
 
     private fun emitMessage(message: String) {
@@ -101,6 +101,8 @@ class SettingsViewModel(
                     isChecking = true,
                     errorMessage = null,
                     piVersion = null,
+                    sessionName = null,
+                    pendingMessageCount = null,
                     connectionStatus = ConnectionStatus.CHECKING,
                 )
 
@@ -108,17 +110,6 @@ class SettingsViewModel(
                 val result = sessionController.getState()
                 if (result.isSuccess) {
                     val data = result.getOrNull()?.data
-                    val modelDescription =
-                        data?.get("model")?.let { modelElement ->
-                            if (modelElement is kotlinx.serialization.json.JsonObject) {
-                                val name = modelElement["name"]?.toString()?.trim('"')
-                                val provider = modelElement["provider"]?.toString()?.trim('"')
-                                if (name != null && provider != null) "$name ($provider)" else name ?: provider
-                            } else {
-                                modelElement.toString().trim('"')
-                            }
-                        }
-
                     val steeringMode = data.stateModeField("steeringMode", "steering_mode") ?: uiState.steeringMode
                     val followUpMode = data.stateModeField("followUpMode", "follow_up_mode") ?: uiState.followUpMode
 
@@ -127,7 +118,9 @@ class SettingsViewModel(
                         uiState.copy(
                             isChecking = false,
                             connectionStatus = ConnectionStatus.CONNECTED,
-                            piVersion = modelDescription,
+                            piVersion = data.modelDescription(),
+                            sessionName = data.stringField("sessionName"),
+                            pendingMessageCount = data.intField("pendingMessageCount") ?: 0,
                             errorMessage = null,
                             steeringMode = steeringMode,
                             followUpMode = followUpMode,
@@ -137,6 +130,9 @@ class SettingsViewModel(
                         uiState.copy(
                             isChecking = false,
                             connectionStatus = ConnectionStatus.DISCONNECTED,
+                            piVersion = null,
+                            sessionName = null,
+                            pendingMessageCount = null,
                             errorMessage = result.exceptionOrNull()?.message ?: "Connection failed",
                         )
                 }
@@ -147,6 +143,9 @@ class SettingsViewModel(
                     uiState.copy(
                         isChecking = false,
                         connectionStatus = ConnectionStatus.DISCONNECTED,
+                        piVersion = null,
+                        sessionName = null,
+                        pendingMessageCount = null,
                         errorMessage = "${e.javaClass.simpleName}: ${e.message}",
                     )
             }
@@ -263,7 +262,7 @@ class SettingsViewModel(
         }
     }
 
-    private fun refreshDeliveryModesFromState() {
+    private fun refreshStateSummary() {
         viewModelScope.launch {
             val result = sessionController.getState()
             val data = result.getOrNull()?.data ?: return@launch
@@ -271,6 +270,9 @@ class SettingsViewModel(
             val followUpMode = data.stateModeField("followUpMode", "follow_up_mode") ?: uiState.followUpMode
             uiState =
                 uiState.copy(
+                    piVersion = data.modelDescription(),
+                    sessionName = data.stringField("sessionName"),
+                    pendingMessageCount = data.intField("pendingMessageCount") ?: 0,
                     steeringMode = steeringMode,
                     followUpMode = followUpMode,
                 )
@@ -318,6 +320,8 @@ data class SettingsUiState(
     val isChecking: Boolean = false,
     val isLoading: Boolean = false,
     val piVersion: String? = null,
+    val sessionName: String? = null,
+    val pendingMessageCount: Int? = null,
     val appVersion: String = "unknown",
     val errorMessage: String? = null,
     val autoCompactionEnabled: Boolean = true,
@@ -327,8 +331,8 @@ data class SettingsUiState(
     val transportRuntimeNote: String = "",
     val themePreference: ThemePreference = ThemePreference.SYSTEM,
     val showExtensionStatusStrip: Boolean = true,
-    val steeringMode: String = SettingsViewModel.MODE_ALL,
-    val followUpMode: String = SettingsViewModel.MODE_ALL,
+    val steeringMode: String = SettingsViewModel.MODE_ONE_AT_A_TIME,
+    val followUpMode: String = SettingsViewModel.MODE_ONE_AT_A_TIME,
     val isUpdatingSteeringMode: Boolean = false,
     val isUpdatingFollowUpMode: Boolean = false,
 )
@@ -351,6 +355,21 @@ private fun JsonObject?.stateModeField(
         it == SettingsViewModel.MODE_ALL || it == SettingsViewModel.MODE_ONE_AT_A_TIME
     }
 }
+
+private fun JsonObject?.stringField(key: String): String? = this?.get(key)?.jsonPrimitive?.contentOrNull
+
+private fun JsonObject?.intField(key: String): Int? = this?.get(key)?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+
+private fun JsonObject?.modelDescription(): String? =
+    when (val modelElement = this?.get("model")) {
+        null -> null
+        is JsonObject -> {
+            val name = modelElement.stringField("name")
+            val provider = modelElement.stringField("provider")
+            if (name != null && provider != null) "$name ($provider)" else name ?: provider
+        }
+        else -> modelElement.toString().trim('"')
+    }
 
 private fun transportRuntimeNote(
     requested: TransportPreference,

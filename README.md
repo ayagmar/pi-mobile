@@ -19,8 +19,8 @@ Pi Mobile is an Android client for the [Pi coding agent](https://github.com/badl
 
 Pi runs on your laptop. This app lets you:
 - Browse and resume coding sessions from anywhere
-- Chat with the agent: prompt, abort, steer, follow-up, compact, rename, export
-- Discover slash commands from an in-app command palette (`/tree`, `/stats`, `/model`, `/new`, `/name`, ...)
+- Chat with the agent: prompt, abort, steer, follow-up, compact, rename, copy last response, export, import JSONL sessions
+- Discover slash commands from an in-app command palette (`/tree`, `/stats`, `/model`, `/new`, `/name`, `/copy`, `/import`, ...)
 - View streaming thinking/tool blocks with collapse/expand controls
 - Open a built-in bash dialog (run/abort/history/copy output)
 - Inspect session stats, context usage, and pick models from an advanced model picker
@@ -138,8 +138,11 @@ App renders streaming text/tools
 - **Tool cards**: tool args/output are grouped with icons and expandable output.
 - **Edit diff viewer**: `edit` tool calls show before/after content.
 - **Command palette**: insert slash commands quickly from the prompt field menu, including bridge-backed mobile commands.
+- **Quick copy action**: copy the last assistant response from the chat header menu without typing `/copy`.
 - **Bash dialog**: execute shell commands with timeout/truncation handling and history.
-- **Session stats sheet**: token/cost/message/context counters and session path.
+- **Session status in chat**: shows the active session name and queued message count from pi state.
+- **Session names in session browser**: active named sessions are surfaced more clearly in the Sessions header, rename dialog, and cards.
+- **Session stats sheet**: token/cost/message/context counters, queued-message summary, and session path.
 - **Model picker**: provider-aware searchable model selection.
 - **Tree navigator**: inspect branch points, filter views, jump in-place, or fork from chosen entries.
 - **Session coherency guard**: warns on cross-device edits and offers **Sync now**.
@@ -188,6 +191,8 @@ benchmark/        - Macrobenchmark / baseline profile scaffolding
 
 ### Running Tests
 
+Use JDK 21 for Android and Gradle work in this repo.
+
 ```bash
 # Android tests
 ./gradlew test
@@ -230,7 +235,7 @@ BRIDGE_PORT=8787                    # Port to listen on
 BRIDGE_AUTH_TOKEN=your-secret       # Required authentication token
 BRIDGE_PROCESS_IDLE_TTL_MS=300000   # Idle process eviction window (ms)
 BRIDGE_RECONNECT_GRACE_MS=30000     # Keep control locks after disconnect (ms)
-BRIDGE_SESSION_DIR=/absolute/path/to/.pi/agent/sessions  # Override session index root (optional)
+BRIDGE_SESSION_DIR=/absolute/path/to/.pi/agent/sessions  # Override the session dir used for indexing and spawned pi runtimes
 BRIDGE_LOG_LEVEL=info               # fatal,error,warn,info,debug,trace,silent
 BRIDGE_ENABLE_HEALTH_ENDPOINT=true  # set false to disable /health endpoint
 ```

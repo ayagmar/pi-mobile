@@ -100,6 +100,13 @@ interface SessionController {
 
     suspend fun getCommands(): Result<List<SlashCommandInfo>>
 
+    suspend fun getLastAssistantText(): Result<String?>
+
+    suspend fun importSessionJsonl(
+        fileName: String,
+        jsonlContent: String,
+    ): Result<String?>
+
     suspend fun executeBash(
         command: String,
         timeoutMs: Int? = null,

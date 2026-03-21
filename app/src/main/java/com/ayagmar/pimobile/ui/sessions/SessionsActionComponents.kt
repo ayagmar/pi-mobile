@@ -50,8 +50,10 @@ fun SessionActionsRow(
     }
 }
 
+@Suppress("LongParameterList")
 @Composable
 fun RenameSessionDialog(
+    currentSession: SessionRecord?,
     name: String,
     isBusy: Boolean,
     onNameChange: (String) -> Unit,
@@ -62,12 +64,23 @@ fun RenameSessionDialog(
         onDismissRequest = onDismiss,
         title = { Text("Rename active session") },
         text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = onNameChange,
-                label = { Text("Session name") },
-                singleLine = true,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                currentSession?.let { session ->
+                    Text(
+                        text = session.displayTitle,
+                    )
+                    session.displaySubtitle?.let { subtitle ->
+                        Text(subtitle)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onNameChange,
+                    label = { Text("Session name") },
+                    singleLine = true,
+                )
+            }
         },
         confirmButton = {
             TextButton(
@@ -131,4 +144,13 @@ fun ForkPickerDialog(
 val SessionRecord.displayTitle: String
     get() {
         return displayName ?: firstUserMessagePreview ?: sessionPath.substringAfterLast('/')
+    }
+
+val SessionRecord.displaySubtitle: String?
+    get() {
+        return when {
+            !displayName.isNullOrBlank() && !firstUserMessagePreview.isNullOrBlank() -> firstUserMessagePreview
+            !displayName.isNullOrBlank() -> sessionPath.substringAfterLast('/')
+            else -> null
+        }
     }

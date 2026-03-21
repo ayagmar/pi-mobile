@@ -33,12 +33,24 @@ class FakeSessionController : SessionController {
 
     var availableCommands: List<SlashCommandInfo> = emptyList()
     var getCommandsCallCount: Int = 0
+    var getLastAssistantTextCallCount: Int = 0
+    var importSessionJsonlCallCount: Int = 0
     var sendPromptCallCount: Int = 0
     var getMessagesCallCount: Int = 0
     var getStateCallCount: Int = 0
     var getSessionFreshnessCallCount: Int = 0
+    var getStateResult: Result<RpcResponse> =
+        Result.success(
+            RpcResponse(
+                type = "response",
+                command = "get_state",
+                success = true,
+            ),
+        )
     var lastPromptMessage: String? = null
     var lastFreshnessSessionPath: String? = null
+    var lastImportedSessionFileName: String? = null
+    var lastImportedSessionJsonlContent: String? = null
     var sendPromptResult: Result<Unit> = Result.success(Unit)
     var sendPromptDelayMs: Long = 0L
     var abortResult: Result<Unit> = Result.success(Unit)
@@ -57,6 +69,8 @@ class FakeSessionController : SessionController {
                 sessionPath = null,
             ),
         )
+    var getLastAssistantTextResult: Result<String?> = Result.success(null)
+    var importSessionJsonlResult: Result<String?> = Result.success(null)
     var lastNavigatedEntryId: String? = null
     var steeringModeResult: Result<Unit> = Result.success(Unit)
     var followUpModeResult: Result<Unit> = Result.success(Unit)
@@ -130,13 +144,7 @@ class FakeSessionController : SessionController {
 
     override suspend fun getState(): Result<RpcResponse> {
         getStateCallCount += 1
-        return Result.success(
-            RpcResponse(
-                type = "response",
-                command = "get_state",
-                success = true,
-            ),
-        )
+        return getStateResult
     }
 
     override suspend fun sendPrompt(
@@ -222,6 +230,21 @@ class FakeSessionController : SessionController {
     override suspend fun getCommands(): Result<List<SlashCommandInfo>> {
         getCommandsCallCount += 1
         return Result.success(availableCommands)
+    }
+
+    override suspend fun getLastAssistantText(): Result<String?> {
+        getLastAssistantTextCallCount += 1
+        return getLastAssistantTextResult
+    }
+
+    override suspend fun importSessionJsonl(
+        fileName: String,
+        jsonlContent: String,
+    ): Result<String?> {
+        importSessionJsonlCallCount += 1
+        lastImportedSessionFileName = fileName
+        lastImportedSessionJsonlContent = jsonlContent
+        return importSessionJsonlResult
     }
 
     override suspend fun executeBash(

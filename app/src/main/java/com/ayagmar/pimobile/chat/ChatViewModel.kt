@@ -469,24 +469,36 @@ class ChatViewModel(
 
         when (invocation.name) {
             BUILTIN_TREE_COMMAND -> showTreeSheet()
-            BUILTIN_STATS_COMMAND -> {
-                invokeInternalWorkflowCommand(INTERNAL_STATS_WORKFLOW_COMMAND) {
-                    showStatsSheet()
-                }
-            }
+            BUILTIN_STATS_COMMAND -> runStatsSlashCommand()
             BUILTIN_MODEL_COMMAND -> showModelPicker()
             BUILTIN_SESSION_COMMAND -> showStatsSheet()
             BUILTIN_COMPACT_COMMAND -> compactNow()
-            BUILTIN_FORK_COMMAND -> {
-                showTreeSheet()
-                addSystemNotification(
-                    message = "Select an entry and tap Fork to create a new branch session",
-                    type = "info",
-                )
-            }
+            BUILTIN_FORK_COMMAND -> runForkSlashCommand()
             BUILTIN_EXPORT_COMMAND -> runExportSlashCommand()
+            BUILTIN_IMPORT_COMMAND -> runImportSlashCommand()
             BUILTIN_NEW_COMMAND -> runNewSessionSlashCommand()
             BUILTIN_NAME_COMMAND -> runRenameSlashCommand(invocation.args)
+            BUILTIN_COPY_COMMAND -> runCopySlashCommand()
+            else -> showUnsupportedKnownSlashCommandMessage(invocation.name)
+        }
+    }
+
+    private fun runStatsSlashCommand() {
+        invokeInternalWorkflowCommand(INTERNAL_STATS_WORKFLOW_COMMAND) {
+            showStatsSheet()
+        }
+    }
+
+    private fun runForkSlashCommand() {
+        showTreeSheet()
+        addSystemNotification(
+            message = "Select an entry and tap Fork to create a new branch session",
+            type = "info",
+        )
+    }
+
+    private fun showUnsupportedKnownSlashCommandMessage(commandName: String) {
+        when (commandName) {
             BUILTIN_SETTINGS_COMMAND -> {
                 _uiState.update {
                     it.copy(errorMessage = "Use the Settings tab for /settings on mobile")
@@ -498,19 +510,18 @@ class ChatViewModel(
                 }
             }
             BUILTIN_RESUME_COMMAND,
-            BUILTIN_COPY_COMMAND,
             BUILTIN_SHARE_COMMAND,
             BUILTIN_RELOAD_COMMAND,
             BUILTIN_CHANGELOG_COMMAND,
             BUILTIN_SCOPED_MODELS_COMMAND,
             -> {
                 _uiState.update {
-                    it.copy(errorMessage = "/${invocation.name} is not available on mobile yet")
+                    it.copy(errorMessage = "/$commandName is not available on mobile yet")
                 }
             }
             else -> {
                 _uiState.update {
-                    it.copy(errorMessage = "/${invocation.name} is interactive-only and unavailable via RPC prompt")
+                    it.copy(errorMessage = "/$commandName is interactive-only and unavailable via RPC prompt")
                 }
             }
         }
@@ -527,6 +538,7 @@ class ChatViewModel(
             markLocalSessionMutationExpected()
             val result = sessionController.renameSession(newName)
             if (result.isSuccess) {
+                _uiState.update { it.copy(sessionName = newName) }
                 addSystemNotification(message = "Session renamed to \"$newName\"", type = "info")
             } else {
                 _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
@@ -546,6 +558,37 @@ class ChatViewModel(
             } else {
                 _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
             }
+        }
+    }
+
+    fun copyLastResponse() {
+        runCopySlashCommand()
+    }
+
+    private fun runCopySlashCommand() {
+        viewModelScope.launch {
+            val result = sessionController.getLastAssistantText()
+            if (result.isFailure) {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+                return@launch
+            }
+
+            val assistantText = result.getOrNull()
+            if (assistantText.isNullOrBlank()) {
+                addSystemNotification(message = "No assistant response is available to copy", type = "warning")
+                return@launch
+            }
+
+            _uiState.update { it.copy(pendingClipboardText = assistantText) }
+        }
+    }
+
+    private fun runImportSlashCommand() {
+        _uiState.update {
+            it.copy(
+                pendingImportRequestToken = UUID.randomUUID().toString(),
+                errorMessage = null,
+            )
         }
     }
 
@@ -818,6 +861,7 @@ class ChatViewModel(
                     current.copy(
                         isStreaming = isStreaming,
                         pendingQueueItems = if (isStreaming) current.pendingQueueItems else emptyList(),
+                        pendingMessageCount = if (isStreaming) current.pendingMessageCount else 0,
                     )
                 }
             }
@@ -847,10 +891,13 @@ class ChatViewModel(
             )
 
         _uiState.update { current ->
+            val nextPendingQueueItems =
+                (current.pendingQueueItems + queueItem)
+                    .takeLast(MAX_PENDING_QUEUE_ITEMS)
+
             current.copy(
-                pendingQueueItems =
-                    (current.pendingQueueItems + queueItem)
-                        .takeLast(MAX_PENDING_QUEUE_ITEMS),
+                pendingQueueItems = nextPendingQueueItems,
+                pendingMessageCount = nextPendingQueueItems.size,
             )
         }
 
@@ -1438,19 +1485,70 @@ class ChatViewModel(
         }
     }
 
+    fun consumePendingClipboardText(copySucceeded: Boolean) {
+        val pendingText = _uiState.value.pendingClipboardText
+        if (pendingText == null) {
+            return
+        }
+
+        _uiState.update { it.copy(pendingClipboardText = null) }
+        addSystemNotification(
+            message = if (copySucceeded) "Copied last assistant response" else "Failed to copy last assistant response",
+            type = if (copySucceeded) "info" else "error",
+        )
+    }
+
+    fun consumePendingImportRequest() {
+        if (_uiState.value.pendingImportRequestToken == null) {
+            return
+        }
+
+        _uiState.update { it.copy(pendingImportRequestToken = null) }
+    }
+
+    fun importSessionJsonl(
+        fileName: String,
+        jsonlContent: String,
+    ) {
+        viewModelScope.launch {
+            markLocalSessionMutationExpected()
+            val result = sessionController.importSessionJsonl(fileName = fileName, jsonlContent = jsonlContent)
+            if (result.isSuccess) {
+                addSystemNotification(
+                    message = "Session imported${if (fileName.isBlank()) "" else " from $fileName"}",
+                    type = "info",
+                )
+            } else {
+                _uiState.update { it.copy(errorMessage = result.exceptionOrNull()?.message) }
+            }
+        }
+    }
+
+    fun onImportSessionReadFailed(message: String) {
+        _uiState.update { it.copy(errorMessage = message) }
+    }
+
     fun removePendingQueueItem(itemId: String) {
         _uiState.update { state ->
+            val nextPendingQueueItems =
+                state.pendingQueueItems.filterNot { item ->
+                    item.id == itemId
+                }
+
             state.copy(
-                pendingQueueItems =
-                    state.pendingQueueItems.filterNot { item ->
-                        item.id == itemId
-                    },
+                pendingQueueItems = nextPendingQueueItems,
+                pendingMessageCount = nextPendingQueueItems.size,
             )
         }
     }
 
     fun clearPendingQueueItems() {
-        _uiState.update { it.copy(pendingQueueItems = emptyList()) }
+        _uiState.update {
+            it.copy(
+                pendingQueueItems = emptyList(),
+                pendingMessageCount = 0,
+            )
+        }
     }
 
     fun syncNow() {
@@ -1552,6 +1650,8 @@ class ChatViewModel(
                         steeringMode = stateData.deliveryModeField("steeringMode", "steering_mode"),
                         followUpMode = stateData.deliveryModeField("followUpMode", "follow_up_mode"),
                         sessionPath = stateData?.stringField("sessionFile"),
+                        sessionName = stateData?.stringField("sessionName"),
+                        pendingMessageCount = stateData?.intField("pendingMessageCount") ?: 0,
                     )
 
                 _uiState.update { state ->
@@ -1651,6 +1751,8 @@ class ChatViewModel(
             isStreaming = metadata.isStreaming,
             steeringMode = metadata.steeringMode,
             followUpMode = metadata.followUpMode,
+            sessionName = metadata.sessionName,
+            pendingMessageCount = metadata.pendingMessageCount,
         )
     }
 
@@ -1691,6 +1793,8 @@ class ChatViewModel(
             isStreaming = metadata.isStreaming,
             steeringMode = metadata.steeringMode,
             followUpMode = metadata.followUpMode,
+            sessionName = metadata.sessionName,
+            pendingMessageCount = metadata.pendingMessageCount,
         )
     }
 
@@ -2498,6 +2602,7 @@ class ChatViewModel(
         private const val BUILTIN_SESSION_COMMAND = "session"
         private const val BUILTIN_COMPACT_COMMAND = "compact"
         private const val BUILTIN_EXPORT_COMMAND = "export"
+        private const val BUILTIN_IMPORT_COMMAND = "import"
         private const val BUILTIN_FORK_COMMAND = "fork"
         private const val BUILTIN_NEW_COMMAND = "new"
         private const val BUILTIN_NAME_COMMAND = "name"
@@ -2566,6 +2671,20 @@ class ChatViewModel(
                     path = null,
                 ),
                 SlashCommandInfo(
+                    name = BUILTIN_IMPORT_COMMAND,
+                    description = "Import a JSONL session from this device",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
+                    name = BUILTIN_COPY_COMMAND,
+                    description = "Copy the last assistant response",
+                    source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
+                    location = null,
+                    path = null,
+                ),
+                SlashCommandInfo(
                     name = BUILTIN_FORK_COMMAND,
                     description = "Open tree and fork from a selected entry",
                     source = COMMAND_SOURCE_BUILTIN_BRIDGE_BACKED,
@@ -2600,7 +2719,6 @@ class ChatViewModel(
             BUILTIN_COMMAND_NAMES +
                 setOf(
                     BUILTIN_NAME_COMMAND,
-                    BUILTIN_COPY_COMMAND,
                     BUILTIN_SHARE_COMMAND,
                     BUILTIN_RELOAD_COMMAND,
                     BUILTIN_CHANGELOG_COMMAND,
@@ -2647,6 +2765,8 @@ data class ChatUiState(
     val errorMessage: String? = null,
     val currentModel: ModelInfo? = null,
     val thinkingLevel: String? = null,
+    val sessionName: String? = null,
+    val pendingMessageCount: Int = 0,
     val activeExtensionRequest: ExtensionUiRequest? = null,
     val notifications: List<ExtensionNotification> = emptyList(),
     val extensionWidgets: Map<String, ExtensionWidget> = emptyMap(),
@@ -2657,9 +2777,11 @@ data class ChatUiState(
     val commands: List<SlashCommandInfo> = emptyList(),
     val commandsQuery: String = "",
     val isLoadingCommands: Boolean = false,
-    val steeringMode: String = ChatViewModel.DELIVERY_MODE_ALL,
-    val followUpMode: String = ChatViewModel.DELIVERY_MODE_ALL,
+    val steeringMode: String = ChatViewModel.DELIVERY_MODE_ONE_AT_A_TIME,
+    val followUpMode: String = ChatViewModel.DELIVERY_MODE_ONE_AT_A_TIME,
     val pendingQueueItems: List<PendingQueueItem> = emptyList(),
+    val pendingClipboardText: String? = null,
+    val pendingImportRequestToken: String? = null,
     val isSyncingSession: Boolean = false,
     val sessionCoherencyWarning: String? = null,
     // Bash dialog state
@@ -2814,6 +2936,8 @@ private data class InitialLoadMetadata(
     val steeringMode: String,
     val followUpMode: String,
     val sessionPath: String?,
+    val sessionName: String?,
+    val pendingMessageCount: Int,
 )
 
 private data class DraftClearState(
@@ -3051,7 +3175,7 @@ private fun JsonObject?.deliveryModeField(
 
     return value?.takeIf {
         it == ChatViewModel.DELIVERY_MODE_ALL || it == ChatViewModel.DELIVERY_MODE_ONE_AT_A_TIME
-    } ?: ChatViewModel.DELIVERY_MODE_ALL
+    } ?: ChatViewModel.DELIVERY_MODE_ONE_AT_A_TIME
 }
 
 private fun parseModelInfo(data: JsonObject?): ModelInfo? {

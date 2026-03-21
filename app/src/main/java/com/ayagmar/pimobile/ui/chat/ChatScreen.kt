@@ -1,6 +1,7 @@
 package com.ayagmar.pimobile.ui.chat
 
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -76,6 +77,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -116,8 +118,41 @@ import com.ayagmar.pimobile.sessions.SessionController
 import com.ayagmar.pimobile.sessions.SessionTreeEntry
 import com.ayagmar.pimobile.sessions.SessionTreeSnapshot
 import com.ayagmar.pimobile.sessions.SlashCommandInfo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private fun readTextFromUri(
+    context: android.content.Context,
+    uri: Uri,
+): String? {
+    return runCatching {
+        context.contentResolver.openInputStream(uri)?.bufferedReader().use { reader ->
+            reader?.readText()
+        }
+    }.getOrNull()
+}
+
+private fun resolveDocumentDisplayName(
+    context: android.content.Context,
+    uri: Uri,
+): String? {
+    return runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) {
+                return@use null
+            }
+
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (nameIndex == -1) {
+                null
+            } else {
+                cursor.getString(nameIndex)
+            }
+        }
+    }.getOrNull()
+}
 
 private data class ChatCallbacks(
     val onToggleToolExpansion: (String) -> Unit,
@@ -141,6 +176,7 @@ private data class ChatCallbacks(
     val onHideCommandPalette: () -> Unit,
     val onCommandsQueryChanged: (String) -> Unit,
     val onCommandSelected: (SlashCommandInfo) -> Unit,
+    val onCopyLastResponse: () -> Unit,
     // Bash callbacks
     val onShowBashDialog: () -> Unit,
     val onHideBashDialog: () -> Unit,
@@ -191,6 +227,8 @@ fun ChatRoute(
     showExtensionStatusStrip: Boolean,
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val routeScope = rememberCoroutineScope()
     val imageEncoder = remember { ImageEncoder(context) }
     val factory =
         remember(sessionController, imageEncoder) {
@@ -201,6 +239,47 @@ fun ChatRoute(
         }
     val chatViewModel: ChatViewModel = viewModel(factory = factory)
     val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
+    val importSessionLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            if (uri == null) {
+                return@rememberLauncherForActivityResult
+            }
+
+            routeScope.launch {
+                val fileName = resolveDocumentDisplayName(context, uri) ?: "imported-session.jsonl"
+                val jsonlContent =
+                    withContext(Dispatchers.IO) {
+                        readTextFromUri(context, uri)
+                    }
+
+                if (jsonlContent == null) {
+                    chatViewModel.onImportSessionReadFailed("Failed to read selected JSONL file")
+                    return@launch
+                }
+
+                chatViewModel.importSessionJsonl(
+                    fileName = fileName,
+                    jsonlContent = jsonlContent,
+                )
+            }
+        }
+
+    LaunchedEffect(uiState.pendingClipboardText) {
+        val pendingText = uiState.pendingClipboardText ?: return@LaunchedEffect
+        val copied =
+            runCatching {
+                clipboardManager.setText(AnnotatedString(pendingText))
+            }.isSuccess
+        chatViewModel.consumePendingClipboardText(copySucceeded = copied)
+    }
+
+    LaunchedEffect(uiState.pendingImportRequestToken) {
+        uiState.pendingImportRequestToken ?: return@LaunchedEffect
+        chatViewModel.consumePendingImportRequest()
+        importSessionLauncher.launch(arrayOf("*/*"))
+    }
 
     val callbacks =
         remember(chatViewModel) {
@@ -226,6 +305,7 @@ fun ChatRoute(
                 onHideCommandPalette = chatViewModel::hideCommandPalette,
                 onCommandsQueryChanged = chatViewModel::onCommandsQueryChanged,
                 onCommandSelected = chatViewModel::onCommandSelected,
+                onCopyLastResponse = chatViewModel::copyLastResponse,
                 onShowBashDialog = chatViewModel::showBashDialog,
                 onHideBashDialog = chatViewModel::hideBashDialog,
                 onBashCommandChanged = chatViewModel::onBashCommandChanged,
@@ -322,6 +402,8 @@ private fun ChatScreen(
     SessionStatsSheet(
         isVisible = state.isStatsSheetVisible,
         stats = state.sessionStats,
+        sessionName = state.sessionName,
+        pendingMessageCount = state.pendingMessageCount,
         isLoading = state.isLoadingStats,
         onRefresh = callbacks.onRefreshStats,
         onDismiss = callbacks.onHideStatsSheet,
@@ -417,6 +499,8 @@ private fun ChatScreenContent(
             isSyncingSession = state.isSyncingSession,
             sessionCoherencyWarning = state.sessionCoherencyWarning,
             extensionTitle = state.extensionTitle,
+            sessionName = state.sessionName,
+            pendingMessageCount = state.pendingMessageCount,
             connectionState = state.connectionState,
             currentModel = state.currentModel,
             thinkingLevel = state.thinkingLevel,
@@ -488,6 +572,8 @@ private fun ChatHeader(
     isSyncingSession: Boolean,
     sessionCoherencyWarning: String?,
     extensionTitle: String?,
+    sessionName: String?,
+    pendingMessageCount: Int,
     connectionState: com.ayagmar.pimobile.corenet.ConnectionState,
     currentModel: ModelInfo?,
     thinkingLevel: String?,
@@ -506,7 +592,7 @@ private fun ChatHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                val title = extensionTitle ?: "Chat"
+                val title = extensionTitle ?: sessionName ?: "Chat"
                 Text(
                     text = title,
                     style =
@@ -517,21 +603,17 @@ private fun ChatHeader(
                         },
                 )
 
-                // Subtle connection status
                 if (!isCompact && extensionTitle == null) {
-                    val statusText =
-                        when (connectionState) {
-                            com.ayagmar.pimobile.corenet.ConnectionState.CONNECTED -> "●"
-                            com.ayagmar.pimobile.corenet.ConnectionState.CONNECTING -> "○"
-                            else -> "○"
-                        }
                     Text(
-                        text = statusText,
+                        text = formatConnectionSummary(connectionState, pendingMessageCount),
                         style = MaterialTheme.typography.bodySmall,
                         color =
                             when (connectionState) {
                                 com.ayagmar.pimobile.corenet.ConnectionState.CONNECTED ->
                                     MaterialTheme.colorScheme.primary
+                                com.ayagmar.pimobile.corenet.ConnectionState.CONNECTING,
+                                com.ayagmar.pimobile.corenet.ConnectionState.RECONNECTING,
+                                -> MaterialTheme.colorScheme.tertiary
                                 else -> MaterialTheme.colorScheme.outline
                             },
                     )
@@ -590,6 +672,13 @@ private fun ChatHeader(
                         },
                     )
                     DropdownMenuItem(
+                        text = { Text("Copy last response") },
+                        onClick = {
+                            showSecondaryActionsMenu = false
+                            callbacks.onCopyLastResponse()
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text("Compact now") },
                         onClick = {
                             showSecondaryActionsMenu = false
@@ -621,10 +710,21 @@ private fun ChatHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AssistChip(
-                onClick = callbacks.onShowStatsSheet,
-                label = { Text(contextUsageLabel) },
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AssistChip(
+                    onClick = callbacks.onShowStatsSheet,
+                    label = { Text(contextUsageLabel) },
+                )
+                if (pendingMessageCount > 0) {
+                    AssistChip(
+                        onClick = callbacks.onShowStatsSheet,
+                        label = { Text(formatQueuedMessagesLabel(pendingMessageCount)) },
+                    )
+                }
+            }
             TextButton(onClick = callbacks.onRefreshStats) {
                 Text("Refresh")
             }
@@ -639,6 +739,30 @@ private fun ChatHeader(
             )
         }
     }
+}
+
+private fun formatConnectionSummary(
+    connectionState: com.ayagmar.pimobile.corenet.ConnectionState,
+    pendingMessageCount: Int,
+): String {
+    val statusLabel =
+        when (connectionState) {
+            com.ayagmar.pimobile.corenet.ConnectionState.CONNECTED -> "Connected"
+            com.ayagmar.pimobile.corenet.ConnectionState.CONNECTING -> "Connecting"
+            com.ayagmar.pimobile.corenet.ConnectionState.RECONNECTING -> "Reconnecting"
+            com.ayagmar.pimobile.corenet.ConnectionState.DISCONNECTED -> "Offline"
+        }
+
+    if (pendingMessageCount <= 0) {
+        return statusLabel
+    }
+
+    return "$statusLabel • ${formatQueuedMessagesLabel(pendingMessageCount)}"
+}
+
+private fun formatQueuedMessagesLabel(pendingMessageCount: Int): String {
+    val suffix = if (pendingMessageCount == 1) "msg" else "msgs"
+    return "Queued $pendingMessageCount $suffix"
 }
 
 @Composable
@@ -2973,6 +3097,8 @@ private fun BashDialog(
 private fun SessionStatsSheet(
     isVisible: Boolean,
     stats: SessionStats?,
+    sessionName: String?,
+    pendingMessageCount: Int,
     isLoading: Boolean,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
@@ -3016,6 +3142,15 @@ private fun SessionStatsSheet(
                     modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    if (sessionName != null || pendingMessageCount > 0) {
+                        StatsSection(title = "Session") {
+                            sessionName?.let { StatRow("Name", it) }
+                            if (pendingMessageCount > 0) {
+                                StatRow("Queued Messages", pendingMessageCount.toString())
+                            }
+                        }
+                    }
+
                     // Token stats
                     StatsSection(title = "Tokens") {
                         StatRow("Input Tokens", formatNumber(stats.inputTokens))

@@ -15,6 +15,8 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,12 +49,27 @@ class SettingsViewModelTest {
             val viewModel = createViewModel(controller)
 
             dispatcher.scheduler.advanceUntilIdle()
-            viewModel.setSteeringMode(SettingsViewModel.MODE_ONE_AT_A_TIME)
+            viewModel.setSteeringMode(SettingsViewModel.MODE_ALL)
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(SettingsViewModel.MODE_ALL, viewModel.uiState.steeringMode)
+            assertFalse(viewModel.uiState.isUpdatingSteeringMode)
+            assertTrue(controller.lastSteeringMode == SettingsViewModel.MODE_ALL)
+        }
+
+    @Test
+    fun defaultsDeliveryModesToPiDefaultsWhenStateIsUnavailable() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController().apply {
+                    getStateResult = Result.failure(IllegalStateException("offline"))
+                }
+            val viewModel = createViewModel(controller)
+
             dispatcher.scheduler.advanceUntilIdle()
 
             assertEquals(SettingsViewModel.MODE_ONE_AT_A_TIME, viewModel.uiState.steeringMode)
-            assertFalse(viewModel.uiState.isUpdatingSteeringMode)
-            assertTrue(controller.lastSteeringMode == SettingsViewModel.MODE_ONE_AT_A_TIME)
+            assertEquals(SettingsViewModel.MODE_ONE_AT_A_TIME, viewModel.uiState.followUpMode)
         }
 
     @Test
@@ -65,13 +82,13 @@ class SettingsViewModelTest {
             val viewModel = createViewModel(controller)
 
             dispatcher.scheduler.advanceUntilIdle()
-            viewModel.setFollowUpMode(SettingsViewModel.MODE_ONE_AT_A_TIME)
+            viewModel.setFollowUpMode(SettingsViewModel.MODE_ALL)
             dispatcher.scheduler.advanceUntilIdle()
 
-            assertEquals(SettingsViewModel.MODE_ALL, viewModel.uiState.followUpMode)
+            assertEquals(SettingsViewModel.MODE_ONE_AT_A_TIME, viewModel.uiState.followUpMode)
             assertFalse(viewModel.uiState.isUpdatingFollowUpMode)
             assertEquals("rpc failed", viewModel.uiState.errorMessage)
-            assertEquals(SettingsViewModel.MODE_ONE_AT_A_TIME, controller.lastFollowUpMode)
+            assertEquals(SettingsViewModel.MODE_ALL, controller.lastFollowUpMode)
         }
 
     @Test
@@ -88,6 +105,45 @@ class SettingsViewModelTest {
 
             assertEquals(listOf("Bridge reachable"), messages)
             collector.cancel()
+        }
+
+    @Test
+    fun pingBridgeSurfacesSessionSummaryFromState() =
+        runTest(dispatcher) {
+            val controller =
+                FakeSessionController().apply {
+                    getStateResult =
+                        Result.success(
+                            com.ayagmar.pimobile.corerpc.RpcResponse(
+                                type = "response",
+                                command = "get_state",
+                                success = true,
+                                data =
+                                    buildJsonObject {
+                                        put(
+                                            "model",
+                                            buildJsonObject {
+                                                put("name", "Claude Sonnet")
+                                                put("provider", "anthropic")
+                                            },
+                                        )
+                                        put("sessionName", "mobile-session")
+                                        put("pendingMessageCount", 3)
+                                        put("steeringMode", SettingsViewModel.MODE_ONE_AT_A_TIME)
+                                        put("followUpMode", SettingsViewModel.MODE_ONE_AT_A_TIME)
+                                    },
+                            ),
+                        )
+                }
+            val viewModel = createViewModel(controller)
+
+            dispatcher.scheduler.advanceUntilIdle()
+            viewModel.pingBridge()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals("Claude Sonnet (anthropic)", viewModel.uiState.piVersion)
+            assertEquals("mobile-session", viewModel.uiState.sessionName)
+            assertEquals(3, viewModel.uiState.pendingMessageCount)
         }
 
     @Test
