@@ -51,6 +51,8 @@ interface SessionController {
 
     suspend fun getState(): Result<RpcResponse>
 
+    suspend fun reloadActiveSessionFromDisk(): Result<String?>
+
     suspend fun sendPrompt(
         message: String,
         images: List<ImagePayload> = emptyList(),

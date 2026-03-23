@@ -193,6 +193,30 @@ class RpcSessionController(
         }
     }
 
+    override suspend fun reloadActiveSessionFromDisk(): Result<String?> {
+        return mutex.withLock {
+            runCatching {
+                val connection = ensureActiveConnection()
+                val sessionPath = refreshCurrentSessionPath(connection)
+                check(!sessionPath.isNullOrBlank()) {
+                    "No active session file available to reload"
+                }
+
+                val switchResponse =
+                    sendAndAwaitResponse(
+                        connection = connection,
+                        requestTimeoutMs = requestTimeoutMs,
+                        command = SwitchSessionCommand(id = UUID.randomUUID().toString(), sessionPath = sessionPath),
+                        expectedCommand = SWITCH_SESSION_COMMAND,
+                    ).requireSuccess("Failed to reload active session")
+
+                switchResponse.requireNotCancelled("Active session reload was cancelled")
+
+                refreshCurrentSessionPath(connection)
+            }
+        }
+    }
+
     override suspend fun renameSession(name: String): Result<String?> {
         return mutex.withLock {
             runCatching {

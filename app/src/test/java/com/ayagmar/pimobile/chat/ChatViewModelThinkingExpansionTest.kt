@@ -748,6 +748,7 @@ class ChatViewModelThinkingExpansionTest {
 
             waitForState(viewModel) { state -> !state.isSyncingSession }
             val state = viewModel.uiState.value
+            assertEquals(1, controller.reloadActiveSessionCallCount)
             assertEquals(
                 "Potential cross-device session edits detected. Use Sync now before continuing.",
                 state.sessionCoherencyWarning,
@@ -773,7 +774,35 @@ class ChatViewModelThinkingExpansionTest {
             dispatcher.scheduler.advanceUntilIdle()
 
             waitForState(viewModel) { state -> !state.isSyncingSession }
+            assertEquals(2, controller.reloadActiveSessionCallCount)
             assertEquals(null, viewModel.uiState.value.sessionCoherencyWarning)
+        }
+
+    @Test
+    fun syncNowShowsErrorAndSkipsMessageFetchWhenReloadFails() =
+        runTest(dispatcher) {
+            val controller = FakeSessionController()
+            controller.messagesPayload = historyWithMessageTexts(listOf("unchanged"))
+            val viewModel = createViewModel(controller)
+            dispatcher.scheduler.advanceUntilIdle()
+            awaitInitialLoad(viewModel)
+
+            val baselineMessageCalls = controller.getMessagesCallCount
+            val baselineStateCalls = controller.getStateCallCount
+            controller.reloadActiveSessionResult = Result.failure(IllegalStateException("reload failed"))
+
+            viewModel.syncNow()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            waitForState(viewModel) { state -> !state.isSyncingSession }
+            assertEquals(1, controller.reloadActiveSessionCallCount)
+            assertEquals(baselineMessageCalls, controller.getMessagesCallCount)
+            assertEquals(baselineStateCalls, controller.getStateCallCount)
+            assertEquals("reload failed", viewModel.uiState.value.errorMessage)
+            assertEquals(
+                "Potential cross-device session edits detected. Use Sync now before continuing.",
+                viewModel.uiState.value.sessionCoherencyWarning,
+            )
         }
 
     @Test

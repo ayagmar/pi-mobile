@@ -610,8 +610,8 @@ private fun SessionCardFooter(
         )
 
         PiButton(
-            label = if (isActive) "Active" else "Resume",
-            enabled = !isBusy && !isActive,
+            label = if (isActive) "Open" else "Resume",
+            enabled = !isBusy,
             onClick = onResumeClick,
         )
     }

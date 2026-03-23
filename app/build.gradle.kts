@@ -56,6 +56,7 @@ android {
         abortOnError = true
         checkReleaseBuilds = true
         warningsAsErrors = true
+        disable += "GradleDependency"
         baseline = file("lint-baseline.xml")
     }
 }

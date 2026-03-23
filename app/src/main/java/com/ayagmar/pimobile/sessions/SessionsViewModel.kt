@@ -254,8 +254,10 @@ class SessionsViewModel(
     }
 
     fun resumeSession(session: SessionRecord) {
-        val hostId = _uiState.value.selectedHostId ?: return
-        val selectedHost = _uiState.value.hosts.firstOrNull { host -> host.id == hostId } ?: return
+        val state = _uiState.value
+        val hostId = state.selectedHostId ?: return
+        val selectedHost = state.hosts.firstOrNull { host -> host.id == hostId } ?: return
+        val isOpenCurrentSession = state.activeSessionPath == session.sessionPath
 
         // Record resume start for performance tracking
         PerformanceMetrics.recordResumeStart()
@@ -291,7 +293,8 @@ class SessionsViewModel(
 
             if (resumeResult.isSuccess) {
                 markConnectionWarm(hostId = hostId, cwd = session.cwd)
-                emitMessage("Resumed ${session.summaryTitle()}")
+                val action = if (isOpenCurrentSession) "Opened" else "Resumed"
+                emitMessage("$action ${session.summaryTitle()}")
                 _navigateToChat.trySend(Unit)
             }
 

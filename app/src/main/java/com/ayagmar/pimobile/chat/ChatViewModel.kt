@@ -1631,11 +1631,33 @@ class ChatViewModel(
                 null
             }
 
+        val shouldForceRuntimeReload =
+            reason == TimelineReloadReason.MANUAL_SYNC ||
+                reason == TimelineReloadReason.AUTO_FRESHNESS_REFRESH
+
         initialLoadJob?.cancel()
         initialLoadJob =
             viewModelScope.launch(Dispatchers.IO) {
-                val messagesResult = sessionController.getMessages()
-                val stateResult = sessionController.getState()
+                val reloadResult =
+                    if (shouldForceRuntimeReload) {
+                        sessionController.reloadActiveSessionFromDisk()
+                    } else {
+                        null
+                    }
+                val reloadError = reloadResult?.exceptionOrNull()
+
+                val messagesResult =
+                    if (reloadError == null) {
+                        sessionController.getMessages()
+                    } else {
+                        Result.failure(reloadError)
+                    }
+                val stateResult =
+                    if (reloadError == null) {
+                        sessionController.getState()
+                    } else {
+                        Result.failure(reloadError)
+                    }
 
                 if (messagesResult.isSuccess) {
                     recordMetricsSafely { PerformanceMetrics.recordFirstMessagesRendered() }
@@ -1670,7 +1692,7 @@ class ChatViewModel(
                     }
                 }
 
-                latestSessionPath = metadata.sessionPath ?: latestSessionPath
+                latestSessionPath = metadata.sessionPath ?: reloadResult?.getOrNull() ?: latestSessionPath
                 refreshSessionFreshness(trigger = FreshnessCheckTrigger.POST_LOAD)
 
                 val refreshedHistorySignature = historyWindowSignature(historyWindowMessages)
@@ -1684,7 +1706,7 @@ class ChatViewModel(
                         state.copy(
                             isSyncingSession = false,
                             sessionCoherencyWarning =
-                                if (hasPotentialExternalChanges) {
+                                if (messagesResult.isFailure || hasPotentialExternalChanges) {
                                     SESSION_COHERENCY_WARNING_MESSAGE
                                 } else {
                                     null
@@ -1705,7 +1727,14 @@ class ChatViewModel(
                     }
                 } else if (reason == TimelineReloadReason.AUTO_FRESHNESS_REFRESH) {
                     _uiState.update {
-                        it.copy(sessionCoherencyWarning = null)
+                        it.copy(
+                            sessionCoherencyWarning =
+                                if (messagesResult.isSuccess) {
+                                    null
+                                } else {
+                                    SESSION_COHERENCY_WARNING_MESSAGE
+                                },
+                        )
                     }
 
                     if (messagesResult.isSuccess) {
