@@ -38,6 +38,7 @@ class FakeSessionController : SessionController {
     var sendPromptCallCount: Int = 0
     var getMessagesCallCount: Int = 0
     var getStateCallCount: Int = 0
+    var reloadActiveSessionCallCount: Int = 0
     var getSessionFreshnessCallCount: Int = 0
     var getStateResult: Result<RpcResponse> =
         Result.success(
@@ -47,6 +48,7 @@ class FakeSessionController : SessionController {
                 success = true,
             ),
         )
+    var reloadActiveSessionResult: Result<String?> = Result.success(null)
     var lastPromptMessage: String? = null
     var lastFreshnessSessionPath: String? = null
     var lastImportedSessionFileName: String? = null
@@ -145,6 +147,11 @@ class FakeSessionController : SessionController {
     override suspend fun getState(): Result<RpcResponse> {
         getStateCallCount += 1
         return getStateResult
+    }
+
+    override suspend fun reloadActiveSessionFromDisk(): Result<String?> {
+        reloadActiveSessionCallCount += 1
+        return reloadActiveSessionResult
     }
 
     override suspend fun sendPrompt(
