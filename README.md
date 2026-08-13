@@ -1,3 +1,5 @@
+
+
 # Pi Mobile
 
 > **Your Pi coding agent, in your pocket.**
@@ -262,6 +264,8 @@ BRIDGE_ENABLE_HEALTH_ENDPOINT=true  # set false to disable /health endpoint
 BRIDGE_WEBSOCKET_MAX_PAYLOAD_BYTES=16777216 # maximum WebSocket message size (16 MiB)
 BRIDGE_IMPORT_MAX_BYTES=10485760     # maximum UTF-8 JSONL import size (10 MiB)
 BRIDGE_PI_COMMAND=pi                 # Pi executable path/name; probed with --version at startup
+BRIDGE_STATE_DIR=/path/to/state           # Durable state for share references
+BRIDGE_SHARE_ORIGIN=https://your-domain    # Optional metadata-free landing URL for shared links
 ```
 
 ### App Build Variants
