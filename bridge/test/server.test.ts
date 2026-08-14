@@ -15,6 +15,7 @@ import type {
     ProcessManagerEvent,
 } from "../src/process-manager.js";
 import type { PiRpcForwarder } from "../src/rpc-forwarder.js";
+import type { BridgeConfig } from "../src/config.js";
 import type { BridgeServer } from "../src/server.js";
 import { buildPiRpcArgs, createBridgeServer } from "../src/server.js";
 import type {
@@ -1405,12 +1406,188 @@ describe("bridge websocket server", () => {
 
         ws.close();
     });
+
+    it("serves websockets over TLS when cert and key are configured", async () => {
+        const tlsDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-mobile-tls-"));
+        const { certFile, keyFile } = await generateSelfSignedCert(tlsDir, "localhost");
+
+        try {
+            const { baseUrl, server } = await startBridgeServer(
+                {},
+                { tlsCertFile: certFile, tlsKeyFile: keyFile },
+            );
+            bridgeServer = server;
+
+            const ws = await connectWebSocket(baseUrl, {
+                headers: { authorization: "Bearer bridge-token" },
+                rejectUnauthorized: false,
+            });
+            const hello = await waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_hello");
+            expect(hello.payload?.message).toBe("Bridge skeleton is running");
+            ws.close();
+        } finally {
+            await fs.rm(tlsDir, { recursive: true, force: true });
+        }
+    });
+
+    it("accepts a trusted TLS handshake when the hostname matches the certificate", async () => {
+        const tlsDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-mobile-tls-"));
+        const { certFile, keyFile } = await generateSelfSignedCert(tlsDir, "bridge.example.test");
+
+        try {
+            const { baseUrl, server } = await startBridgeServer(
+                {},
+                { tlsCertFile: certFile, tlsKeyFile: keyFile },
+            );
+            bridgeServer = server;
+
+            const hostPort = baseUrl.replace("wss://", "").replace("/ws", "");
+            const ws = await connectWebSocket(`wss://127.0.0.1:${hostPort.split(":")[1]}/ws`, {
+                headers: { authorization: "Bearer bridge-token" },
+                ca: await fs.readFile(certFile),
+                servername: "bridge.example.test",
+            } as ClientOptions);
+            const hello = await waitForEnvelope(ws, (envelope) => envelope.payload?.type === "bridge_hello");
+            expect(hello.payload?.message).toBe("Bridge skeleton is running");
+            ws.close();
+        } finally {
+            await fs.rm(tlsDir, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects a TLS handshake when the hostname does not match the certificate", async () => {
+        const tlsDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-mobile-tls-"));
+        const { certFile, keyFile } = await generateSelfSignedCert(tlsDir, "bridge.example.test");
+
+        try {
+            const { baseUrl, server } = await startBridgeServer(
+                {},
+                { tlsCertFile: certFile, tlsKeyFile: keyFile },
+            );
+            bridgeServer = server;
+
+            await expect(
+                connectWebSocket(baseUrl, {
+                    headers: { authorization: "Bearer bridge-token" },
+                    ca: await fs.readFile(certFile),
+                    servername: "wrong.example.test",
+                } as ClientOptions),
+            ).rejects.toThrow();
+        } finally {
+            await fs.rm(tlsDir, { recursive: true, force: true });
+        }
+    });
+
+    it("serves the health endpoint over TLS", async () => {
+        const tlsDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-mobile-tls-"));
+        const { certFile, keyFile } = await generateSelfSignedCert(tlsDir, "localhost");
+
+        try {
+            const { healthUrl, server } = await startBridgeServer(
+                {},
+                { tlsCertFile: certFile, tlsKeyFile: keyFile },
+            );
+            bridgeServer = server;
+
+            const https = (await import("node:https")).default;
+            const body = await new Promise<string>((resolve, reject) => {
+                https.get(healthUrl, { rejectUnauthorized: false }, (response) => {
+                    let data = "";
+                    response.on("data", (chunk) => {
+                        data += chunk.toString();
+                    });
+                    response.on("end", () => resolve(data));
+                }).on("error", reject);
+            });
+
+            expect(JSON.parse(body).ok).toBe(true);
+        } finally {
+            await fs.rm(tlsDir, { recursive: true, force: true });
+        }
+    });
+
+    it("refuses a plain ws client when TLS is configured", async () => {
+        const tlsDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-mobile-tls-"));
+        const { certFile, keyFile } = await generateSelfSignedCert(tlsDir, "localhost");
+
+        try {
+            const { baseUrl, server } = await startBridgeServer(
+                {},
+                { tlsCertFile: certFile, tlsKeyFile: keyFile },
+            );
+            bridgeServer = server;
+
+            await expect(
+                connectWebSocket(baseUrl.replace("wss://", "ws://"), {
+                    headers: { authorization: "Bearer bridge-token" },
+                }),
+            ).rejects.toThrow();
+        } finally {
+            await fs.rm(tlsDir, { recursive: true, force: true });
+        }
+    });
+
+    it("fails fast when a TLS cert or key file is missing", async () => {
+        const tlsDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-mobile-tls-"));
+        const { keyFile } = await generateSelfSignedCert(tlsDir, "localhost");
+
+        try {
+            expect(() =>
+                createBridgeServer(
+                    {
+                        host: "127.0.0.1",
+                        port: 0,
+                        logLevel: "silent",
+                        authToken: "bridge-token",
+                        processIdleTtlMs: 300_000,
+                        reconnectGraceMs: 100,
+                        sessionDirectory: "/tmp/pi-sessions",
+                        enableHealthEndpoint: true,
+                        websocketMaxPayloadBytes: 16 * 1024 * 1024,
+                        importMaxBytes: 10 * 1024 * 1024,
+                        piCommand: "pi",
+                        tlsCertFile: path.join(tlsDir, "missing.pem"),
+                        tlsKeyFile: keyFile,
+                    },
+                    createLogger("silent"),
+                    { probePiVersion: async () => "0.80.6" },
+                ),
+            ).toThrow("Failed to read TLS credentials");
+        } finally {
+            await fs.rm(tlsDir, { recursive: true, force: true });
+        }
+    });
+
+    it("fails fast when only one TLS credential is configured", async () => {
+        expect(() =>
+            createBridgeServer(
+                {
+                    host: "127.0.0.1",
+                    port: 0,
+                    logLevel: "silent",
+                    authToken: "bridge-token",
+                    processIdleTtlMs: 300_000,
+                    reconnectGraceMs: 100,
+                    sessionDirectory: "/tmp/pi-sessions",
+                    enableHealthEndpoint: true,
+                    websocketMaxPayloadBytes: 16 * 1024 * 1024,
+                    importMaxBytes: 10 * 1024 * 1024,
+                    piCommand: "pi",
+                    tlsCertFile: "/tmp/only-cert.pem",
+                },
+                createLogger("silent"),
+                { probePiVersion: async () => "0.80.6" },
+            ),
+        ).toThrow("BRIDGE_TLS_CERT_FILE and BRIDGE_TLS_KEY_FILE must be set together");
+    });
 });
 
 async function startBridgeServer(
     deps?: { processManager?: PiProcessManager; sessionIndexer?: SessionIndexer },
+    configOverrides: Partial<BridgeConfig> = {},
 ): Promise<{ baseUrl: string; healthUrl: string; server: BridgeServer }> {
     const logger = createLogger("silent");
+    const tlsEnabled = Boolean(configOverrides.tlsCertFile && configOverrides.tlsKeyFile);
     const server = createBridgeServer(
         {
             host: "127.0.0.1",
@@ -1424,6 +1601,7 @@ async function startBridgeServer(
             websocketMaxPayloadBytes: 16 * 1024 * 1024,
             importMaxBytes: 10 * 1024 * 1024,
             piCommand: "pi",
+            ...configOverrides,
         },
         logger,
         { ...deps, probePiVersion: async () => "0.80.6" },
@@ -1432,14 +1610,36 @@ async function startBridgeServer(
     const serverInfo = await server.start();
 
     return {
-        baseUrl: `ws://127.0.0.1:${serverInfo.port}/ws`,
-        healthUrl: `http://127.0.0.1:${serverInfo.port}/health`,
+        baseUrl: `${tlsEnabled ? "wss" : "ws"}://127.0.0.1:${serverInfo.port}/ws`,
+        healthUrl: `${tlsEnabled ? "https" : "http"}://127.0.0.1:${serverInfo.port}/health`,
         server,
     };
 }
 
 const envelopeBuffers = new WeakMap<WebSocket, EnvelopeLike[]>();
 const envelopeCursors = new WeakMap<WebSocket, number>();
+
+async function generateSelfSignedCert(
+    tlsDir: string,
+    commonName: string,
+): Promise<{ certFile: string; keyFile: string }> {
+    const certFile = path.join(tlsDir, "cert.pem");
+    const keyFile = path.join(tlsDir, "key.pem");
+
+    const { execFileSync } = await import("node:child_process");
+    execFileSync(
+        "openssl",
+        [
+            "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", keyFile, "-out", certFile,
+            "-days", "1", "-subj", `/CN=${commonName}`,
+            "-addext", `subjectAltName=DNS:${commonName}`,
+        ],
+        { stdio: "ignore" },
+    );
+
+    return { certFile, keyFile };
+}
 
 async function connectWebSocket(url: string, options?: ClientOptions): Promise<WebSocket> {
     return await new Promise<WebSocket>((resolve, reject) => {

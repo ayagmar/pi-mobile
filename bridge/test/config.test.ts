@@ -106,4 +106,31 @@ describe("parseBridgeConfig", () => {
             parseBridgeConfig({ BRIDGE_AUTH_TOKEN: "test-token", BRIDGE_ENABLE_HEALTH_ENDPOINT: "maybe" }),
         ).toThrow("Invalid BRIDGE_ENABLE_HEALTH_ENDPOINT: maybe");
     });
+
+    it("parses TLS cert and key files", () => {
+        const config = parseBridgeConfig({
+            BRIDGE_AUTH_TOKEN: "test-token",
+            BRIDGE_TLS_CERT_FILE: "./tmp/server.pem",
+            BRIDGE_TLS_KEY_FILE: "./tmp/server.key",
+        });
+
+        expect(config.tlsCertFile).toBe(path.resolve("./tmp/server.pem"));
+        expect(config.tlsKeyFile).toBe(path.resolve("./tmp/server.key"));
+    });
+
+    it("leaves TLS unset when no TLS env is provided", () => {
+        const config = parseBridgeConfig({ BRIDGE_AUTH_TOKEN: "test-token" });
+
+        expect(config.tlsCertFile).toBeUndefined();
+        expect(config.tlsKeyFile).toBeUndefined();
+    });
+
+    it.each([
+        ["BRIDGE_TLS_CERT_FILE", "./tmp/server.pem"],
+        ["BRIDGE_TLS_KEY_FILE", "./tmp/server.key"],
+    ])("fails when only %s is set", (name, value) => {
+        expect(() => parseBridgeConfig({ BRIDGE_AUTH_TOKEN: "test-token", [name]: value })).toThrow(
+            "BRIDGE_TLS_CERT_FILE and BRIDGE_TLS_KEY_FILE must be set together",
+        );
+    });
 });
