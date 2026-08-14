@@ -26,7 +26,7 @@ export function createHostPairingPayload(config: BridgeConfig, hostOverride?: st
         name,
         host,
         port: config.port,
-        useTls: false,
+        useTls: Boolean(config.tlsCertFile && config.tlsKeyFile),
         token: config.authToken,
         ...(config.shareOrigin ? { shareOrigin: config.shareOrigin } : {}),
     };
