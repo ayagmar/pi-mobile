@@ -115,6 +115,37 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 5. Tap a session to resume it.
 
+### Enabling TLS (wss)
+
+The bridge can terminate TLS directly so phone traffic is encrypted without a separate proxy.
+
+1. Obtain a certificate for the exact hostname the phone will connect to (e.g. `bridge.example.com`). A certificate for the parent domain (`example.com`) does **not** cover subdomains. Let's Encrypt or a public CA works; a self-signed certificate also works if its public cert is embedded in the app (see below).
+2. In `bridge/.env`, set both, pointing at the PEM files:
+
+   ```env
+   BRIDGE_TLS_CERT_FILE=/absolute/path/to/fullchain.pem
+   BRIDGE_TLS_KEY_FILE=/absolute/path/to/privkey.pem
+   ```
+
+   Both must be set together; the bridge fails fast if only one is present. The `BRIDGE_PORT` stays the same — TLS replaces plain `ws://` on the same port.
+3. Restart the bridge. The startup log should show `TLS is enabled; websocket clients must connect over wss://`. Verify with `curl -sk https://<host>:8787/health` or `openssl s_client -connect <host>:8787 -servername <host>`.
+4. In Pi Mobile, set the host profile to the **same hostname** the certificate names (hostnames match TLS verification; raw IPs do not), keep the port, and enable **Use TLS**. Pairing QR codes advertise TLS automatically (`useTls: true`) when the bridge has TLS configured.
+5. Certificate trust on the phone:
+   - **Public CA / Let's Encrypt:** works out of the box.
+   - **Self-signed:** the app trusts a certificate only if it is shipped as a trusted anchor. Generate your own cert, add the public cert (never the private key) to `app/src/main/res/raw/` and reference it in `app/src/*/res/xml/network_security_config.xml`:
+
+     ```xml
+     <domain-config>
+         <domain includeSubdomains="true">bridge.example.com</domain>
+         <trust-anchors>
+             <certificates src="@raw/bridge_cert" />
+             <certificates src="system" />
+         </trust-anchors>
+     </domain-config>
+     ```
+
+     then rebuild and reinstall the app.
+
 ## How It Works
 
 ### Sessions
@@ -259,6 +290,8 @@ BRIDGE_RECONNECT_GRACE_MS=30000     # Keep control locks after disconnect (ms)
 BRIDGE_SESSION_DIR=/absolute/path/to/.pi/agent/sessions  # Override the session dir used for indexing and spawned pi runtimes
 BRIDGE_LOG_LEVEL=info               # fatal,error,warn,info,debug,trace,silent
 BRIDGE_ENABLE_HEALTH_ENDPOINT=true  # set false to disable /health endpoint
+BRIDGE_TLS_CERT_FILE=/absolute/path/to/fullchain.pem  # optional; when set with BRIDGE_TLS_KEY_FILE, serve wss:// instead of ws://
+BRIDGE_TLS_KEY_FILE=/absolute/path/to/privkey.pem     # optional; certificate chain must be trusted by the Android device
 BRIDGE_WEBSOCKET_MAX_PAYLOAD_BYTES=16777216 # maximum WebSocket message size (16 MiB)
 BRIDGE_IMPORT_MAX_BYTES=10485760     # maximum UTF-8 JSONL import size (10 MiB)
 BRIDGE_PI_COMMAND=pi                 # Pi executable path/name; probed with --version at startup
@@ -275,8 +308,7 @@ Debug builds include development logging and assertions. The repository-safe rel
 - The bridge binds to localhost by default; explicitly set `BRIDGE_HOST` to your Tailscale IP for remote access
 - Avoid `0.0.0.0` unless you intentionally expose the service behind strict firewall/Tailscale policy
 - `/health` exposure is explicit via `BRIDGE_ENABLE_HEALTH_ENDPOINT` (disable it for least exposure)
-- Android cleartext traffic is scoped to `localhost` and Tailnet MagicDNS hosts (`*.ts.net`)
-- All traffic goes over Tailscale's encrypted mesh
+- Android cleartext traffic is scoped to `localhost` and Tailnet MagicDNS hosts (`*.ts.net`); enable `BRIDGE_TLS_CERT_FILE`/`BRIDGE_TLS_KEY_FILE` for encrypted `wss://` connections from the phone
 - Session data stays on the laptop; the app only displays it
 
 ## Limitations
