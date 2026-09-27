@@ -164,7 +164,7 @@ internal data class SessionsCallbacks(
     val onFreshnessSelected: (SessionFreshnessFilter) -> Unit = {},
     val onToggleDensity: () -> Unit = {},
     val onRefresh: () -> Unit = {},
-    val onNew: () -> Unit = {},
+    val onNew: (String?) -> Unit = {},
     val onOpen: (SessionCockpitItem) -> Unit = {},
     val onPin: (SessionCockpitItem) -> Unit = {},
     val onHide: (SessionCockpitItem) -> Unit = {},
@@ -196,6 +196,7 @@ internal fun SessionsScreen(
 ) {
     var renameDraft by rememberSaveable { mutableStateOf("") }
     var showRename by rememberSaveable { mutableStateOf(false) }
+    var showNewSession by rememberSaveable { mutableStateOf(false) }
     val activeItem = state.items.firstOrNull { it.isActive }
 
     Column(
@@ -222,7 +223,11 @@ internal fun SessionsScreen(
                 TextButton(onClick = callbacks.onRefresh, enabled = !state.isRefreshing) {
                     Text(if (state.isRefreshing) "Refreshing" else "Refresh")
                 }
-                PiButton(label = "New", onClick = callbacks.onNew)
+                PiButton(
+                    label = "New",
+                    onClick = { showNewSession = true },
+                    enabled = state.hosts.isNotEmpty() && !state.isResuming,
+                )
             },
         )
 
@@ -261,6 +266,19 @@ internal fun SessionsScreen(
             onConfirm = {
                 callbacks.onRename(renameDraft)
                 showRename = false
+            },
+        )
+    }
+    if (showNewSession) {
+        val initialCwd = state.selectedCwd ?: state.groups.firstOrNull()?.cwd ?: ""
+        NewSessionDialog(
+            workspaces = state.groups.map { it.cwd }.distinct(),
+            initialCwd = initialCwd,
+            isBusy = state.isResuming,
+            onDismiss = { showNewSession = false },
+            onConfirm = { chosenCwd ->
+                callbacks.onNew(chosenCwd)
+                showNewSession = false
             },
         )
     }

@@ -198,7 +198,7 @@ class SessionsViewModel(
             }
     }
 
-    fun newSession() {
+    fun newSession(targetCwd: String? = null) {
         val host = selectedHost() ?: return
         viewModelScope.launch(backgroundDispatcher) {
             val token = tokenStore.getToken(host.id)
@@ -207,13 +207,14 @@ class SessionsViewModel(
                 return@launch
             }
             _uiState.update { it.copy(isResuming = true, errorMessage = null) }
-            val cwd = resolveConnectionCwdForHost(host.id)
+            val cwd = targetCwd?.trim()?.takeIf { it.isNotBlank() } ?: resolveConnectionCwdForHost(host.id)
             val connected = sessionController.ensureConnected(host, token, cwd)
             if (connected.isFailure) {
                 emitError(connected.exceptionOrNull()?.message ?: "Failed to connect for new session")
                 return@launch
             }
             markConnectionWarm(host.id, cwd)
+            onCwdSelected(cwd)
             val result = sessionController.newSession()
             if (result.isSuccess) {
                 _uiState.update { it.copy(isResuming = false, errorMessage = null) }
