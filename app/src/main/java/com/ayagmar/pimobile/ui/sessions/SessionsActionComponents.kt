@@ -9,14 +9,21 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.ayagmar.pimobile.coresessions.SessionRecord
 import com.ayagmar.pimobile.sessions.ForkableMessage
+import com.ayagmar.pimobile.sessions.formatCwdTail
 import com.ayagmar.pimobile.sessions.privacySafeText
 
 @Composable
@@ -147,6 +154,65 @@ fun ForkPickerDialog(
             }
         },
         confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+fun NewSessionDialog(
+    workspaces: List<String>,
+    initialCwd: String,
+    isBusy: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var cwdDraft by rememberSaveable { mutableStateOf(initialCwd) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New session") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (workspaces.isNotEmpty()) {
+                    Text(
+                        text = "Workspaces",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(workspaces, key = { it }) { ws ->
+                            val isSelected = cwdDraft.trim().trimEnd('/') == ws.trim().trimEnd('/')
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { cwdDraft = ws },
+                                label = { Text(formatCwdTail(ws)) },
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = cwdDraft,
+                    onValueChange = { cwdDraft = it },
+                    label = { Text("Working directory") },
+                    placeholder = { Text("/path/to/project") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(cwdDraft.trim()) },
+                enabled = !isBusy && cwdDraft.isNotBlank(),
+            ) {
+                Text("Start")
+            }
+        },
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("Cancel")
