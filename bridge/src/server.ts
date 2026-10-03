@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { access, mkdir, unlink, writeFile } from "node:fs/promises";
 import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -231,7 +233,7 @@ export function createBridgeServer(
         return consumed;
     };
 
-    const server = http.createServer((request, response) => {
+    const requestListener = (request: http.IncomingMessage, response: http.ServerResponse): void => {
         if (request.url === "/health" && config.enableHealthEndpoint) {
             const processStats = processManager.getStats();
             response.writeHead(200, { "content-type": "application/json" });
@@ -258,12 +260,26 @@ export function createBridgeServer(
 
         response.writeHead(404, { "content-type": "application/json", "cache-control": "no-store" });
         response.end(JSON.stringify({ error: "Not Found" }));
-    });
+    };
+
+    if (Boolean(config.tlsCertFile) !== Boolean(config.tlsKeyFile)) {
+        throw new Error(
+            "BRIDGE_TLS_CERT_FILE and BRIDGE_TLS_KEY_FILE must be set together to enable TLS",
+        );
+    }
+
+    const server = config.tlsCertFile && config.tlsKeyFile
+        ? https.createServer(loadTlsCredentials(config.tlsCertFile, config.tlsKeyFile), requestListener)
+        : http.createServer(requestListener);
 
     if (isUnsafeBindHost(config.host)) {
         logger.warn(
             "Bridge is listening on a non-loopback interface; restrict exposure with Tailscale/firewall rules",
         );
+    }
+
+    if (config.tlsCertFile && config.tlsKeyFile) {
+        logger.info("TLS is enabled; websocket clients must connect over wss://");
     }
 
     if (!config.enableHealthEndpoint) {
@@ -1563,6 +1579,18 @@ function isLoopbackHost(host: string): boolean {
 
 function isUnsafeBindHost(host: string): boolean {
     return !isLoopbackHost(host);
+}
+
+function loadTlsCredentials(certFile: string, keyFile: string): https.ServerOptions {
+    try {
+        return {
+            cert: readFileSync(certFile),
+            key: readFileSync(keyFile),
+        };
+    } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to read TLS credentials: ${reason}`, { cause: error });
+    }
 }
 
 function isSessionTreeFilter(value: string): value is SessionTreeFilter {

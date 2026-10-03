@@ -28,6 +28,8 @@ export interface BridgeConfig {
     websocketMaxPayloadBytes: number;
     importMaxBytes: number;
     piCommand: string;
+    tlsCertFile?: string;
+    tlsKeyFile?: string;
 }
 
 export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
@@ -52,6 +54,7 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
         DEFAULT_IMPORT_MAX_BYTES,
     );
     const piCommand = env.BRIDGE_PI_COMMAND?.trim() || DEFAULT_PI_COMMAND;
+    const tls = parseTlsConfig(env.BRIDGE_TLS_CERT_FILE, env.BRIDGE_TLS_KEY_FILE);
 
     return {
         host,
@@ -67,6 +70,7 @@ export function parseBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeC
         websocketMaxPayloadBytes,
         importMaxBytes,
         piCommand,
+        ...tls,
     };
 }
 
@@ -182,4 +186,24 @@ function parseConfiguredShareOrigin(raw: string | undefined): string | undefined
         throw new Error("BRIDGE_SHARE_ORIGIN must be an http(s) origin without path, userinfo, query, or fragment");
     }
     return parsed.origin;
+}
+
+function parseTlsConfig(
+    certFileRaw: string | undefined,
+    keyFileRaw: string | undefined,
+): { tlsCertFile?: string; tlsKeyFile?: string } {
+    const certFile = certFileRaw?.trim();
+    const keyFile = keyFileRaw?.trim();
+
+    if (!certFile && !keyFile) return {};
+    if (!certFile || !keyFile) {
+        throw new Error(
+            "BRIDGE_TLS_CERT_FILE and BRIDGE_TLS_KEY_FILE must be set together to enable TLS",
+        );
+    }
+
+    return {
+        tlsCertFile: path.resolve(certFile),
+        tlsKeyFile: path.resolve(keyFile),
+    };
 }
